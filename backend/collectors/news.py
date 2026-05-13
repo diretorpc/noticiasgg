@@ -10,15 +10,9 @@ router = APIRouter()
 
 NEWSAPI_URL = "https://newsapi.org/v2/top-headlines"
 
-ALLOWED_SOURCES = {
-    "reuters", "bloomberg", "the-wall-street-journal", "financial-times",
-    "g1", "valor-economico", "infomoney", "exame",
-}
-
-QUERIES = [
-    {"q": "mercado financeiro OR bolsa OR economia", "language": "pt"},
-    {"q": "stock market OR economy OR finance", "language": "en"},
-]
+# Fontes confiáveis suportadas pela NewsAPI (plano free exige sources ou country)
+SOURCES_EN = "reuters,bloomberg,the-wall-street-journal,financial-times,the-economist"
+SOURCES_BR = "google-news-br"
 
 
 def collect() -> list[dict]:
@@ -29,25 +23,21 @@ def collect() -> list[dict]:
     artigos = []
     vistos = set()
 
+    queries = [
+        {"sources": SOURCES_EN, "pageSize": 10},
+        {"country": "br", "category": "business", "pageSize": 10},
+    ]
+
     with httpx.Client(timeout=15) as client:
-        for query_params in QUERIES:
-            params = {
-                "apiKey": api_key,
-                "pageSize": 10,
-                **query_params,
-            }
-            resp = client.get(NEWSAPI_URL, params=params)
-            resp.raise_for_status()
+        for params in queries:
+            resp = client.get(NEWSAPI_URL, params={"apiKey": api_key, **params})
+            if resp.status_code != 200:
+                continue
 
             for a in resp.json().get("articles", []):
                 url = a.get("url", "")
-                source_id = (a.get("source") or {}).get("id") or ""
-
                 if url in vistos:
                     continue
-                if source_id and source_id not in ALLOWED_SOURCES:
-                    continue
-
                 vistos.add(url)
                 artigos.append({
                     "titulo": a.get("title"),

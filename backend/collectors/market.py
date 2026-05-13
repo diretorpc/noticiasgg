@@ -4,47 +4,52 @@ import yfinance as yf
 
 router = APIRouter()
 
-TICKERS = {
-    "bolsas": {
-        "IBOVESPA": "^BVSP",
-        "S&P 500": "SPY",
-        "NASDAQ": "QQQ",
-        "Dow Jones": "DIA",
-    },
-    "cambio": {
-        "USD/BRL": "USDBRL=X",
-        "EUR/BRL": "EURBRL=X",
-    },
-    "commodities": {
-        "Ouro": "GC=F",
-        "Petroleo": "CL=F",
-        "Soja": "ZS=F",
-    },
+# Todos os tickers numa única chamada para minimizar latência
+ALL_SYMBOLS = ["^BVSP", "SPY", "QQQ", "DIA", "USDBRL=X", "EURBRL=X", "GC=F", "CL=F", "ZS=F"]
+
+MAPA = {
+    "^BVSP":    ("bolsas",      "IBOVESPA"),
+    "SPY":      ("bolsas",      "S&P 500"),
+    "QQQ":      ("bolsas",      "NASDAQ"),
+    "DIA":      ("bolsas",      "Dow Jones"),
+    "USDBRL=X": ("cambio",      "USD/BRL"),
+    "EURBRL=X": ("cambio",      "EUR/BRL"),
+    "GC=F":     ("commodities", "Ouro"),
+    "CL=F":     ("commodities", "Petroleo"),
+    "ZS=F":     ("commodities", "Soja"),
 }
 
 
-def _fetch_ticker(symbol: str) -> dict:
-    t = yf.Ticker(symbol)
-    hist = t.history(period="2d")
-    if hist.empty:
-        return {"preco": None, "variacao_pct": None}
-
-    closes = hist["Close"].dropna()
-    if len(closes) < 2:
-        return {"preco": round(float(closes.iloc[-1]), 2), "variacao_pct": None}
-
-    atual = float(closes.iloc[-1])
-    anterior = float(closes.iloc[-2])
-    variacao = ((atual - anterior) / anterior) * 100
-    return {"preco": round(atual, 2), "variacao_pct": round(variacao, 2)}
-
-
 def collect() -> dict:
-    resultado = {}
-    for categoria, ativos in TICKERS.items():
-        resultado[categoria] = {}
-        for nome, symbol in ativos.items():
-            resultado[categoria][nome] = _fetch_ticker(symbol)
+    # Download em lote — uma única requisição HTTP para todos os tickers
+    df = yf.download(
+        tickers=" ".join(ALL_SYMBOLS),
+        period="2d",
+        interval="1d",
+        group_by="ticker",
+        auto_adjust=True,
+        progress=False,
+        threads=True,
+    )
+
+    resultado: dict = {"bolsas": {}, "cambio": {}, "commodities": {}}
+
+    for symbol in ALL_SYMBOLS:
+        categoria, nome = MAPA[symbol]
+        try:
+            closes = df[symbol]["Close"].dropna() if len(ALL_SYMBOLS) > 1 else df["Close"].dropna()
+            if closes.empty:
+                resultado[categoria][nome] = {"preco": None, "variacao_pct": None}
+                continue
+            atual = float(closes.iloc[-1])
+            variacao = None
+            if len(closes) >= 2:
+                anterior = float(closes.iloc[-2])
+                variacao = round(((atual - anterior) / anterior) * 100, 2)
+            resultado[categoria][nome] = {"preco": round(atual, 2), "variacao_pct": variacao}
+        except Exception:
+            resultado[categoria][nome] = {"preco": None, "variacao_pct": None}
+
     return resultado
 
 
