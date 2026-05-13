@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Ambiente
+.env
+.env.local
+
+# Vercel
+.vercel/
+
+# n8n exports com credenciais (manter só os JSONs sem secrets)
+docs/n8n/*.credentials.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Testes
+.pytest_cache/
+htmlcov/
+.coverage
