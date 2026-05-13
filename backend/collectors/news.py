@@ -10,9 +10,23 @@ router = APIRouter()
 
 NEWSAPI_URL = "https://newsapi.org/v2/top-headlines"
 
-# Fontes confiáveis suportadas pela NewsAPI (plano free exige sources ou country)
-SOURCES_EN = "reuters,bloomberg,the-wall-street-journal,financial-times,the-economist"
-SOURCES_BR = "google-news-br"
+# IDs de fontes suportados pela NewsAPI (plano free exige sources ou country)
+# Mapeados a partir da lista de fontes confiáveis do projeto
+SOURCES_EN = ",".join([
+    "reuters",
+    "bloomberg",
+    "the-wall-street-journal",
+    "financial-times",
+    "the-economist",
+    "cnbc",
+    "cnn",
+    "bbc-news",
+    "the-guardian-uk",
+    "forbes",
+])
+
+# Notícias BR via categoria business
+PARAMS_BR = {"country": "br", "category": "business", "pageSize": 10}
 
 
 def collect() -> list[dict]:
@@ -24,8 +38,8 @@ def collect() -> list[dict]:
     vistos = set()
 
     queries = [
-        {"sources": SOURCES_EN, "pageSize": 10},
-        {"country": "br", "category": "business", "pageSize": 10},
+        {"sources": SOURCES_EN, "pageSize": 15},
+        PARAMS_BR,
     ]
 
     with httpx.Client(timeout=15) as client:
@@ -47,7 +61,7 @@ def collect() -> list[dict]:
                     "resumo": a.get("description"),
                 })
 
-    return artigos[:15]
+    return artigos[:20]
 
 
 @router.get("/api/collectors/news")
