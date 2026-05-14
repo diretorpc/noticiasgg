@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Seed inicial dos usuários autorizados. Rodar uma vez."""
 import os
-import sys
 import httpx
 from dotenv import load_dotenv
 
