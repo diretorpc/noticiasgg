@@ -1,0 +1,197 @@
+{
+  "name": "Relatório 12h",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 15 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://noticiasgg.vercel.app/api/collectors/market",
+        "options": {}
+      },
+      "id": "http-market",
+      "name": "Market",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 160]
+    },
+    {
+      "parameters": {
+        "url": "https://noticiasgg.vercel.app/api/collectors/crypto",
+        "options": {}
+      },
+      "id": "http-crypto",
+      "name": "Crypto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://noticiasgg.vercel.app/api/collectors/news",
+        "options": {}
+      },
+      "id": "http-news",
+      "name": "News",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 440]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "numberInputs": 3
+      },
+      "id": "merge",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst agora = new Date().toLocaleString(\"pt-BR\", { timeZone: \"America/Sao_Paulo\" });\nconst hora = new Date().toLocaleTimeString(\"pt-BR\", { timeZone: \"America/Sao_Paulo\", hour: \"2-digit\", minute: \"2-digit\" });\nconst saudacao = (() => {\n  const h = parseInt(hora.split(\":\")[0]);\n  if (h >= 5 && h < 12) return \"Bom dia\";\n  if (h >= 12 && h < 18) return \"Boa tarde\";\n  return \"Boa noite\";\n})();\n\nlet context = `=== DADOS FINANCEIROS COLETADOS (MEIO-DIA) ===\\n\\nDATA/HORA: ${agora}\\nSAUDACAO: ${saudacao}, Matheus\\n\\n`;\ncontext += `💵 CÂMBIO | 🪙 CRIPTOMOEDAS | 📰 NOTÍCIAS\\n\\n`;\n\nfor (const item of items) {\n  const body = item.json;\n  context += JSON.stringify(body, null, 2) + \"\\n\\n\";\n}\n\nreturn [{ json: { context: JSON.stringify(context) } }];"
+      },
+      "id": "formatar-dados",
+      "name": "Formatar dados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "{\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 5024,\n  \"system\": \"Você é um agente especialista em finanças globais e mercado brasileiro. Gere um resumo de mercado do meio-dia claro e objetivo em português. Tom profissional com leveza. Máximo 2500 caracteres. Inicie sempre com a saudação do campo SAUDACAO do contexto. Use seta para cima ⬆️ se variação positiva e seta para baixo ⬇️ se negativa. Nunca mostre cálculos. Formato obrigatório: CÂMBIO (Dólar USD/BRL e Euro EUR/BRL com valor em R$ e variação), CRIPTOMOEDAS (USDT volume 24h em USD, BTC e ETH com preço em USD e variação), NOTÍCIAS (4 principais com fonte), ANÁLISE DO MEIO-DIA em 2 partes: Visão Macro Global e Visão Brasil. Encerra com frase leve.\",\n  \"messages\": [{\"role\": \"user\", \"content\": {{ $json.context }}}]\n}",
+        "options": {}
+      },
+      "id": "claude",
+      "name": "Claude",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const texto = $json.content[0].text;\nreturn [{ json: { texto: JSON.stringify(texto) } }];"
+      },
+      "id": "extrair-resposta",
+      "name": "Extrair resposta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://46.202.179.33:8080/message/sendText/noticiasgg",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "noticiasgg2026"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "{\n  \"number\": \"5534999945010\",\n  \"textMessage\": {\"text\": {{ $json.texto }}}\n}",
+        "options": {}
+      },
+      "id": "enviar-whatsapp",
+      "name": "Enviar WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1680, 300]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          { "node": "Market", "type": "main", "index": 0 },
+          { "node": "Crypto", "type": "main", "index": 0 },
+          { "node": "News", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Market": {
+      "main": [
+        [{ "node": "Merge", "type": "main", "index": 0 }]
+      ]
+    },
+    "Crypto": {
+      "main": [
+        [{ "node": "Merge", "type": "main", "index": 1 }]
+      ]
+    },
+    "News": {
+      "main": [
+        [{ "node": "Merge", "type": "main", "index": 2 }]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [{ "node": "Formatar dados", "type": "main", "index": 0 }]
+      ]
+    },
+    "Formatar dados": {
+      "main": [
+        [{ "node": "Claude", "type": "main", "index": 0 }]
+      ]
+    },
+    "Claude": {
+      "main": [
+        [{ "node": "Extrair resposta", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extrair resposta": {
+      "main": [
+        [{ "node": "Enviar WhatsApp", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1"
+}

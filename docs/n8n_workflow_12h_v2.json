@@ -1,0 +1,300 @@
+{
+  "name": "Relatório 12h v2",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 15 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://noticiasgg.vercel.app/api/collectors/market",
+        "options": {}
+      },
+      "id": "http-market",
+      "name": "Market",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 160]
+    },
+    {
+      "parameters": {
+        "url": "https://noticiasgg.vercel.app/api/collectors/crypto",
+        "options": {}
+      },
+      "id": "http-crypto",
+      "name": "Crypto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://noticiasgg.vercel.app/api/collectors/news",
+        "options": {}
+      },
+      "id": "http-news",
+      "name": "News",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 440]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "numberInputs": 3
+      },
+      "id": "merge",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst agora = new Date().toLocaleString(\"pt-BR\", { timeZone: \"America/Sao_Paulo\" });\nconst hora = new Date().toLocaleTimeString(\"pt-BR\", { timeZone: \"America/Sao_Paulo\", hour: \"2-digit\", minute: \"2-digit\" });\nconst saudacao = (() => {\n  const h = parseInt(hora.split(\":\")[0]);\n  if (h >= 5 && h < 12) return \"Bom dia\";\n  if (h >= 12 && h < 18) return \"Boa tarde\";\n  return \"Boa noite\";\n})();\n\nlet context = `=== DADOS FINANCEIROS COLETADOS (MEIO-DIA) ===\\n\\nDATA/HORA: ${agora}\\nSAUDACAO: ${saudacao}, Matheus\\n\\n`;\n\nfor (const item of items) {\n  const body = item.json;\n  context += JSON.stringify(body, null, 2) + \"\\n\\n\";\n}\n\nreturn [{ json: { context: JSON.stringify(context) } }];"
+      },
+      "id": "formatar-dados",
+      "name": "Formatar dados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "{\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 1024,\n  \"system\": \"Você é um agente especialista em finanças globais, mercado brasileiro, agronegócio e jornalismo econômico. Responda APENAS com o conteúdo solicitado, sem títulos com ##, sem tabelas markdown, sem traços separadores. Use texto simples com emojis. Use 🟢 se variação positiva, 🔴 se variação negativa e 🟡 se variação zero ou estável. Nunca mostre cálculos. Gere APENAS a seção de CÂMBIO e CRIPTOMOEDAS. Inicie com a saudação do campo SAUDACAO seguida de vírgula e nome. Formato: saudação na primeira linha, linha em branco, depois 💵 CÂMBIO com Dólar USD/BRL e Euro EUR/BRL (valor em R$ e variação), linha em branco, depois 🪙 CRIPTOMOEDAS com USDT volume 24h em USD, BTC e ETH (preço em USD e variação). Texto corrido, sem tabelas.\",\n  \"messages\": [{\"role\": \"user\", \"content\": {{ $json.context }}}]\n}",
+        "options": {}
+      },
+      "id": "claude-cambio-cripto",
+      "name": "Claude Câmbio e Cripto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 160]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "{\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 1024,\n  \"system\": \"Você é um agente especialista em finanças globais, mercado brasileiro, agronegócio e jornalismo econômico. Responda APENAS com o conteúdo solicitado, sem títulos com ##, sem tabelas markdown, sem traços separadores. Use texto simples com emojis. Gere APENAS a seção de NOTÍCIAS. Sem saudação. Formato: 📰 NOTÍCIAS na primeira linha, depois liste as 5 principais notícias financeiras numeradas, cada uma com título em negrito, descrição de uma linha e fonte entre parênteses.\",\n  \"messages\": [{\"role\": \"user\", \"content\": {{ $json.context }}}]\n}",
+        "options": {}
+      },
+      "id": "claude-noticias",
+      "name": "Claude Notícias",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "{\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 2048,\n  \"system\": \"Você é um agente especialista em finanças globais, mercado brasileiro, agronegócio e jornalismo econômico. Responda APENAS com o conteúdo solicitado, sem títulos com ##, sem tabelas markdown, sem traços separadores. Use texto simples com emojis. Gere APENAS a ANÁLISE DO CENÁRIO. Sem saudação. Formato: 🔍 ANÁLISE DO CENÁRIO na primeira linha, depois 3 partes separadas por linha em branco: 🌍 Visão Macro Global, 🇧🇷 Visão Brasil e 🌾 Visão Agro BR. Cada parte com 3 a 4 linhas. Encerra com frase leve.\",\n  \"messages\": [{\"role\": \"user\", \"content\": {{ $json.context }}}]\n}",
+        "options": {}
+      },
+      "id": "claude-analise",
+      "name": "Claude Análise",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 440]
+    },
+    {
+      "parameters": {
+        "jsCode": "const texto = $json.content[0].text;\nreturn [{ json: { texto: JSON.stringify(texto) } }];"
+      },
+      "id": "extrair-cambio-cripto",
+      "name": "Extrair Câmbio e Cripto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 160]
+    },
+    {
+      "parameters": {
+        "jsCode": "const texto = $json.content[0].text;\nreturn [{ json: { texto: JSON.stringify(texto) } }];"
+      },
+      "id": "extrair-noticias",
+      "name": "Extrair Notícias",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const texto = $json.content[0].text;\nreturn [{ json: { texto: JSON.stringify(texto) } }];"
+      },
+      "id": "extrair-analise",
+      "name": "Extrair Análise",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 440]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://46.202.179.33:8080/message/sendText/noticiasgg",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "noticiasgg2026" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "{\n  \"number\": \"5534999945010\",\n  \"textMessage\": {\"text\": {{ $json.texto }}}\n}",
+        "options": {}
+      },
+      "id": "whatsapp-cambio-cripto",
+      "name": "WhatsApp Câmbio e Cripto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1680, 160]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://46.202.179.33:8080/message/sendText/noticiasgg",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "noticiasgg2026" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "{\n  \"number\": \"5534999945010\",\n  \"textMessage\": {\"text\": {{ $json.texto }}}\n}",
+        "options": {}
+      },
+      "id": "whatsapp-noticias",
+      "name": "WhatsApp Notícias",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://46.202.179.33:8080/message/sendText/noticiasgg",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "noticiasgg2026" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "{\n  \"number\": \"5534999945010\",\n  \"textMessage\": {\"text\": {{ $json.texto }}}\n}",
+        "options": {}
+      },
+      "id": "whatsapp-analise",
+      "name": "WhatsApp Análise",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1680, 440]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          { "node": "Market", "type": "main", "index": 0 },
+          { "node": "Crypto", "type": "main", "index": 0 },
+          { "node": "News", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Market": {
+      "main": [[{ "node": "Merge", "type": "main", "index": 0 }]]
+    },
+    "Crypto": {
+      "main": [[{ "node": "Merge", "type": "main", "index": 1 }]]
+    },
+    "News": {
+      "main": [[{ "node": "Merge", "type": "main", "index": 2 }]]
+    },
+    "Merge": {
+      "main": [
+        [
+          { "node": "Formatar dados", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Formatar dados": {
+      "main": [
+        [
+          { "node": "Claude Câmbio e Cripto", "type": "main", "index": 0 },
+          { "node": "Claude Notícias", "type": "main", "index": 0 },
+          { "node": "Claude Análise", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Claude Câmbio e Cripto": {
+      "main": [[{ "node": "Extrair Câmbio e Cripto", "type": "main", "index": 0 }]]
+    },
+    "Claude Notícias": {
+      "main": [[{ "node": "Extrair Notícias", "type": "main", "index": 0 }]]
+    },
+    "Claude Análise": {
+      "main": [[{ "node": "Extrair Análise", "type": "main", "index": 0 }]]
+    },
+    "Extrair Câmbio e Cripto": {
+      "main": [[{ "node": "WhatsApp Câmbio e Cripto", "type": "main", "index": 0 }]]
+    },
+    "Extrair Notícias": {
+      "main": [[{ "node": "WhatsApp Notícias", "type": "main", "index": 0 }]]
+    },
+    "Extrair Análise": {
+      "main": [[{ "node": "WhatsApp Análise", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1"
+}

@@ -1,0 +1,120 @@
+{
+  "name": "Relatório Commodities Segunda 7h",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://noticiasgg.vercel.app/api/collectors/commodities-br",
+        "options": {}
+      },
+      "id": "http-commodities",
+      "name": "Commodities BR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst agora = new Date().toLocaleString(\"pt-BR\", { timeZone: \"America/Sao_Paulo\" });\nconst hora = new Date().toLocaleTimeString(\"pt-BR\", { timeZone: \"America/Sao_Paulo\", hour: \"2-digit\", minute: \"2-digit\" });\nconst saudacao = (() => {\n  const h = parseInt(hora.split(\":\")[0]);\n  if (h >= 5 && h < 12) return \"Bom dia\";\n  if (h >= 12 && h < 18) return \"Boa tarde\";\n  return \"Boa noite\";\n})();\n\nlet context = `=== DADOS DE COMMODITIES ===\\n\\nDATA/HORA: ${agora}\\nSAUDACAO: ${saudacao}, Matheus\\n\\n`;\n\nfor (const item of items) {\n  context += JSON.stringify(item.json, null, 2) + \"\\n\\n\";\n}\n\nreturn [{ json: { context: JSON.stringify(context) } }];"
+      },
+      "id": "formatar-dados",
+      "name": "Formatar dados",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "{\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 1024,\n  \"system\": \"Você é um agente especialista em agronegócio e commodities brasileiras. Gere APENAS a listagem de commodities no formato exato abaixo, sem texto adicional, sem explicações, sem parágrafos. Use 🟢 se variação positiva, 🔴 se variação negativa, 🟡 se zero ou estável. Nunca mostre cálculos. Inicie com a saudação do campo SAUDACAO seguida de vírgula e nome, linha em branco, depois o conteúdo. Formato obrigatório:\\n\\n🌱 *COMMODITIES*\\n\\n🛢️ Petróleo Brent: US$ X,XX/barril 🔴 -X,XX%\\n🐮 Boi Gordo SP: R$ XXX,XX/@ 🟢 +X,XX%\\n☕ Café Arábica SP: R$ X.XXX,XX/sc 60kg 🔴 -X,XX%\\n🌱 Soja PR: R$ XXX,XX/sc 60kg 🟢 +X,XX%\\n🌽 Milho SP: R$ XX,XX/sc 60kg 🔴 -X,XX%\\n🌾 Trigo PR: R$ X.XXX,XX/ton 🟢 +X,XX%\\n🫙 Açúcar Cristal SP: R$ XX,XX/sc 50kg 🔴 -X,XX%\\n🍗 Frango Congelado SP: R$ X,XX/kg 🟡 estável\\n🐷 Suíno Vivo PR: R$ X,XX/kg 🔴 -X,XX%\\n🍚 Arroz Tipo 1 RS: R$ XX,XX/sc 50kg 🔴 -X,XX%\",\n  \"messages\": [{\"role\": \"user\", \"content\": {{ $json.context }}}]\n}",
+        "options": {}
+      },
+      "id": "claude-commodities",
+      "name": "Claude Commodities",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const texto = $json.content[0].text;\nreturn [{ json: { texto: JSON.stringify(texto) } }];"
+      },
+      "id": "extrair-resposta",
+      "name": "Extrair resposta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://46.202.179.33:8080/message/sendText/noticiasgg",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "apikey", "value": "noticiasgg2026" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "jsonBody": "{\n  \"number\": \"5534999945010\",\n  \"textMessage\": {\"text\": {{ $json.texto }}}\n}",
+        "options": {}
+      },
+      "id": "enviar-whatsapp",
+      "name": "Enviar WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 300]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{ "node": "Commodities BR", "type": "main", "index": 0 }]]
+    },
+    "Commodities BR": {
+      "main": [[{ "node": "Formatar dados", "type": "main", "index": 0 }]]
+    },
+    "Formatar dados": {
+      "main": [[{ "node": "Claude Commodities", "type": "main", "index": 0 }]]
+    },
+    "Claude Commodities": {
+      "main": [[{ "node": "Extrair resposta", "type": "main", "index": 0 }]]
+    },
+    "Extrair resposta": {
+      "main": [[{ "node": "Enviar WhatsApp", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1"
+}

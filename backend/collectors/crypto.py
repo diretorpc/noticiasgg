@@ -6,7 +6,7 @@ router = APIRouter()
 
 COINGECKO_URL = (
     "https://api.coingecko.com/api/v3/coins/markets"
-    "?vs_currency=usd&order=market_cap_desc&per_page=10&page=1"
+    "?vs_currency=usd&ids=bitcoin,ethereum,tether"
     "&price_change_percentage=24h"
 )
 
@@ -17,16 +17,28 @@ def collect() -> list[dict]:
         resp.raise_for_status()
         coins = resp.json()
 
-    return [
-        {
-            "nome": c["name"],
-            "simbolo": c["symbol"].upper(),
-            "preco_usd": c["current_price"],
-            "variacao_24h_pct": round(c.get("price_change_percentage_24h") or 0, 2),
-            "market_cap_usd": c["market_cap"],
-        }
-        for c in coins
-    ]
+    coins_map = {c["id"]: c for c in coins}
+    result = []
+
+    usdt = coins_map.get("tether")
+    if usdt:
+        result.append({
+            "nome": "Tether",
+            "simbolo": "USDT",
+            "volume_24h_usd": usdt.get("total_volume"),
+        })
+
+    for coin_id in ["bitcoin", "ethereum"]:
+        c = coins_map.get(coin_id)
+        if c:
+            result.append({
+                "nome": c["name"],
+                "simbolo": c["symbol"].upper(),
+                "preco_usd": c["current_price"],
+                "variacao_24h_pct": round(c.get("price_change_percentage_24h") or 0, 2),
+            })
+
+    return result
 
 
 @router.get("/api/collectors/crypto")
