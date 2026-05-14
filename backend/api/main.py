@@ -36,6 +36,44 @@ app.include_router(cron_report.router)
 
 PHONE_RE = re.compile(r"^\D*(\d{10,13})\D*$")
 
+_DATA_KEYWORDS = re.compile(
+    r"\b("
+    # relatório explícito
+    r"relat[oó]rio|resumo|an[áa]lise|panorama|overview|briefing|"
+    # câmbio e moedas
+    r"d[oó]lar|dolar|euro|libra|iene|yuan|renminbi|peso|"
+    r"c[âa]mbio|forex|moeda|convers[ãa]o|"
+    # cripto
+    r"bitcoin|btc|ethereum|eth|cripto|crypto|altcoin|blockchain|"
+    r"solana|sol|bnb|xrp|ripple|cardano|ada|dogecoin|doge|"
+    # bolsas e índices
+    r"bolsa|ibovespa|ibrx|nasdaq|s&p|s&p500|dow\s*jones|nikkei|ftse|"
+    r"dax|cac|shanghai|hang\s*seng|b3|nyse|"
+    # ações e mercado
+    r"a[çc][ãa]o|a[çc][õo]es|papel|papeis|ticker|pregão|pregao|"
+    r"mercado|investimento|carteira|portf[oó]lio|"
+    # indicadores BR
+    r"selic|ipca|igpm|igp-m|pib|c[âa]mbio|inpc|"
+    # indicadores EUA
+    r"cpi|ppi|gdp|fed|federal\s*reserve|taxa\s*de\s*juros|juros|"
+    r"desemprego|emprego|payroll|inflac[ãa]o|infla[çc][ãa]o|"
+    # commodities
+    r"commodity|commodities|petr[oó]leo|brent|wti|g[aá]s|"
+    r"ouro|prata|cobre|min[eé]rio|"
+    r"soja|milho|caf[eé]|a[çc][uú]car|algod[ãa]o|trigo|boi|"
+    # tempo e atualidade
+    r"hoje|agora|atual|atualmente|esta\s*semana|esse\s*m[eê]s|"
+    r"cota[çc][ãa]o|pre[çc]o|valor|quanto\s*est[aá]|como\s*est[aá]|"
+    # notícias
+    r"not[ií]cia|not[ií]cias|novidade|acontec"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _needs_market_data(text: str) -> bool:
+    return bool(_DATA_KEYWORDS.search(text))
+
 
 @app.get("/api/health")
 async def health():
@@ -107,26 +145,7 @@ Regras de horário:
 Reset: "volta pro padrão", "quero tudo de volta", "cancela preferências" → {"intent": "preference", "sections": null, "report_time": null, "reset": true, "reply": "..."}
 
 CATEGORIA 2 — Qualquer outra mensagem:
-Responda SOMENTE com JSON:
-{"intent": "message", "needs_data": true ou false}
-
-needs_data = true SOMENTE se o usuário pedir EXPLICITAMENTE um dos itens abaixo:
-- preço ou cotação atual de algo (dólar, euro, bitcoin, ação, commodity)
-- desempenho de bolsas hoje (Ibovespa, Nasdaq, S&P 500, etc.)
-- valor atual de indicador econômico (Selic, IPCA, CPI, juros, PIB, desemprego)
-- notícias financeiras ou econômicas do dia
-- relatório, resumo ou análise do mercado
-- commodities (petróleo, ouro, soja, milho, café, etc.)
-
-needs_data = false para TUDO O MAIS. Sem exceções. Exemplos:
-- qualquer saudação ou despedida
-- agradecimentos
-- respostas curtas (ok, sim, não, entendi, certo, show, ótimo)
-- perguntas conceituais ou educacionais sobre finanças
-- comentários, opiniões, elogios
-- qualquer mensagem que não peça dados de mercado em tempo real
-
-REGRA DE OURO: na dúvida, retorne needs_data = false."""
+Responda SOMENTE com JSON: {"intent": "message"}"""
 
 
 def _detect_preference_intent(text: str, current_sections: dict | None = None) -> dict:
@@ -206,8 +225,7 @@ async def whatsapp_webhook(request: Request):
         history = supabase.get_history(target_phone, limit=10)
         anthropic_history = [{"role": h["role"], "content": h["content"]} for h in history]
 
-        needs_data = intent.get("needs_data", True)
-        sections = current_sections if needs_data else {}
+        sections = current_sections if _needs_market_data(text) else {}
 
         supabase.save_message(target_phone, "user", text)
         reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"), sections=sections)
