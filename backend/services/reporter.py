@@ -47,7 +47,7 @@ _COLLECTORS = {
 
 
 def _collect_all(sections: dict | None = None) -> dict:
-    active = sections or DEFAULT_SECTIONS
+    active = sections if sections is not None else DEFAULT_SECTIONS
     return {
         k: _safe_collect(fn)
         for k, fn in _COLLECTORS.items()
