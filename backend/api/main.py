@@ -110,21 +110,23 @@ CATEGORIA 2 — Qualquer outra mensagem:
 Responda SOMENTE com JSON:
 {"intent": "message", "needs_data": true ou false}
 
-needs_data = true se o usuário pedir:
-- relatório, resumo, análise do mercado
-- cotações, preços, valores de ações/moedas/cripto
-- notícias financeiras ou econômicas
-- indicadores (Selic, IPCA, juros, PIB, CPI, etc.)
-- commodities, petróleo, ouro, soja
+needs_data = true SOMENTE se o usuário pedir EXPLICITAMENTE um dos itens abaixo:
+- preço ou cotação atual de algo (dólar, euro, bitcoin, ação, commodity)
+- desempenho de bolsas hoje (Ibovespa, Nasdaq, S&P 500, etc.)
+- valor atual de indicador econômico (Selic, IPCA, CPI, juros, PIB, desemprego)
+- notícias financeiras ou econômicas do dia
+- relatório, resumo ou análise do mercado
+- commodities (petróleo, ouro, soja, milho, café, etc.)
 
-needs_data = false para QUALQUER mensagem que não exija dados em tempo real, incluindo:
-- saudações e despedidas (oi, olá, bom dia, boa tarde, boa noite, tchau, até mais)
-- agradecimentos (obrigado, valeu, show)
-- confirmações e respostas curtas (ok, entendi, certo, sim, não)
-- perguntas conceituais ("o que é Selic?", "como funciona a bolsa?", "o que é inflação?")
-- qualquer conversa casual que não dependa de dados de mercado atuais
+needs_data = false para TUDO O MAIS. Sem exceções. Exemplos:
+- qualquer saudação ou despedida
+- agradecimentos
+- respostas curtas (ok, sim, não, entendi, certo, show, ótimo)
+- perguntas conceituais ou educacionais sobre finanças
+- comentários, opiniões, elogios
+- qualquer mensagem que não peça dados de mercado em tempo real
 
-Em caso de dúvida, prefira needs_data = false."""
+REGRA DE OURO: na dúvida, retorne needs_data = false."""
 
 
 def _detect_preference_intent(text: str, current_sections: dict | None = None) -> dict:
