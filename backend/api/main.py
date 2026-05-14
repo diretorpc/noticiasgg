@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.collectors import market, crypto, indicators_us, indicators_br, news, commodities_br, politics_br, polls_br
 from backend.services import reporter, whatsapp, supabase
-from backend.api import send_report
+from backend.api import send_report, cron_report
 
 logger = logging.getLogger("noticiasgg")
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +29,7 @@ app.include_router(commodities_br.router)
 app.include_router(politics_br.router)
 app.include_router(polls_br.router)
 app.include_router(send_report.router)
+app.include_router(cron_report.router)
 
 
 PHONE_RE = re.compile(r"^\D*(\d{10,13})\D*$")
