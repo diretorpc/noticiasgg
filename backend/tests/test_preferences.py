@@ -52,6 +52,9 @@ def test_get_users_for_hour_retorna_usuario_com_horario():
     users = supabase.get_users_for_hour("08:00")
     phones = [u["phone"] for u in users]
     assert PHONE_TEST in phones
+    match = next(u for u in users if u["phone"] == PHONE_TEST)
+    assert "name" in match
+    assert "sections" in match
 
 
 def test_get_users_for_hour_nao_retorna_outros_horarios():
