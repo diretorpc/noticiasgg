@@ -1,8 +1,10 @@
+import json
 import os
 import re
 import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from anthropic import Anthropic
 
 from backend.collectors import market, crypto, indicators_us, indicators_br, news, commodities_br, politics_br, polls_br
 from backend.services import reporter, whatsapp, supabase
@@ -79,6 +81,59 @@ def _handle_admin_command(text: str) -> str | None:
     return None
 
 
+_PREFERENCE_SYSTEM = """Você é um parser de intenções. Analise se a mensagem é um pedido de configuração do relatório financeiro diário.
+
+Seções disponíveis:
+- market: bolsas e câmbio
+- crypto: criptomoedas
+- indicators_us: indicadores econômicos dos EUA
+- indicators_br: indicadores econômicos do Brasil
+- news: notícias
+- commodities_br: commodities brasileiras
+- politics_br: política brasileira
+- polls_br: pesquisas eleitorais
+
+Se for um pedido de configuração, responda SOMENTE com JSON válido:
+{
+  "intent": "preference",
+  "sections": {todas as 8 seções com true/false},
+  "report_time": "HH:00" ou null,
+  "reset": false,
+  "reply": "mensagem de confirmação amigável em português"
+}
+
+Regras de seções:
+- "quero só X e Y" → todas false exceto X e Y
+- "remove X" → manter configuração atual, apenas X=false (retornar seções com base no contexto fornecido)
+- "adiciona X" → manter configuração atual, apenas X=true
+
+Regras de horário:
+- "às 8h" → "08:00"
+- "às 20h30" ou "8 e meia" → arredondar para próxima hora cheia
+
+Reset:
+- "volta pro padrão", "quero tudo de volta", "cancela preferências" → {"intent": "preference", "sections": null, "report_time": null, "reset": true, "reply": "..."}
+
+Se NÃO for pedido de configuração, responda SOMENTE: {"intent": "message"}"""
+
+
+def _detect_preference_intent(text: str, current_sections: dict | None = None) -> dict:
+    context = ""
+    if current_sections:
+        context = f"\n\nConfiguração atual do usuário: {json.dumps(current_sections, ensure_ascii=False)}"
+    try:
+        client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=400,
+            system=_PREFERENCE_SYSTEM,
+            messages=[{"role": "user", "content": text + context}],
+        )
+        return json.loads(response.content[0].text)
+    except Exception:
+        return {"intent": "message"}
+
+
 @app.post("/api/webhook")
 async def whatsapp_webhook(request: Request):
     payload = await request.json()
@@ -118,9 +173,25 @@ async def whatsapp_webhook(request: Request):
                 whatsapp.send_message(admin_phone, admin_response)
                 return {"status": "ok", "reason": "admin command"}
 
+        # Detectar intenção de preferência antes de gerar resposta
+        current_prefs = supabase.get_preferences(target_phone)
+        current_sections = (current_prefs or {}).get("sections")
+        intent = _detect_preference_intent(text, current_sections=current_sections)
+
+        if intent.get("intent") == "preference":
+            if intent.get("reset"):
+                supabase.delete_preferences(target_phone)
+            else:
+                new_sections = intent.get("sections")
+                new_time = intent.get("report_time")
+                if new_sections is not None or new_time is not None:
+                    supabase.save_preferences(target_phone, sections=new_sections, report_time=new_time)
+            reply = intent.get("reply", "Preferências atualizadas!")
+            whatsapp.send_message(target_phone, reply)
+            return {"status": "ok", "reason": "preference_updated"}
+
         # Buscar histórico e gerar resposta
         history = supabase.get_history(target_phone, limit=10)
-        # Converte histórico para formato Anthropic (sem o turno atual)
         anthropic_history = [{"role": h["role"], "content": h["content"]} for h in history]
 
         supabase.save_message(target_phone, "user", text)
