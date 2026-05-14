@@ -74,10 +74,13 @@ def generate_report(
             f"(não em toda frase)."
         )
 
-    user_content = (
-        f"Mensagem do usuário: {user_message}\n\n"
-        f"Dados de mercado coletados agora:\n{json.dumps(data, ensure_ascii=False, default=str)}"
-    )
+    if data:
+        user_content = (
+            f"Mensagem do usuário: {user_message}\n\n"
+            f"Dados de mercado coletados agora:\n{json.dumps(data, ensure_ascii=False, default=str)}"
+        )
+    else:
+        user_content = f"Mensagem do usuário: {user_message}"
 
     messages = list(history or [])
     messages.append({"role": "user", "content": user_content})

@@ -81,19 +81,12 @@ def _handle_admin_command(text: str) -> str | None:
     return None
 
 
-_PREFERENCE_SYSTEM = """Você é um parser de intenções. Analise se a mensagem é um pedido de configuração do relatório financeiro diário.
+_PREFERENCE_SYSTEM = """Você é um parser de intenções. Analise a mensagem e classifique em uma de duas categorias.
 
-Seções disponíveis:
-- market: bolsas e câmbio
-- crypto: criptomoedas
-- indicators_us: indicadores econômicos dos EUA
-- indicators_br: indicadores econômicos do Brasil
-- news: notícias
-- commodities_br: commodities brasileiras
-- politics_br: política brasileira
-- polls_br: pesquisas eleitorais
+CATEGORIA 1 — Pedido de configuração do relatório diário:
+Seções disponíveis: market, crypto, indicators_us, indicators_br, news, commodities_br, politics_br, polls_br.
 
-Se for um pedido de configuração, responda SOMENTE com JSON válido:
+Responda SOMENTE com JSON:
 {
   "intent": "preference",
   "sections": {todas as 8 seções com true/false},
@@ -104,17 +97,31 @@ Se for um pedido de configuração, responda SOMENTE com JSON válido:
 
 Regras de seções:
 - "quero só X e Y" → todas false exceto X e Y
-- "remove X" → manter configuração atual, apenas X=false (retornar seções com base no contexto fornecido)
-- "adiciona X" → manter configuração atual, apenas X=true
+- "remove X" → apenas X=false (manter restante do contexto atual)
+- "adiciona X" → apenas X=true (manter restante do contexto atual)
 
 Regras de horário:
 - "às 8h" → "08:00"
 - "às 20h30" ou "8 e meia" → arredondar para próxima hora cheia
 
-Reset:
-- "volta pro padrão", "quero tudo de volta", "cancela preferências" → {"intent": "preference", "sections": null, "report_time": null, "reset": true, "reply": "..."}
+Reset: "volta pro padrão", "quero tudo de volta", "cancela preferências" → {"intent": "preference", "sections": null, "report_time": null, "reset": true, "reply": "..."}
 
-Se NÃO for pedido de configuração, responda SOMENTE: {"intent": "message"}"""
+CATEGORIA 2 — Qualquer outra mensagem:
+Responda SOMENTE com JSON:
+{"intent": "message", "needs_data": true ou false}
+
+needs_data = true se o usuário pedir:
+- relatório, resumo, análise do mercado
+- cotações, preços, valores de ações/moedas/cripto
+- notícias financeiras ou econômicas
+- indicadores (Selic, IPCA, juros, PIB, CPI, etc.)
+- commodities, petróleo, ouro, soja
+
+needs_data = false para:
+- saudações (oi, olá, bom dia, tudo bem)
+- agradecimentos
+- perguntas conceituais que não precisam de dados em tempo real ("o que é Selic?", "como funciona a bolsa?")
+- qualquer conversa que não dependa de dados de mercado atuais"""
 
 
 def _detect_preference_intent(text: str, current_sections: dict | None = None) -> dict:
@@ -194,8 +201,11 @@ async def whatsapp_webhook(request: Request):
         history = supabase.get_history(target_phone, limit=10)
         anthropic_history = [{"role": h["role"], "content": h["content"]} for h in history]
 
+        needs_data = intent.get("needs_data", True)
+        sections = current_sections if needs_data else {}
+
         supabase.save_message(target_phone, "user", text)
-        reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"))
+        reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"), sections=sections)
         supabase.save_message(target_phone, "assistant", reply)
 
         whatsapp.send_message(target_phone, reply)
