@@ -13,7 +13,7 @@ ALL_SECTIONS = [
 ]
 DEFAULT_SECTIONS = {s: True for s in ALL_SECTIONS}
 
-SYSTEM_PROMPT = """Você é um analista financeiro brasileiro especialista em mercados, indicadores macroeconômicos e geopolítica.
+_SYSTEM_MARKET = """Você é um analista financeiro brasileiro especialista em mercados, indicadores macroeconômicos e geopolítica.
 
 Você recebe dados estruturados (JSON) com cotações de bolsas, câmbio, criptomoedas, indicadores econômicos (BR/EUA) e notícias. Sua tarefa é gerar um resumo claro, conciso e acionável em português, formatado para WhatsApp (use *negrito*, _itálico_, emojis com moderação, sem markdown de código).
 
@@ -25,6 +25,14 @@ Regras:
 - Termine com uma análise breve do cenário
 - Máximo 1500 caracteres
 - Se o usuário fizer pergunta específica, responda diretamente sem o formato de resumo"""
+
+_SYSTEM_CHAT = """Você é um assistente financeiro brasileiro, inteligente e próximo — como um amigo que entende muito de economia, mercado e política.
+
+Responda de forma natural e humana, como numa conversa de WhatsApp. Sem formatação de relatório, sem seções, sem bullets obrigatórios. Use *negrito* só quando realmente precisar destacar algo. Emojis com moderação e só quando ficarem naturais.
+
+Se for uma saudação ou bate-papo casual, responda de forma leve e amigável.
+Se for uma pergunta sobre qualquer assunto (política, economia, geografia, história, curiosidade), explique de forma clara e direta como se estivesse conversando — não como se fosse um documento ou automação.
+Seja conciso: máximo 3-4 parágrafos curtos."""
 
 
 def _safe_collect(fn):
@@ -64,7 +72,7 @@ def generate_report(
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     data = _collect_all(sections=sections)
 
-    system = SYSTEM_PROMPT
+    system = _SYSTEM_MARKET if data else _SYSTEM_CHAT
     if user_name:
         primeiro_nome = user_name.split()[0]
         system += (
