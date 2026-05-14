@@ -1,4 +1,7 @@
+import datetime
 import os
+import re
+
 import httpx
 
 
@@ -93,7 +96,12 @@ def save_preferences(phone: str, sections: dict | None, report_time: str | None)
     with _client() as c:
         r = c.post(
             "/user_preferences",
-            json={"phone": phone, "sections": sections, "report_time": report_time},
+            json={
+                "phone": phone,
+                "sections": sections,
+                "report_time": report_time,
+                "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
             headers={"Prefer": "resolution=merge-duplicates,return=representation"},
         )
         r.raise_for_status()
@@ -106,16 +114,23 @@ def delete_preferences(phone: str) -> None:
 
 
 def get_users_for_hour(hour_brt: str) -> list[dict]:
+    if not re.fullmatch(r"\d{2}:00", hour_brt):
+        return []
     with _client() as c:
         r = c.get(f"/user_preferences?report_time=eq.{hour_brt}&select=phone,sections")
         r.raise_for_status()
         prefs = r.json()
-    result = []
-    for p in prefs:
-        user = get_authorized_by_phone(p["phone"])
-        result.append({
+        if not prefs:
+            return []
+        phones = ",".join(p["phone"] for p in prefs)
+        r2 = c.get(f"/authorized_users?phone=in.({phones})&select=phone,name")
+        r2.raise_for_status()
+        users_by_phone = {u["phone"]: u.get("name") for u in r2.json()}
+    return [
+        {
             "phone": p["phone"],
-            "name": user.get("name") if user else None,
+            "name": users_by_phone.get(p["phone"]),
             "sections": p.get("sections"),
-        })
-    return result
+        }
+        for p in prefs
+    ]
