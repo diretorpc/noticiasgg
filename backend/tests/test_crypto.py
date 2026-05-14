@@ -27,5 +27,7 @@ def test_crypto_campos_obrigatorios():
     for moeda in moedas:
         assert "nome" in moeda
         assert "simbolo" in moeda
-        assert "preco_usd" in moeda
-        assert "variacao_24h_pct" in moeda
+        # Stablecoins (ex: USDT) não têm preco_usd, só volume
+        if moeda["simbolo"] != "USDT":
+            assert "preco_usd" in moeda
+            assert "variacao_24h_pct" in moeda

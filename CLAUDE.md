@@ -8,6 +8,9 @@ PRD completo: [docs/PRD.md](docs/PRD.md)
 Spec de design: [docs/superpowers/specs/2026-05-11-agente-financeiro-whatsapp-design.md](docs/superpowers/specs/2026-05-11-agente-financeiro-whatsapp-design.md)
 Plano de implementação: [docs/superpowers/plans/2026-05-11-agente-financeiro-whatsapp.md](docs/superpowers/plans/2026-05-11-agente-financeiro-whatsapp.md)
 
+URL produção: https://noticiasgg.vercel.app
+WhatsApp do agente: +55 34 99659-2975
+
 ---
 
 ## Stack
@@ -16,15 +19,15 @@ Plano de implementação: [docs/superpowers/plans/2026-05-11-agente-financeiro-w
 |--------|-----------|
 | Backend principal | Python 3.12, FastAPI |
 | IA | Claude API (`claude-sonnet-4-6`) via `anthropic` SDK |
-| Dados de mercado | `yfinance` (bolsas, commodities, câmbio) |
+| Dados de mercado | Yahoo Finance (HTTP direto) |
 | Cripto | CoinGecko API (sem chave) |
 | Indicadores EUA | FRED API (`FRED_API_KEY`) |
 | Indicadores BR | BCB (Banco Central, sem chave) |
 | Notícias | NewsAPI (`NEWS_API_KEY`) |
 | Mensageria | Evolution API v1.8.2 (WhatsApp, self-hosted na VPS Hostinger) |
-| Banco de dados | Supabase (planejado para histórico futuro) |
+| Banco de dados | Supabase (histórico de mensagens) |
 | Frontend | Next.js, React, Tailwind CSS, TypeScript (planejado) |
-| Automação | n8n (planejado) |
+| Automação | n8n (workflows configurados — NÃO MEXER) |
 | Deploy | Vercel Serverless Functions |
 
 ---
@@ -33,44 +36,48 @@ Plano de implementação: [docs/superpowers/plans/2026-05-11-agente-financeiro-w
 
 ```
 c:\noticiasgg\
-├── api/
-│   └── webhook.py          # Orquestrador FastAPI — ponto de entrada do webhook WhatsApp
-├── collectors/
-│   ├── market.py           # Bolsas, commodities, câmbio (yfinance)
-│   ├── crypto.py           # Criptomoedas (CoinGecko)
-│   ├── indicators_us.py    # Indicadores EUA: CPI, PPI, desemprego (FRED)
-│   ├── indicators_br.py    # Indicadores BR: SELIC, IPCA, câmbio (BCB)
-│   └── news.py             # Notícias financeiras (NewsAPI)
-├── services/
-│   ├── reporter.py         # Geração de relatório via Claude API
-│   └── whatsapp.py         # Envio de mensagens via Evolution API
-├── tests/                  # 29 testes (pytest)
+├── backend/
+│   ├── api/
+│   │   └── main.py             # FastAPI + endpoint /api/webhook
+│   ├── collectors/
+│   │   ├── market.py           # Bolsas, câmbio (Yahoo Finance)
+│   │   ├── crypto.py           # Criptomoedas (CoinGecko)
+│   │   ├── indicators_us.py    # CPI, PPI, desemprego (FRED)
+│   │   ├── indicators_br.py    # SELIC, IPCA (BCB)
+│   │   ├── news.py             # Notícias (NewsAPI)
+│   │   ├── commodities_br.py   # Commodities BR
+│   │   ├── politics_br.py      # Política BR
+│   │   └── polls_br.py         # Pesquisas eleitorais
+│   ├── services/
+│   │   ├── reporter.py         # Geração de relatório via Claude
+│   │   └── whatsapp.py         # Envio via Evolution API
+│   ├── tests/                  # pytest
+│   └── requirements.txt
 ├── docs/
 │   ├── PRD.md
 │   └── superpowers/
-│       ├── specs/
-│       └── plans/
-├── .env                    # Variáveis de ambiente (NÃO commitar)
-├── requirements.txt
+├── vps/                        # Scripts da VPS
 ├── vercel.json
 └── CLAUDE.md
 ```
 
 ---
 
-## Variáveis de Ambiente
+## Variáveis de Ambiente (Vercel)
 
 | Variável | Descrição |
 |----------|-----------|
-| `ANTHROPIC_API_KEY` | Chave da API Claude (Anthropic) |
-| `FRED_API_KEY` | Chave da API FRED (indicadores EUA) |
+| `ANTHROPIC_API_KEY` | Chave da API Claude |
+| `FRED_API_KEY` | Chave da API FRED |
 | `NEWS_API_KEY` | Chave da NewsAPI |
-| `EVOLUTION_API_URL` | URL da Evolution API (`http://46.202.179.33:8080`) |
-| `EVOLUTION_API_KEY` | Chave da Evolution API (`noticiasgg2026`) |
-| `EVOLUTION_INSTANCE` | Nome da instância WhatsApp (`noticiasgg`) |
-| `AUTHORIZED_NUMBER` | Número WhatsApp autorizado (`5534999945010`) |
-
-Copiar `.env.example` para `.env` e preencher antes de rodar localmente.
+| `SCRAPER_API_KEY` | Chave do ScraperAPI |
+| `EVOLUTION_API_URL` | `http://46.202.179.33:8080` |
+| `EVOLUTION_API_KEY` | `noticiasgg2026` |
+| `EVOLUTION_INSTANCE` | `noticiasgg` |
+| `AUTHORIZED_NUMBER` | Número WhatsApp autorizado (formato Evolution: `553496592975`) |
+| `REPLY_TO_NUMBER` | Fallback de destino quando o `remoteJid` é LID (`5534999945010`) |
+| `SUPABASE_URL` | URL do projeto Supabase (histórico) |
+| `SUPABASE_KEY` | Service role key do Supabase |
 
 ---
 
@@ -78,10 +85,11 @@ Copiar `.env.example` para `.env` e preencher antes de rodar localmente.
 
 - **Python:** snake_case para funções e variáveis, PascalCase para classes.
 - **TypeScript/Next.js:** camelCase para variáveis/funções, PascalCase para componentes React.
-- **Commits:** mensagens em inglês, imperativas (`Add collector for crypto data`).
+- **Commits:** mensagens em inglês, imperativas.
 - **Sem comentários desnecessários** — apenas quando o "porquê" não é óbvio.
 - **Sem mock de banco em testes** — testes de integração usam APIs reais onde possível.
-- **Sem features além do escopo** — YAGNI.
+- **YAGNI** — sem features fora do escopo.
+- **n8n:** NÃO mexer nos nodes — já está tudo configurado.
 
 ---
 
@@ -89,56 +97,61 @@ Copiar `.env.example` para `.env` e preencher antes de rodar localmente.
 
 ```
 WhatsApp (usuário)
-  → Evolution API webhook
-    → api/webhook.py
-      → collectors/* (dados em paralelo)
+  → Evolution API webhook (POST /webhook/set/noticiasgg)
+    → backend/api/main.py:/api/webhook
+      → collectors/* (dados via _safe_collect — tolerante a falhas)
       → services/reporter.py (Claude gera resumo)
       → services/whatsapp.py (envia resposta)
   → WhatsApp (usuário recebe relatório)
 ```
 
+**Nota sobre LID**: Mensagens recebidas vêm com `remoteJid` no formato `<id>@lid` (Linked Identifier do WhatsApp moderno). Para responder, mapeamos LID → número via `/chat/findContacts` da Evolution API (com fallback `REPLY_TO_NUMBER`).
+
 ---
 
-## Estado Atual (2026-05-13)
+## Estado Atual (2026-05-14)
 
 | Task | Status |
 |------|--------|
 | Estrutura do projeto | ✅ |
-| `collectors/market.py` | ✅ |
-| `collectors/crypto.py` | ✅ |
-| `collectors/indicators_us.py` | ✅ |
-| `collectors/indicators_br.py` | ✅ |
-| `collectors/news.py` | ✅ |
-| `services/reporter.py` | ✅ |
-| `services/whatsapp.py` | ✅ |
-| `api/webhook.py` | ✅ |
-| Conectar WhatsApp via QR code | ⏳ |
-| Deploy na Vercel | ⏳ |
+| Collectors (market, crypto, FRED, BCB, news, commodities, politics, polls) | ✅ |
+| `services/reporter.py` (Claude) | ✅ |
+| `services/whatsapp.py` (Evolution) | ✅ |
+| `api/main.py` webhook | ✅ |
+| Conectar WhatsApp via QR code | ✅ |
+| Deploy na Vercel | ✅ |
+| Webhook Evolution → Vercel funcionando end-to-end | ✅ |
+| Suporte a múltiplos números (LID resolver) | ⏳ |
+| Integração Supabase (histórico) | ⏳ |
+| Frontend Next.js | ⏳ |
 
 ---
 
 ## Como Rodar Localmente
 
 ```bash
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 cp .env.example .env  # preencher variáveis
-uvicorn api.webhook:app --reload
+uvicorn backend.api.main:app --reload
 ```
 
 ## Testes
 
 ```bash
-pytest tests/ -v
+pytest backend/tests/ -v
 ```
 
 ## Deploy (Vercel)
 
 ```bash
-npm i -g vercel
-vercel login
-vercel env add ANTHROPIC_API_KEY
-# (repetir para todas as variáveis)
 vercel --prod
 ```
 
-Após o deploy, atualizar a URL do webhook na Evolution API para a URL da Vercel.
+## Configurar Webhook Evolution API
+
+```bash
+curl -X POST "http://46.202.179.33:8080/webhook/set/noticiasgg" \
+  -H "apikey: noticiasgg2026" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://noticiasgg.vercel.app/api/webhook", "events": ["MESSAGES_UPSERT"]}'
+```
