@@ -175,7 +175,7 @@ async def whatsapp_webhook(request: Request):
 
         # Detectar intenção de preferência antes de gerar resposta
         current_prefs = supabase.get_preferences(target_phone)
-        current_sections = (current_prefs or {}).get("sections")
+        current_sections = current_prefs.get("sections") if current_prefs else None
         intent = _detect_preference_intent(text, current_sections=current_sections)
 
         if intent.get("intent") == "preference":

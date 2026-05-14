@@ -48,7 +48,11 @@ def test_webhook_preferencia_salva_e_responde():
          patch("backend.api.main.whatsapp.send_message") as mock_send:
         resp = client.post("/api/webhook", json=_make_webhook("quero só notícias e crypto"))
     assert resp.status_code == 200
-    mock_save.assert_called_once()
+    mock_save.assert_called_once_with(
+        "5534999301855",
+        sections=intent_result["sections"],
+        report_time=intent_result["report_time"],
+    )
     mock_send.assert_called_once_with(
         "5534999301855",
         "Feito! Seu relatório vai incluir apenas notícias e criptomoedas."
