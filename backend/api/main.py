@@ -117,11 +117,14 @@ needs_data = true se o usuário pedir:
 - indicadores (Selic, IPCA, juros, PIB, CPI, etc.)
 - commodities, petróleo, ouro, soja
 
-needs_data = false para:
-- saudações (oi, olá, bom dia, tudo bem)
-- agradecimentos
-- perguntas conceituais que não precisam de dados em tempo real ("o que é Selic?", "como funciona a bolsa?")
-- qualquer conversa que não dependa de dados de mercado atuais"""
+needs_data = false para QUALQUER mensagem que não exija dados em tempo real, incluindo:
+- saudações e despedidas (oi, olá, bom dia, boa tarde, boa noite, tchau, até mais)
+- agradecimentos (obrigado, valeu, show)
+- confirmações e respostas curtas (ok, entendi, certo, sim, não)
+- perguntas conceituais ("o que é Selic?", "como funciona a bolsa?", "o que é inflação?")
+- qualquer conversa casual que não dependa de dados de mercado atuais
+
+Em caso de dúvida, prefira needs_data = false."""
 
 
 def _detect_preference_intent(text: str, current_sections: dict | None = None) -> dict:
