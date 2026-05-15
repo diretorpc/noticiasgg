@@ -1,4 +1,3 @@
-import pytest
 from fastapi.testclient import TestClient
 from backend.api.main import app
 
@@ -24,5 +23,8 @@ def test_agro_br_cbot_campos():
     assert len(data) > 0
     for ativo in data.values():
         assert "preco" in ativo
+        assert "variacao_pct" in ativo
         assert "moeda" in ativo
         assert "unidade" in ativo
+    com_preco = [v for v in data.values() if v.get("preco") is not None]
+    assert len(com_preco) > 0, f"Nenhum ativo com preço válido: {data}"

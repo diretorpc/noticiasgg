@@ -6,17 +6,17 @@ from fastapi import APIRouter, HTTPException
 router = APIRouter()
 
 HEADERS_JSON = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json",
 }
 HEADERS_HTML = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml",
 }
 
 YF_URL = "https://query2.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=2d"
 YF_URL_FALLBACK = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=2d"
-NA_BASE = "https://www.noticiasagricolas.com.br"
+NA_BASE = "https://www.noticiasagricolas.com.br"  # usado nas categorias de scraping (Tasks 2-3)
 
 # (símbolo, unidade, moeda)
 CBOT_SYMBOLS = {
