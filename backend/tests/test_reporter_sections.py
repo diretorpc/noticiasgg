@@ -66,3 +66,80 @@ def test_generate_report_passa_sections():
         result = reporter.generate_report("teste", sections=sections)
     assert isinstance(result, str)
     assert len(result) > 0
+
+
+def test_generate_report_injeta_news_feedback_no_system():
+    feedback = [
+        {"important_topics": ["Fed", "juros"], "unimportant_topics": ["eleições"]},
+    ]
+    captured_system = []
+
+    def capture_create(**kwargs):
+        captured_system.append(kwargs.get("system", ""))
+        mock_msg = MagicMock()
+        mock_msg.content = [MagicMock(text="relatório")]
+        mock_msg.stop_reason = "end_turn"
+        return mock_msg
+
+    with patch("backend.services.reporter.Anthropic") as MockA, \
+         patch("backend.services.reporter.market") as m, \
+         patch("backend.services.reporter.crypto") as c, \
+         patch("backend.services.reporter.news") as n, \
+         patch("backend.services.reporter.indicators_us") as ius, \
+         patch("backend.services.reporter.indicators_br") as ibr, \
+         patch("backend.services.reporter.commodities_br") as cb, \
+         patch("backend.services.reporter.politics_br") as pb, \
+         patch("backend.services.reporter.polls_br") as plb:
+        for mod in [m, c, n, ius, ibr, cb, pb, plb]:
+            mod.collect.return_value = {"ok": True}
+        MockA.return_value.messages.create.side_effect = capture_create
+        reporter.generate_report("relatório", news_feedback=feedback)
+    assert "PRIORIZAR" in captured_system[0]
+    assert "Fed" in captured_system[0]
+    assert "eleições" in captured_system[0]
+    assert "EVITAR" in captured_system[0]
+
+
+def test_generate_report_sem_feedback_nao_injeta():
+    captured_system = []
+
+    def capture_create(**kwargs):
+        captured_system.append(kwargs.get("system", ""))
+        mock_msg = MagicMock()
+        mock_msg.content = [MagicMock(text="relatório")]
+        mock_msg.stop_reason = "end_turn"
+        return mock_msg
+
+    with patch("backend.services.reporter.Anthropic") as MockA, \
+         patch("backend.services.reporter.market") as m, \
+         patch("backend.services.reporter.crypto") as c, \
+         patch("backend.services.reporter.news") as n, \
+         patch("backend.services.reporter.indicators_us") as ius, \
+         patch("backend.services.reporter.indicators_br") as ibr, \
+         patch("backend.services.reporter.commodities_br") as cb, \
+         patch("backend.services.reporter.politics_br") as pb, \
+         patch("backend.services.reporter.polls_br") as plb:
+        for mod in [m, c, n, ius, ibr, cb, pb, plb]:
+            mod.collect.return_value = {"ok": True}
+        MockA.return_value.messages.create.side_effect = capture_create
+        reporter.generate_report("relatório", news_feedback=None)
+    assert "PRIORIZAR" not in captured_system[0]
+
+
+def test_generate_report_feedback_nao_injeta_em_chat():
+    """news_feedback não deve afetar _SYSTEM_CHAT (quando sections={}, sem dados de mercado)."""
+    feedback = [{"important_topics": ["Fed"], "unimportant_topics": []}]
+    captured_system = []
+
+    def capture_create(**kwargs):
+        captured_system.append(kwargs.get("system", ""))
+        mock_msg = MagicMock()
+        mock_msg.content = [MagicMock(text="resposta")]
+        mock_msg.stop_reason = "end_turn"
+        return mock_msg
+
+    with patch("backend.services.reporter.Anthropic") as MockA:
+        MockA.return_value.messages.create.side_effect = capture_create
+        # sections={} → _collect_all retorna {} → _SYSTEM_CHAT
+        reporter.generate_report("olá", news_feedback=feedback, sections={})
+    assert "PRIORIZAR" not in captured_system[0]

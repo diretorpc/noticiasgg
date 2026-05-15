@@ -157,6 +157,7 @@ def generate_report(
     history: list[dict] | None = None,
     user_name: str | None = None,
     sections: dict | None = None,
+    news_feedback: list[dict] | None = None,
 ) -> str:
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     data = _collect_all(sections=sections)
@@ -170,6 +171,25 @@ def generate_report(
             f"respostas longas, ou quando quiser dar um tom pessoal — mas sem exagerar "
             f"(não em toda frase)."
         )
+
+    if data and news_feedback:
+        important: list[str] = []
+        unimportant: list[str] = []
+        for fb in news_feedback:
+            important.extend(fb.get("important_topics") or [])
+            unimportant.extend(fb.get("unimportant_topics") or [])
+        seen_i: set = set()
+        seen_u: set = set()
+        unique_important = [x for x in important if not (x in seen_i or seen_i.add(x))]
+        unique_unimportant = [x for x in unimportant if not (x in seen_u or seen_u.add(x))]
+        if unique_important or unique_unimportant:
+            fb_text = "\n\nPREFERÊNCIAS DE NOTÍCIAS DO USUÁRIO (baseado em feedbacks anteriores):"
+            if unique_important:
+                fb_text += f"\nPRIORIZAR temas: {', '.join(unique_important)}"
+            if unique_unimportant:
+                fb_text += f"\nEVITAR ou desprioritizar: {', '.join(unique_unimportant)}"
+            fb_text += "\nAo selecionar e destacar notícias no relatório, filtre de acordo com essas preferências."
+            system += fb_text
 
     ticker_data = _extract_ticker_data(user_message)
 
