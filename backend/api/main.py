@@ -194,6 +194,13 @@ async def whatsapp_webhook(request: Request):
                     admin_phone,
                     f"Novo pedido de acesso:\n\n*{push_name}* mandou: \"{text}\"\n\nResponda com o número da pessoa (ex: 5534999999999) para autorizar.",
                 )
+            try:
+                whatsapp.send_message(
+                    remote_jid,
+                    "Vou enviar uma mensagem para o admin liberar o seu acesso, só um momento! 🙏",
+                )
+            except Exception:
+                logger.warning("failed to notify pending user %s", remote_jid)
             return {"status": "ok", "reason": "pending auth"}
 
         target_phone = authorized["phone"]

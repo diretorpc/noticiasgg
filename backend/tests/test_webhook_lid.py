@@ -48,3 +48,29 @@ def test_confirmacao_preferencia_usa_remote_jid():
         resp = client.post("/api/webhook", json=_payload(text="quero só crypto"))
     assert resp.status_code == 200
     mock_send.assert_called_once_with(_REMOTE_JID, "Feito!")
+
+
+def test_usuario_nao_autorizado_recebe_confirmacao():
+    with patch("backend.api.main.supabase.get_authorized", return_value=None), \
+         patch("backend.api.main.supabase.upsert_pending"), \
+         patch("backend.api.main._admin_phone", return_value="5534999945010"), \
+         patch("backend.api.main.whatsapp.send_message") as mock_send:
+        resp = client.post("/api/webhook", json=_payload())
+    assert resp.status_code == 200
+    assert resp.json()["reason"] == "pending auth"
+    calls = [c.args[0] for c in mock_send.call_args_list]
+    assert _REMOTE_JID in calls
+
+
+def test_usuario_nao_autorizado_confirmacao_falha_silenciosa():
+    def raise_on_user_jid(number, text):
+        if number == _REMOTE_JID:
+            raise Exception("connection error")
+
+    with patch("backend.api.main.supabase.get_authorized", return_value=None), \
+         patch("backend.api.main.supabase.upsert_pending"), \
+         patch("backend.api.main._admin_phone", return_value="5534999945010"), \
+         patch("backend.api.main.whatsapp.send_message", side_effect=raise_on_user_jid):
+        resp = client.post("/api/webhook", json=_payload())
+    assert resp.status_code == 200
+    assert resp.json()["reason"] == "pending auth"
