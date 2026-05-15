@@ -25,10 +25,12 @@ async def cron_report(request: Request):
 
     for user in users:
         try:
+            feedback = supabase.get_news_feedback(user["phone"])
             text = reporter.generate_report(
                 "Gere o relatório diário.",
                 sections=user.get("sections"),
                 user_name=user.get("name"),
+                news_feedback=feedback,
             )
             whatsapp.send_message(user["phone"], text)
             sent += 1
