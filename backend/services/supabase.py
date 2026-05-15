@@ -134,3 +134,31 @@ def get_users_for_hour(hour_brt: str) -> list[dict]:
         }
         for p in prefs
     ]
+
+
+def save_news_feedback(phone: str, important: list, unimportant: list, raw: str) -> None:
+    with _client() as c:
+        r = c.post("/news_feedback", json={
+            "phone": phone,
+            "important_topics": important,
+            "unimportant_topics": unimportant,
+            "raw_feedback": raw,
+        })
+        r.raise_for_status()
+
+
+def get_news_feedback(phone: str, limit: int = 15) -> list[dict]:
+    with _client() as c:
+        r = c.get(
+            f"/news_feedback?phone=eq.{phone}"
+            f"&select=important_topics,unimportant_topics"
+            f"&order=created_at.desc&limit={limit}"
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+def delete_news_feedback(phone: str) -> None:
+    with _client() as c:
+        r = c.delete(f"/news_feedback?phone=eq.{phone}")
+        r.raise_for_status()
