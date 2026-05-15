@@ -109,7 +109,7 @@ WhatsApp (usuário)
 
 ---
 
-## Estado Atual (2026-05-14)
+## Estado Atual (2026-05-15)
 
 | Task | Status |
 |------|--------|
@@ -121,8 +121,9 @@ WhatsApp (usuário)
 | Conectar WhatsApp via QR code | ✅ |
 | Deploy na Vercel | ✅ |
 | Webhook Evolution → Vercel funcionando end-to-end | ✅ |
+| Integração Supabase (histórico de conversas) | ✅ |
+| Aprendizado de feedback de notícias | ✅ |
 | Suporte a múltiplos números (LID resolver) | ⏳ |
-| Integração Supabase (histórico) | ⏳ |
 | Frontend Next.js | ⏳ |
 
 ---
