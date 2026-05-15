@@ -25,7 +25,7 @@ Regras:
 - Termine com uma análise breve do cenário
 - Máximo 1500 caracteres
 - Se o usuário fizer pergunta específica, responda diretamente sem o formato de resumo
-- Se o usuário perguntar sobre uma ação específica que não está nos dados recebidos, use a ferramenta get_stock_data para buscar a cotação em tempo real antes de responder"""
+- OBRIGATÓRIO: se o usuário perguntar sobre cotação ou preço de uma ação específica (ex: RAIZ4, PETR4, VALE3, AAPL) que não esteja nos dados recebidos, chame IMEDIATAMENTE get_stock_data antes de responder. NUNCA diga que não tem o dado sem antes usar a ferramenta."""
 
 _SYSTEM_CHAT = """Você é um assistente financeiro brasileiro, inteligente e próximo — como um amigo que entende muito de economia, mercado e política.
 
