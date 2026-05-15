@@ -1,4 +1,5 @@
 import os
+import re
 import json
 from anthropic import Anthropic
 
@@ -77,6 +78,22 @@ _STOCK_TOOL = {
 }
 
 
+_TICKER_RE = re.compile(r"\b([A-Z]{3,5}\d{1,2})\b")
+
+
+def _extract_ticker_data(text: str) -> dict:
+    """Detecta tickers no texto e busca dados em tempo real para cada um."""
+    tickers = _TICKER_RE.findall(text.upper())
+    if not tickers:
+        return {}
+    result = {}
+    for ticker in set(tickers):
+        data = stocks.get_stock_data(ticker)
+        if "erro" not in data:
+            result[ticker] = data
+    return result
+
+
 def _collect_all(sections: dict | None = None) -> dict:
     active = sections if sections is not None else DEFAULT_SECTIONS
     return {
@@ -105,10 +122,15 @@ def generate_report(
             f"(não em toda frase)."
         )
 
-    if data:
+    ticker_data = _extract_ticker_data(user_message)
+
+    if data or ticker_data:
+        context = {**data}
+        if ticker_data:
+            context["acoes_consultadas"] = ticker_data
         user_content = (
             f"Mensagem do usuário: {user_message}\n\n"
-            f"Dados de mercado coletados agora:\n{json.dumps(data, ensure_ascii=False, default=str)}"
+            f"Dados de mercado coletados agora:\n{json.dumps(context, ensure_ascii=False, default=str)}"
         )
     else:
         user_content = f"Mensagem do usuário: {user_message}"
