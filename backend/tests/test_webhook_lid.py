@@ -74,3 +74,23 @@ def test_usuario_nao_autorizado_confirmacao_falha_silenciosa():
         resp = client.post("/api/webhook", json=_payload())
     assert resp.status_code == 200
     assert resp.json()["reason"] == "pending auth"
+
+
+def test_autorizacao_envia_boas_vindas_pelo_lid():
+    _ADMIN_PHONE = "5534999945010"
+    admin_jid = "999000111@lid"
+    admin_authorized = {"lid": admin_jid, "phone": _ADMIN_PHONE, "name": "Matheus"}
+    new_user_lid = "555888777@lid"
+    pending_user = {"lid": new_user_lid, "push_name": "Ricardim", "last_message": "oi"}
+
+    with patch("backend.api.main.supabase.get_authorized", return_value=admin_authorized), \
+         patch("backend.api.main._admin_phone", return_value=_ADMIN_PHONE), \
+         patch("backend.api.main.supabase.pop_oldest_pending", return_value=pending_user), \
+         patch("backend.api.main.supabase.add_authorized"), \
+         patch("backend.api.main.whatsapp.send_message") as mock_send:
+        resp = client.post("/api/webhook", json=_payload(remote_jid=admin_jid, text="5534999301855"))
+    assert resp.status_code == 200
+    assert resp.json()["reason"] == "admin command"
+    calls = [c.args[0] for c in mock_send.call_args_list]
+    assert new_user_lid in calls
+    assert _USER_PHONE not in calls

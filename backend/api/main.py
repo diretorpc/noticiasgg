@@ -114,7 +114,7 @@ def _handle_admin_command(text: str) -> str | None:
         if not pending:
             return None  # número solto sem pendência — trata como mensagem normal
         supabase.add_authorized(pending["lid"], phone, pending["push_name"])
-        whatsapp.send_message(phone, "Olá! Você foi autorizado a conversar com o agente Notícias GG. Pode mandar suas perguntas sobre mercado, cotações e notícias financeiras.")
+        whatsapp.send_message(pending["lid"], "Olá! Você foi autorizado a conversar com o agente Notícias GG. Pode mandar suas perguntas sobre mercado, cotações e notícias financeiras.")
         return f"Autorizado: {pending['push_name']} → {phone}"
 
     return None
