@@ -110,10 +110,12 @@ def get_stock_data(ticker: str) -> dict:
     if result:
         return result
 
-    # Fallback: Yahoo Finance (ações internacionais ou se brapi falhar)
-    yf_ticker = ticker if "." in ticker else ticker
-    result = _fetch_yahoo(yf_ticker)
-    if result:
-        return result
+    # Fallback: Yahoo Finance com .SA para ações BR (formato LETRAS+DÍGITO)
+    import re as _re
+    is_br = bool(_re.match(r"^[A-Z]{3,5}\d{1,2}$", clean))
+    for yf_ticker in ([f"{clean}.SA", clean] if is_br else [ticker]):
+        result = _fetch_yahoo(yf_ticker)
+        if result:
+            return result
 
     return {"ticker": ticker, "erro": "Ativo não encontrado ou indisponível"}
