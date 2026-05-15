@@ -14,7 +14,7 @@ ALL_SECTIONS = [
 ]
 DEFAULT_SECTIONS = {s: True for s in ALL_SECTIONS}
 
-_SYSTEM_MARKET = """Você é um analista financeiro brasileiro especialista em mercados, indicadores macroeconômicos e geopolítica.
+_SYSTEM_MARKET = """Você é um analista financeiro brasileiro especialista em mercados, indicadores macroeconômicos, geopolítica e agronegócio.
 
 Você recebe dados estruturados (JSON) com cotações de bolsas, câmbio, criptomoedas, indicadores econômicos (BR/EUA) e notícias. Sua tarefa é gerar um resumo claro, conciso e acionável em português, formatado para WhatsApp (use *negrito*, _itálico_, emojis com moderação, sem markdown de código).
 
@@ -26,16 +26,18 @@ Regras:
 - Termine com uma análise breve do cenário
 - Máximo 1500 caracteres
 - Se o usuário fizer pergunta específica, responda diretamente sem o formato de resumo
-- OBRIGATÓRIO: se o usuário perguntar sobre cotação ou preço de uma ação específica (ex: RAIZ4, PETR4, VALE3, AAPL) que não esteja nos dados recebidos, chame IMEDIATAMENTE get_stock_data antes de responder. NUNCA diga que não tem o dado sem antes usar a ferramenta."""
+- OBRIGATÓRIO: se o usuário perguntar sobre cotação ou preço de uma ação específica (ex: RAIZ4, PETR4, VALE3, AAPL) que não esteja nos dados recebidos, chame IMEDIATAMENTE get_stock_data antes de responder. NUNCA diga que não tem o dado sem antes usar a ferramenta.
+- OBRIGATÓRIO: se o usuário perguntar sobre qualquer dado do agronegócio (commodities agrícolas, pecuária, fertilizantes, defensivos, glifosato, ureia, soja, milho, boi gordo, etc.), chame get_agro_data com a categoria mais relevante. Se a informação não estiver nas categorias estruturadas (ex: preço de terra, maquinário, estimativa de safra, fungicida, inseticida), use search_agro_web."""
 
-_SYSTEM_CHAT = """Você é um assistente financeiro brasileiro, inteligente e próximo — como um amigo que entende muito de economia, mercado e política.
+_SYSTEM_CHAT = """Você é um assistente financeiro brasileiro, inteligente e próximo — como um amigo que entende muito de economia, mercado, política e agronegócio.
 
 Responda de forma natural e humana, como numa conversa de WhatsApp. Sem formatação de relatório, sem seções, sem bullets obrigatórios. Use *negrito* só quando realmente precisar destacar algo. Emojis com moderação e só quando ficarem naturais.
 
 Se for uma saudação ou bate-papo casual, responda de forma leve e amigável.
 Se for uma pergunta sobre qualquer assunto (política, economia, geografia, história, curiosidade), explique de forma clara e direta como se estivesse conversando — não como se fosse um documento ou automação.
 Seja conciso: máximo 3-4 parágrafos curtos.
-Se o usuário perguntar sobre cotação ou preço de uma ação específica, use a ferramenta get_stock_data para buscar os dados em tempo real."""
+Se o usuário perguntar sobre cotação ou preço de uma ação específica, use a ferramenta get_stock_data para buscar os dados em tempo real.
+Se o usuário perguntar sobre qualquer dado do agronegócio (commodities, pecuária, fertilizantes, defensivos, terras, maquinários, safra, etc.), use get_agro_data com a categoria mais relevante ou search_agro_web para dados não cobertos estruturalmente."""
 
 
 def _safe_collect(fn):
@@ -74,6 +76,53 @@ _STOCK_TOOL = {
             }
         },
         "required": ["ticker"],
+    },
+}
+
+
+_AGRO_DATA_TOOL = {
+    "name": "get_agro_data",
+    "description": (
+        "Busca dados estruturados do agronegócio brasileiro. "
+        "Use para qualquer pergunta sobre commodities agrícolas (soja, milho, trigo, café, algodão, açúcar, cacau, arroz, feijão, sorgo, mandioca, amendoim, laranja, aveia, cevada, canola, girassol), "
+        "pecuária (boi gordo, bezerro, vaca gorda, frango, suíno, leite, ovos), "
+        "fertilizantes (ureia, MAP, KCl) ou defensivos agrícolas (glifosato). "
+        "Para cotações internacionais use categoria 'commodities_cbot', "
+        "para preços BR use 'commodities_br', "
+        "para pecuária use 'gado', para insumos use 'fertilizantes', para agroquímicos use 'defensivos'."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "categoria": {
+                "type": "string",
+                "enum": ["commodities_cbot", "commodities_br", "gado", "fertilizantes", "defensivos"],
+                "description": "Categoria de dados agro a buscar.",
+            }
+        },
+        "required": ["categoria"],
+    },
+}
+
+_AGRO_SEARCH_TOOL = {
+    "name": "search_agro_web",
+    "description": (
+        "Busca na web dados do agronegócio não cobertos pelas categorias estruturadas. "
+        "Use para: preço de arrendamento de terras, preço de maquinários agrícolas, "
+        "estimativas de safra (CONAB), dados climáticos, notícias setoriais, "
+        "defensivos agrícolas específicos (fungicidas, inseticidas além do glifosato), "
+        "crédito rural, dados regionais específicos, ou qualquer outra informação agro "
+        "não disponível em get_agro_data."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Consulta em linguagem natural para buscar no Google.",
+            }
+        },
+        "required": ["query"],
     },
 }
 
@@ -144,7 +193,7 @@ def generate_report(
             max_tokens=2000,
             system=system,
             messages=messages,
-            tools=[_STOCK_TOOL],
+            tools=[_STOCK_TOOL, _AGRO_DATA_TOOL, _AGRO_SEARCH_TOOL],
         )
 
         if response.stop_reason == "tool_use":
@@ -152,6 +201,22 @@ def generate_report(
             for block in response.content:
                 if block.type == "tool_use" and block.name == "get_stock_data":
                     result = stocks.get_stock_data(block.input["ticker"])
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": json.dumps(result, ensure_ascii=False, default=str),
+                    })
+                elif block.type == "tool_use" and block.name == "get_agro_data":
+                    from backend.collectors import agro_br
+                    result = agro_br.collect(block.input.get("categoria"))
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": json.dumps(result, ensure_ascii=False, default=str),
+                    })
+                elif block.type == "tool_use" and block.name == "search_agro_web":
+                    from backend.services import agro_search
+                    result = agro_search.search(block.input["query"])
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
