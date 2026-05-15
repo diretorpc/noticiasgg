@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 import math
 import httpx
+from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException
 
 router = APIRouter()
@@ -53,6 +54,46 @@ def _parse_br_float(texto: str) -> float | None:
         return None
 
 
+def _fetch_noticias_agro(
+    client: httpx.Client, path: str, unidade: str, estado: str,
+    col_preco: int, col_var: int, linha_idx: int
+) -> dict:
+    try:
+        resp = client.get(NA_BASE + path, headers=HEADERS_HTML, timeout=15)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.content, "html.parser")
+        tabela = soup.find("table")
+        if not tabela:
+            return {"preco": None, "variacao_pct": None, "erro": "tabela não encontrada", "moeda": "BRL", "unidade": unidade}
+        linhas = [l for l in tabela.find_all("tr") if l.find("td")]
+        if linha_idx > len(linhas):
+            return {"preco": None, "variacao_pct": None, "erro": "linha não encontrada", "moeda": "BRL", "unidade": unidade}
+        cols = [c.get_text(strip=True) for c in linhas[linha_idx - 1].find_all("td")]
+        preco = _parse_br_float(cols[col_preco]) if col_preco < len(cols) else None
+        variacao = _parse_br_float(cols[col_var]) if col_var < len(cols) else None
+        return {"preco": preco, "variacao_pct": variacao, "moeda": "BRL", "unidade": unidade, "estado": estado}
+    except Exception as e:
+        return {"preco": None, "variacao_pct": None, "erro": str(e), "moeda": "BRL", "unidade": unidade}
+
+
+# (path, unidade, estado, col_preco, col_var, linha_idx)
+# col_preco/col_var: índice da coluna (0-based); linha_idx: linha de dados (1-based)
+# URLs 404 removidas: citros, aveia, cevada, canola, girassol
+NOTICIAS_AGRO_COMMODITIES = {
+    "Soja PR":         ("/cotacoes/soja",           "R$/sc 60kg",  "PR", 1, 2, 1),
+    "Milho SP":        ("/cotacoes/milho",           "R$/sc 60kg",  "SP", 1, 2, 1),
+    "Trigo PR":        ("/cotacoes/trigo",           "R$/ton",      "PR", 2, 3, 1),
+    "Cafe Arabica SP": ("/cotacoes/cafe",            "R$/sc 60kg",  "SP", 1, 2, 1),
+    "Algodao SP":      ("/cotacoes/algodao",         "R$/@ 15kg",   "SP", 1, 2, 1),
+    "Acucar SP":       ("/cotacoes/sucroenergetico", "R$/sc 50kg",  "SP", 1, 2, 1),
+    "Arroz RS":        ("/cotacoes/arroz",           "R$/sc 50kg",  "RS", 1, 2, 1),
+    "Feijao PR":       ("/cotacoes/feijao",          "R$/sc 60kg",  "PR", 1, 2, 1),
+    "Sorgo RS":        ("/cotacoes/sorgo",           "R$/sc 60kg",  "RS", 1, 2, 1),
+    "Mandioca MS":     ("/cotacoes/mandioca",        "R$/ton",      "MS", 2, 3, 1),
+    "Amendoim SP":     ("/cotacoes/amendoim",        "R$/sc 25kg",  "SP", 1, 2, 2),
+}
+
+
 def _fetch_yahoo(client: httpx.Client, symbol: str, unidade: str, moeda: str) -> dict:
     last_err = None
     for url_tpl in [YF_URL, YF_URL_FALLBACK]:
@@ -85,8 +126,17 @@ def collect_commodities_cbot() -> dict:
     return resultado
 
 
+def collect_commodities_br() -> dict:
+    resultado = {}
+    with httpx.Client(timeout=15, follow_redirects=True) as client:
+        for nome, (path, unidade, estado, col_preco, col_var, linha_idx) in NOTICIAS_AGRO_COMMODITIES.items():
+            resultado[nome] = _fetch_noticias_agro(client, path, unidade, estado, col_preco, col_var, linha_idx)
+    return resultado
+
+
 CATEGORIA_MAP = {
     "commodities_cbot": collect_commodities_cbot,
+    "commodities_br":   collect_commodities_br,
 }
 
 

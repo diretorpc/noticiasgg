@@ -28,3 +28,24 @@ def test_agro_br_cbot_campos():
         assert "unidade" in ativo
     com_preco = [v for v in data.values() if v.get("preco") is not None]
     assert len(com_preco) > 0, f"Nenhum ativo com preço válido: {data}"
+
+
+def test_agro_br_commodities_br_status_200():
+    resp = client.get("/api/collectors/agro-br?categoria=commodities_br")
+    assert resp.status_code == 200
+
+
+def test_agro_br_commodities_br_schema():
+    resp = client.get("/api/collectors/agro-br?categoria=commodities_br")
+    body = resp.json()
+    assert "data" in body
+    assert "commodities_br" in body["data"]
+
+
+def test_agro_br_commodities_br_campos():
+    resp = client.get("/api/collectors/agro-br?categoria=commodities_br")
+    data = resp.json()["data"]["commodities_br"]
+    assert len(data) > 0
+    # Pelo menos metade deve ter preço (tolerância a falhas de scraping)
+    com_preco = [v for v in data.values() if v.get("preco") is not None]
+    assert len(com_preco) >= len(data) // 2
