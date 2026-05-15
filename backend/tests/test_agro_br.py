@@ -53,3 +53,31 @@ def test_agro_br_commodities_br_campos():
         assert "unidade" in ativo
     com_preco = [v for v in data.values() if v.get("preco") is not None]
     assert len(com_preco) >= len(data) // 2
+
+
+def test_agro_br_gado_schema():
+    resp = client.get("/api/collectors/agro-br?categoria=gado")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "gado" in body["data"]
+    assert len(body["data"]["gado"]) > 0
+
+
+def test_agro_br_fertilizantes_schema():
+    resp = client.get("/api/collectors/agro-br?categoria=fertilizantes")
+    assert resp.status_code == 200
+    assert "fertilizantes" in resp.json()["data"]
+
+
+def test_agro_br_defensivos_schema():
+    resp = client.get("/api/collectors/agro-br?categoria=defensivos")
+    assert resp.status_code == 200
+    assert "defensivos" in resp.json()["data"]
+
+
+def test_agro_br_all_categorias():
+    resp = client.get("/api/collectors/agro-br")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    for cat in ["commodities_cbot", "commodities_br", "gado", "fertilizantes", "defensivos"]:
+        assert cat in data

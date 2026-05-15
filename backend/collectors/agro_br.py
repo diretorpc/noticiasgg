@@ -93,6 +93,21 @@ NOTICIAS_AGRO_COMMODITIES = {
     "Amendoim SP":     ("/cotacoes/amendoim",        "R$/sc 25kg",  "SP", 1, 2, 2),
 }
 
+# URLs verificadas em 2026-05-15: bezerro/vaca-gorda → 404; boi-gordo/frango/suinos já validados
+NOTICIAS_AGRO_GADO = {
+    "Boi Gordo SP":  ("/cotacoes/boi-gordo", "R$/@",   "SP", 1, 2, 1),
+    "Frango SP":     ("/cotacoes/frango",    "R$/kg",  "SP", 1, 2, 1),
+    "Suino PR":      ("/cotacoes/suinos",    "R$/kg",  "PR", 2, 3, 2),
+    "Leite SP":      ("/cotacoes/leite",     "R$/L",   "SP", 1, 2, 4),
+    "Ovos SP":       ("/cotacoes/ovos",      "R$/dz",  "SP", 2, 3, 2),
+}
+
+# URLs verificadas em 2026-05-15: ureia/map/kcl → 404; sem entradas válidas
+NOTICIAS_AGRO_FERTILIZANTES: dict = {}
+
+# URLs verificadas em 2026-05-15: glifosato → 404; sem entradas válidas
+NOTICIAS_AGRO_DEFENSIVOS: dict = {}
+
 
 def _fetch_yahoo(client: httpx.Client, symbol: str, unidade: str, moeda: str) -> dict:
     last_err = None
@@ -134,9 +149,36 @@ def collect_commodities_br() -> dict:
     return resultado
 
 
+def collect_gado() -> dict:
+    resultado = {}
+    with httpx.Client(timeout=15, follow_redirects=True) as client:
+        for nome, (path, unidade, estado, col_preco, col_var, linha_idx) in NOTICIAS_AGRO_GADO.items():
+            resultado[nome] = _fetch_noticias_agro(client, path, unidade, estado, col_preco, col_var, linha_idx)
+    return resultado
+
+
+def collect_fertilizantes() -> dict:
+    resultado = {}
+    with httpx.Client(timeout=15, follow_redirects=True) as client:
+        for nome, (path, unidade, estado, col_preco, col_var, linha_idx) in NOTICIAS_AGRO_FERTILIZANTES.items():
+            resultado[nome] = _fetch_noticias_agro(client, path, unidade, estado, col_preco, col_var, linha_idx)
+    return resultado
+
+
+def collect_defensivos() -> dict:
+    resultado = {}
+    with httpx.Client(timeout=15, follow_redirects=True) as client:
+        for nome, (path, unidade, estado, col_preco, col_var, linha_idx) in NOTICIAS_AGRO_DEFENSIVOS.items():
+            resultado[nome] = _fetch_noticias_agro(client, path, unidade, estado, col_preco, col_var, linha_idx)
+    return resultado
+
+
 CATEGORIA_MAP = {
     "commodities_cbot": collect_commodities_cbot,
     "commodities_br":   collect_commodities_br,
+    "gado":             collect_gado,
+    "fertilizantes":    collect_fertilizantes,
+    "defensivos":       collect_defensivos,
 }
 
 
