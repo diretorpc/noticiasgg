@@ -59,14 +59,14 @@ def _fetch_noticias_agro(
     col_preco: int, col_var: int, linha_idx: int
 ) -> dict:
     try:
-        resp = client.get(NA_BASE + path, headers=HEADERS_HTML, timeout=15)
+        resp = client.get(NA_BASE + path, headers=HEADERS_HTML)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.content, "html.parser")
         tabela = soup.find("table")
         if not tabela:
             return {"preco": None, "variacao_pct": None, "erro": "tabela não encontrada", "moeda": "BRL", "unidade": unidade}
-        linhas = [l for l in tabela.find_all("tr") if l.find("td")]
-        if linha_idx > len(linhas):
+        linhas = [row for row in tabela.find_all("tr") if row.find("td")]
+        if linha_idx < 1 or linha_idx > len(linhas):
             return {"preco": None, "variacao_pct": None, "erro": "linha não encontrada", "moeda": "BRL", "unidade": unidade}
         cols = [c.get_text(strip=True) for c in linhas[linha_idx - 1].find_all("td")]
         preco = _parse_br_float(cols[col_preco]) if col_preco < len(cols) else None

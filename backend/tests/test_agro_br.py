@@ -46,6 +46,10 @@ def test_agro_br_commodities_br_campos():
     resp = client.get("/api/collectors/agro-br?categoria=commodities_br")
     data = resp.json()["data"]["commodities_br"]
     assert len(data) > 0
-    # Pelo menos metade deve ter preço (tolerância a falhas de scraping)
+    for ativo in data.values():
+        assert "preco" in ativo
+        assert "variacao_pct" in ativo
+        assert "moeda" in ativo
+        assert "unidade" in ativo
     com_preco = [v for v in data.values() if v.get("preco") is not None]
     assert len(com_preco) >= len(data) // 2
