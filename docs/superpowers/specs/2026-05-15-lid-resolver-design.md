@@ -1,6 +1,6 @@
 # LID Resolver — Design Spec
 
-**Goal:** Corrigir o envio de mensagens pelo webhook para que o agente responda pelo mesmo JID pelo qual a mensagem chegou, em vez de tentar resolver o número de telefone.
+**Goal:** Corrigir o envio de mensagens pelo webhook para que o agente responda pelo mesmo JID pelo qual a mensagem chegou, em vez de tentar resolver o número de telefone. Também informar o usuário não autorizado de que o pedido de acesso foi enviado ao admin.
 
 **Architecture:** Ao receber uma mensagem, o `remoteJid` fornecido pela Evolution API é o identificador garantido para aquele usuário. O agente passa a usar esse JID diretamente como destino de todas as respostas no webhook, eliminando a dependência de resolução de número de telefone pela Evolution API.
 
@@ -37,7 +37,20 @@ Substituir todas as chamadas `whatsapp.send_message(target_phone, ...)` dentro d
 
 Manter `whatsapp.send_message(admin_phone, ...)` para notificações ao admin (já funcionam).
 
-**2. `_handle_admin_command` — mensagem de boas-vindas pelo LID**
+**2. Bloco de usuário não autorizado — confirmação ao solicitante**
+
+Após notificar o admin, enviar mensagem ao próprio usuário não autorizado usando `remote_jid`:
+
+```python
+whatsapp.send_message(
+    remote_jid,
+    "Vou enviar uma mensagem para o admin liberar o seu acesso, só um momento! 🙏",
+)
+```
+
+Esse envio não bloqueia o fluxo: se falhar (ex: número bloqueado), o webhook retorna normalmente. Envolver em `try/except` com log de warning.
+
+**3. `_handle_admin_command` — mensagem de boas-vindas pelo LID**
 
 ```python
 # Antes
@@ -70,3 +83,5 @@ Adicionar `backend/tests/test_webhook_lid.py` com testes unitários cobrindo:
 - Confirmação de feedback usa `remote_jid`
 - Admin continua usando `admin_phone`
 - Mensagem de boas-vindas na autorização usa `pending["lid"]`
+- Usuário não autorizado recebe confirmação via `remote_jid`
+- Falha ao notificar usuário não autorizado não derruba o webhook
