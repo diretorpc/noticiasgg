@@ -190,10 +190,13 @@ async def whatsapp_webhook(request: Request):
             # Não autorizado → cria pendência e notifica admin
             supabase.upsert_pending(remote_jid, push_name, text)
             if admin_phone:
-                whatsapp.send_message(
-                    admin_phone,
-                    f"Novo pedido de acesso:\n\n*{push_name}* mandou: \"{text}\"\n\nResponda com o número da pessoa (ex: 5534999999999) para autorizar.",
-                )
+                try:
+                    whatsapp.send_message(
+                        admin_phone,
+                        f"Novo pedido de acesso:\n\n*{push_name}* mandou: \"{text}\"\n\nResponda com o número da pessoa (ex: 5534999999999) para autorizar.",
+                    )
+                except Exception:
+                    logger.warning("failed to notify admin for pending user %s", remote_jid)
             try:
                 whatsapp.send_message(
                     remote_jid,
