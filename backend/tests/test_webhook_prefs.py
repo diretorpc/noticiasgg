@@ -23,6 +23,9 @@ def test_webhook_mensagem_normal_nao_salva_preferencias():
          patch("backend.api.main.supabase.save_message"), \
          patch("backend.api.main._detect_preference_intent",
                return_value={"intent": "message"}), \
+         patch("backend.api.main._detect_news_feedback",
+               return_value={"intent": "message"}), \
+         patch("backend.api.main.supabase.get_news_feedback", return_value=[]), \
          patch("backend.api.main.reporter.generate_report", return_value="resposta"), \
          patch("backend.api.main.whatsapp.send_message"), \
          patch("backend.api.main.supabase.save_preferences") as mock_save:

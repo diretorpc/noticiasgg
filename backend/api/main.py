@@ -166,6 +166,68 @@ def _detect_preference_intent(text: str, current_sections: dict | None = None) -
         return {"intent": "message"}
 
 
+_NEWS_FEEDBACK_SYSTEM = """Você é um classificador de intenções. Analise a mensagem do usuário e classifique em uma categoria.
+
+CATEGORIA 1 — Feedback sobre quais notícias foram relevantes (ex: "só a notícia X foi importante", "a notícia sobre Y foi boa, o resto não", "quero mais sobre Z, menos sobre W"):
+Responda SOMENTE com JSON:
+{
+  "intent": "news_feedback",
+  "important": ["tema ou assunto que o usuário achou relevante"],
+  "unimportant": ["tema ou assunto que o usuário achou irrelevante"]
+}
+
+CATEGORIA 2 — Pedido de reset das preferências de notícias (ex: "esquece o feedback de notícias", "apaga minhas preferências", "volta ao padrão de notícias"):
+Responda SOMENTE com JSON: {"intent": "news_reset"}
+
+CATEGORIA 3 — Qualquer outra mensagem:
+Responda SOMENTE com JSON: {"intent": "message"}
+
+Use o contexto do último relatório enviado (se disponível) para identificar os temas corretos quando o usuário referenciar "notícia 1", "segunda notícia", etc."""
+
+_FEEDBACK_CONFIRM_SYSTEM = """Você é um assistente financeiro pelo WhatsApp. O usuário acabou de dar feedback sobre quais notícias do relatório foram relevantes. Confirme o recebimento de forma amigável e natural (2-3 linhas, tom de conversa de WhatsApp) e faça UMA pergunta de refinamento para entender melhor a preferência. Use *negrito* quando útil, emojis com moderação."""
+
+
+def _detect_news_feedback(text: str, last_report: str | None = None) -> dict:
+    messages = []
+    if last_report:
+        messages.append({"role": "assistant", "content": last_report})
+    messages.append({"role": "user", "content": text})
+    try:
+        client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            system=_NEWS_FEEDBACK_SYSTEM,
+            messages=messages,
+        )
+        result = json.loads(response.content[0].text)
+        if result.get("intent") == "news_feedback":
+            if not result.get("important") and not result.get("unimportant"):
+                return {"intent": "message"}
+        return result
+    except Exception:
+        return {"intent": "message"}
+
+
+def _generate_feedback_confirmation(important: list, unimportant: list) -> str:
+    parts = []
+    if important:
+        parts.append(f"Tópicos que o usuário achou relevantes: {', '.join(important)}")
+    if unimportant:
+        parts.append(f"Tópicos que o usuário achou irrelevantes: {', '.join(unimportant)}")
+    try:
+        client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            system=_FEEDBACK_CONFIRM_SYSTEM,
+            messages=[{"role": "user", "content": "\n".join(parts)}],
+        )
+        return response.content[0].text
+    except Exception:
+        return "Anotado! Vou priorizar essas preferências nos próximos relatórios."
+
+
 @app.post("/api/webhook")
 async def whatsapp_webhook(request: Request):
     payload = await request.json()
@@ -226,10 +288,49 @@ async def whatsapp_webhook(request: Request):
         history = supabase.get_history(target_phone, limit=10)
         anthropic_history = [{"role": h["role"], "content": h["content"]} for h in history]
 
+        # Detectar feedback/reset de notícias (usa último relatório como contexto)
+        last_report = next((h["content"] for h in reversed(history) if h["role"] == "assistant"), None)
+        news_intent = _detect_news_feedback(text, last_report=last_report)
+
+        if news_intent.get("intent") == "news_feedback":
+            try:
+                supabase.save_news_feedback(
+                    target_phone,
+                    news_intent.get("important", []),
+                    news_intent.get("unimportant", []),
+                    text,
+                )
+            except Exception:
+                logger.exception("save_news_feedback failed")
+            confirmation = _generate_feedback_confirmation(
+                news_intent.get("important", []),
+                news_intent.get("unimportant", []),
+            )
+            whatsapp.send_message(target_phone, confirmation)
+            return {"status": "ok", "reason": "news_feedback_saved"}
+
+        if news_intent.get("intent") == "news_reset":
+            try:
+                supabase.delete_news_feedback(target_phone)
+            except Exception:
+                logger.exception("delete_news_feedback failed")
+            whatsapp.send_message(
+                target_phone,
+                "Preferências de notícias apagadas! Voltarei a enviar a curadoria padrão nos próximos relatórios.",
+            )
+            return {"status": "ok", "reason": "news_feedback_reset"}
+
         sections = current_sections if _needs_market_data(text) else {}
 
+        news_feedback = supabase.get_news_feedback(target_phone)
         supabase.save_message(target_phone, "user", text)
-        reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"), sections=sections)
+        reply = reporter.generate_report(
+            text,
+            history=anthropic_history,
+            user_name=authorized.get("name"),
+            sections=sections,
+            news_feedback=news_feedback,
+        )
         supabase.save_message(target_phone, "assistant", reply)
 
         whatsapp.send_message(target_phone, reply)
