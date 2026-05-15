@@ -152,6 +152,7 @@ Ao selecionar e destacar notícias no relatório, filtre de acordo com essas pre
 | `backend/services/supabase.py` | +3 funções: `save_news_feedback`, `get_news_feedback`, `delete_news_feedback` |
 | `backend/api/main.py` | +system prompt `_NEWS_FEEDBACK_SYSTEM`, +`_detect_news_feedback()`, webhook atualizado |
 | `backend/services/reporter.py` | +parâmetro `news_feedback`, injeção no system prompt |
+| `backend/api/cron_report.py` | passar `news_feedback=supabase.get_news_feedback(phone)` no loop do cron diário |
 | Supabase (migration) | Nova tabela `news_feedback` + índice |
 
 ---
