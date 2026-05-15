@@ -20,7 +20,7 @@ def test_send_report_sem_preferencias_envia_texto_n8n():
     assert resp.json()["status"] == "ok"
     mock_send.assert_called_once()
     args = mock_send.call_args[0]
-    assert "Matheus" in args[1]
+    assert args[1] == "Relatório do n8n aqui."
 
 
 def test_send_report_com_horario_customizado_pula():

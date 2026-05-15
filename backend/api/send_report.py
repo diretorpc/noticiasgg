@@ -44,11 +44,7 @@ async def send_report(payload: SendReportPayload):
                 logger.warning("generate_report failed for %s, falling back to n8n text", number)
                 text = n8n_text
         else:
-            if user_name:
-                primeiro_nome = user_name.split()[0]
-                text = f"Bom dia, *{primeiro_nome}!* 👋\n\n{n8n_text}"
-            else:
-                text = n8n_text
+            text = n8n_text
 
         whatsapp.send_message(number, text)
         return {"status": "ok"}
