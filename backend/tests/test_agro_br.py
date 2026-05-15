@@ -66,13 +66,18 @@ def test_agro_br_gado_schema():
 def test_agro_br_fertilizantes_schema():
     resp = client.get("/api/collectors/agro-br?categoria=fertilizantes")
     assert resp.status_code == 200
-    assert "fertilizantes" in resp.json()["data"]
+    data = resp.json()["data"]
+    assert "fertilizantes" in data
+    # sem fontes ativas no Notícias Agrícolas — cobertura via search_agro_web
+    assert isinstance(data["fertilizantes"], dict)
 
 
 def test_agro_br_defensivos_schema():
     resp = client.get("/api/collectors/agro-br?categoria=defensivos")
     assert resp.status_code == 200
-    assert "defensivos" in resp.json()["data"]
+    data = resp.json()["data"]
+    assert "defensivos" in data
+    assert isinstance(data["defensivos"], dict)
 
 
 def test_agro_br_all_categorias():

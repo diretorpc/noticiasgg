@@ -158,6 +158,8 @@ def collect_gado() -> dict:
 
 
 def collect_fertilizantes() -> dict:
+    if not NOTICIAS_AGRO_FERTILIZANTES:
+        return {}
     resultado = {}
     with httpx.Client(timeout=15, follow_redirects=True) as client:
         for nome, (path, unidade, estado, col_preco, col_var, linha_idx) in NOTICIAS_AGRO_FERTILIZANTES.items():
@@ -166,6 +168,8 @@ def collect_fertilizantes() -> dict:
 
 
 def collect_defensivos() -> dict:
+    if not NOTICIAS_AGRO_DEFENSIVOS:
+        return {}
     resultado = {}
     with httpx.Client(timeout=15, follow_redirects=True) as client:
         for nome, (path, unidade, estado, col_preco, col_var, linha_idx) in NOTICIAS_AGRO_DEFENSIVOS.items():
