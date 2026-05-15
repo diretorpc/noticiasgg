@@ -57,9 +57,9 @@ _COLLECTORS = {
 _STOCK_TOOL = {
     "name": "get_stock_data",
     "description": (
-        "Busca dados em tempo real de qualquer ação, ETF ou índice no Yahoo Finance. "
+        "Busca dados em tempo real de qualquer ação, ETF ou índice. "
         "Use quando o usuário perguntar sobre uma empresa ou ativo específico não coberto pelos dados gerais. "
-        "Para ações brasileiras, sempre adicione .SA ao ticker (ex: RAIZ4.SA, PETR4.SA, VALE3.SA). "
+        "Para ações brasileiras, use o ticker sem sufixo (ex: RAIZ4, PETR4, VALE3, ITUB4). "
         "Para ações americanas, use o ticker direto (ex: AAPL, MSFT, TSLA)."
     ),
     "input_schema": {
@@ -67,7 +67,7 @@ _STOCK_TOOL = {
         "properties": {
             "ticker": {
                 "type": "string",
-                "description": "Símbolo do ativo no Yahoo Finance. Ex: 'RAIZ4.SA', 'PETR4.SA', 'AAPL'.",
+                "description": "Símbolo do ativo. Para BR: 'RAIZ4', 'PETR4'. Para EUA: 'AAPL', 'MSFT'.",
             }
         },
         "required": ["ticker"],
