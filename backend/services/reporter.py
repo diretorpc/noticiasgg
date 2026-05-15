@@ -4,7 +4,7 @@ from anthropic import Anthropic
 
 from backend.collectors import (
     market, crypto, indicators_us, indicators_br, news,
-    commodities_br, politics_br, polls_br,
+    commodities_br, politics_br, polls_br, stocks,
 )
 
 ALL_SECTIONS = [
@@ -54,6 +54,27 @@ _COLLECTORS = {
 }
 
 
+_STOCK_TOOL = {
+    "name": "get_stock_data",
+    "description": (
+        "Busca dados em tempo real de qualquer ação, ETF ou índice no Yahoo Finance. "
+        "Use quando o usuário perguntar sobre uma empresa ou ativo específico não coberto pelos dados gerais. "
+        "Para ações brasileiras, sempre adicione .SA ao ticker (ex: RAIZ4.SA, PETR4.SA, VALE3.SA). "
+        "Para ações americanas, use o ticker direto (ex: AAPL, MSFT, TSLA)."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "ticker": {
+                "type": "string",
+                "description": "Símbolo do ativo no Yahoo Finance. Ex: 'RAIZ4.SA', 'PETR4.SA', 'AAPL'.",
+            }
+        },
+        "required": ["ticker"],
+    },
+}
+
+
 def _collect_all(sections: dict | None = None) -> dict:
     active = sections if sections is not None else DEFAULT_SECTIONS
     return {
@@ -93,11 +114,29 @@ def generate_report(
     messages = list(history or [])
     messages.append({"role": "user", "content": user_content})
 
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2000,
-        system=system,
-        messages=messages,
-    )
+    while True:
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2000,
+            system=system,
+            messages=messages,
+            tools=[_STOCK_TOOL],
+        )
 
-    return response.content[0].text
+        if response.stop_reason == "tool_use":
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use" and block.name == "get_stock_data":
+                    result = stocks.get_stock_data(block.input["ticker"])
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": json.dumps(result, ensure_ascii=False, default=str),
+                    })
+            messages.append({"role": "assistant", "content": response.content})
+            messages.append({"role": "user", "content": tool_results})
+        else:
+            for block in response.content:
+                if hasattr(block, "text"):
+                    return block.text
+            return ""
