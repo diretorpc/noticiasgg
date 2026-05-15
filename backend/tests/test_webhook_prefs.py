@@ -54,7 +54,7 @@ def test_webhook_preferencia_salva_e_responde():
         report_time=intent_result["report_time"],
     )
     mock_send.assert_called_once_with(
-        "5534999301855",
+        "553499930185@lid",
         "Feito! Seu relatório vai incluir apenas notícias e criptomoedas."
     )
 

@@ -197,6 +197,7 @@ async def whatsapp_webhook(request: Request):
             return {"status": "ok", "reason": "pending auth"}
 
         target_phone = authorized["phone"]
+        target_jid = remote_jid
         is_admin = target_phone == admin_phone
 
         if is_admin:
@@ -219,7 +220,7 @@ async def whatsapp_webhook(request: Request):
                 if new_sections is not None or new_time is not None:
                     supabase.save_preferences(target_phone, sections=new_sections, report_time=new_time)
             reply = intent.get("reply", "Preferências atualizadas!")
-            whatsapp.send_message(target_phone, reply)
+            whatsapp.send_message(target_jid, reply)
             return {"status": "ok", "reason": "preference_updated"}
 
         # Buscar histórico e gerar resposta
@@ -232,7 +233,7 @@ async def whatsapp_webhook(request: Request):
         reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"), sections=sections)
         supabase.save_message(target_phone, "assistant", reply)
 
-        whatsapp.send_message(target_phone, reply)
+        whatsapp.send_message(target_jid, reply)
         return {"status": "ok"}
     except Exception as e:
         logger.exception("webhook error")
