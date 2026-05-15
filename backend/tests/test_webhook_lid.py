@@ -19,7 +19,7 @@ def _payload(remote_jid=_REMOTE_JID, text="olá"):
     }
 
 
-def test_resposta_normal_usa_remote_jid():
+def test_resposta_normal_usa_phone():
     with patch("backend.api.main.supabase.get_authorized", return_value=_AUTHORIZED), \
          patch("backend.api.main.supabase.get_preferences", return_value=None), \
          patch("backend.api.main._detect_preference_intent", return_value={"intent": "message"}), \
@@ -29,10 +29,10 @@ def test_resposta_normal_usa_remote_jid():
          patch("backend.api.main.whatsapp.send_message") as mock_send:
         resp = client.post("/api/webhook", json=_payload())
     assert resp.status_code == 200
-    mock_send.assert_called_once_with(_REMOTE_JID, "resposta")
+    mock_send.assert_called_once_with(_USER_PHONE, "resposta")
 
 
-def test_confirmacao_preferencia_usa_remote_jid():
+def test_confirmacao_preferencia_usa_phone():
     intent = {
         "intent": "preference",
         "sections": None,
@@ -47,7 +47,7 @@ def test_confirmacao_preferencia_usa_remote_jid():
          patch("backend.api.main.whatsapp.send_message") as mock_send:
         resp = client.post("/api/webhook", json=_payload(text="quero só crypto"))
     assert resp.status_code == 200
-    mock_send.assert_called_once_with(_REMOTE_JID, "Feito!")
+    mock_send.assert_called_once_with(_USER_PHONE, "Feito!")
 
 
 def test_usuario_nao_autorizado_recebe_confirmacao():
