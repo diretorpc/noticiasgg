@@ -98,3 +98,19 @@ def test_detect_news_feedback_fallback_em_excecao():
     with patch("backend.api.main.Anthropic", side_effect=Exception("network error")):
         result = _detect_news_feedback("só a notícia do Fed foi boa")
     assert result["intent"] == "message"
+
+
+def test_detect_news_feedback_com_last_report_nao_quebra_api():
+    """last_report deve ser injetado no system, não como primeiro assistant message."""
+    from backend.api.main import _detect_news_feedback
+    from unittest.mock import MagicMock
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock(text='{"intent": "news_feedback", "important": ["Fed"], "unimportant": []}')]
+    with patch("backend.api.main.Anthropic") as MockA:
+        MockA.return_value.messages.create.return_value = mock_response
+        result = _detect_news_feedback("só a primeira foi boa", last_report="Relatório de ontem...")
+    # Verificar que messages[0] é "user" (não "assistant")
+    call_kwargs = MockA.return_value.messages.create.call_args[1]
+    assert call_kwargs["messages"][0]["role"] == "user"
+    assert len(call_kwargs["messages"]) == 1
+    assert result["intent"] == "news_feedback"

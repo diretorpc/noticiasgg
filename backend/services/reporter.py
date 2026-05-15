@@ -182,6 +182,8 @@ def generate_report(
         seen_u: set = set()
         unique_important = [x for x in important if not (x in seen_i or seen_i.add(x))]
         unique_unimportant = [x for x in unimportant if not (x in seen_u or seen_u.add(x))]
+        important_set = set(unique_important)
+        unique_unimportant = [x for x in unique_unimportant if x not in important_set]
         if unique_important or unique_unimportant:
             fb_text = "\n\nPREFERÊNCIAS DE NOTÍCIAS DO USUÁRIO (baseado em feedbacks anteriores):"
             if unique_important:

@@ -188,16 +188,16 @@ _FEEDBACK_CONFIRM_SYSTEM = """Você é um assistente financeiro pelo WhatsApp. O
 
 
 def _detect_news_feedback(text: str, last_report: str | None = None) -> dict:
-    messages = []
+    system = _NEWS_FEEDBACK_SYSTEM
     if last_report:
-        messages.append({"role": "assistant", "content": last_report})
-    messages.append({"role": "user", "content": text})
+        system += f"\n\nÚltimo relatório enviado ao usuário:\n{last_report}"
+    messages = [{"role": "user", "content": text}]
     try:
         client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=300,
-            system=_NEWS_FEEDBACK_SYSTEM,
+            system=system,
             messages=messages,
         )
         result = json.loads(response.content[0].text)
