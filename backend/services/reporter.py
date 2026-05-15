@@ -222,6 +222,13 @@ def generate_report(
                         "tool_use_id": block.id,
                         "content": json.dumps(result, ensure_ascii=False, default=str),
                     })
+                else:
+                    if block.type == "tool_use":
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": json.dumps({"erro": f"ferramenta desconhecida: {block.name}"}),
+                        })
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": tool_results})
         else:
