@@ -1,4 +1,5 @@
 import logging
+import re
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -7,6 +8,16 @@ from backend.services import reporter, whatsapp, supabase
 
 logger = logging.getLogger("noticiasgg")
 router = APIRouter()
+
+_GREETING_RE = re.compile(r'((?:Bom dia|Boa tarde|Boa noite),\s+)([\w.()]+)([!,]?)')
+
+
+def _personalize(text: str, user_name: str) -> str:
+    """Substitui o nome nas saudações do texto gerado pelo n8n."""
+    if not user_name:
+        return text
+    primeiro_nome = user_name.split()[0]
+    return _GREETING_RE.sub(lambda m: m.group(1) + primeiro_nome + m.group(3), text)
 
 
 class TextMessage(BaseModel):
@@ -42,9 +53,9 @@ async def send_report(payload: SendReportPayload):
                 )
             except Exception:
                 logger.warning("generate_report failed for %s, falling back to n8n text", number)
-                text = n8n_text
+                text = _personalize(n8n_text, user_name)
         else:
-            text = n8n_text
+            text = _personalize(n8n_text, user_name)
 
         whatsapp.send_message(number, text)
         return {"status": "ok"}

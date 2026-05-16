@@ -84,6 +84,20 @@ def test_send_report_reporter_error_usa_fallback():
     mock_send.assert_called_once_with("5534999945010", "Relatório do n8n aqui.")
 
 
+def test_send_report_personaliza_saudacao_para_outro_usuario():
+    n8n_text = "Bom dia, Matheus | 16/05/2026 07:00\n\nDados de mercado.\n\nBom dia, Matheus! Análise aqui."
+    payload = {"number": "5516991016898", "textMessage": {"text": n8n_text}}
+    with patch("backend.api.send_report.supabase.get_preferences", return_value=None), \
+         patch("backend.api.send_report.supabase.get_authorized_by_phone",
+               return_value={"phone": "5516991016898", "name": "G.Mouro"}), \
+         patch("backend.api.send_report.whatsapp.send_message") as mock_send:
+        resp = client.post("/api/send-report", json=payload)
+    assert resp.status_code == 200
+    args = mock_send.call_args[0]
+    assert "G.Mouro" in args[1]
+    assert "Matheus" not in args[1]
+
+
 def test_send_report_payload_invalido_retorna_422():
     resp = client.post("/api/send-report", json={"number": "5534999945010"})
     assert resp.status_code == 422
