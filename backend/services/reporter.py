@@ -27,7 +27,8 @@ Regras:
 - Máximo 1500 caracteres
 - Se o usuário fizer pergunta específica, responda diretamente sem o formato de resumo
 - OBRIGATÓRIO: se o usuário perguntar sobre cotação ou preço de uma ação específica (ex: RAIZ4, PETR4, VALE3, AAPL) que não esteja nos dados recebidos, chame IMEDIATAMENTE get_stock_data antes de responder. NUNCA diga que não tem o dado sem antes usar a ferramenta.
-- OBRIGATÓRIO: se o usuário perguntar sobre qualquer dado do agronegócio (commodities agrícolas, pecuária, fertilizantes, defensivos, glifosato, ureia, soja, milho, boi gordo, etc.), chame get_agro_data com a categoria mais relevante. Se a informação não estiver nas categorias estruturadas (ex: preço de terra, maquinário, estimativa de safra, fungicida, inseticida), use search_agro_web."""
+- OBRIGATÓRIO: se o usuário perguntar sobre qualquer dado do agronegócio (commodities agrícolas, pecuária, fertilizantes, defensivos, glifosato, ureia, soja, milho, boi gordo, etc.), chame get_agro_data com a categoria mais relevante. Se a informação não estiver nas categorias estruturadas (ex: preço de terra, maquinário, estimativa de safra, fungicida, inseticida), use search_agro_web.
+- OBRIGATÓRIO: se o usuário perguntar sobre qualquer dado que não esteja nos dados coletados (preços CEPEA, dados IBGE, CONAB, notícias específicas, informações de empresas, eventos, etc.), use search_web antes de responder. NUNCA diga que não tem acesso a um dado sem antes tentar buscar na web."""
 
 _SYSTEM_CHAT = """Você é um assistente financeiro brasileiro, inteligente e próximo — como um amigo que entende muito de economia, mercado, política e agronegócio.
 
@@ -37,7 +38,8 @@ Se for uma saudação ou bate-papo casual, responda de forma leve e amigável.
 Se for uma pergunta sobre qualquer assunto (política, economia, geografia, história, curiosidade), explique de forma clara e direta como se estivesse conversando — não como se fosse um documento ou automação.
 Seja conciso: máximo 3-4 parágrafos curtos.
 Se o usuário perguntar sobre cotação ou preço de uma ação específica, use a ferramenta get_stock_data para buscar os dados em tempo real.
-Se o usuário perguntar sobre qualquer dado do agronegócio (commodities, pecuária, fertilizantes, defensivos, terras, maquinários, safra, etc.), use get_agro_data com a categoria mais relevante ou search_agro_web para dados não cobertos estruturalmente."""
+Se o usuário perguntar sobre qualquer dado do agronegócio (commodities, pecuária, fertilizantes, defensivos, terras, maquinários, safra, etc.), use get_agro_data com a categoria mais relevante ou search_agro_web para dados não cobertos estruturalmente.
+Se o usuário perguntar sobre qualquer informação que você não tem certeza ou que pode estar desatualizada (preços, notícias, dados de empresas, eventos, leis, sites específicos como CEPEA, IBGE, CONAB), use search_web para buscar em tempo real antes de responder."""
 
 
 def _safe_collect(fn):
@@ -101,6 +103,27 @@ _AGRO_DATA_TOOL = {
             }
         },
         "required": ["categoria"],
+    },
+}
+
+_WEB_SEARCH_TOOL = {
+    "name": "search_web",
+    "description": (
+        "Busca qualquer informação na web em tempo real. "
+        "Use quando o usuário perguntar sobre dados que não estão nos coletores fixos: "
+        "preços do CEPEA, cotações regionais, dados do IBGE, CONAB, Banco Central, "
+        "notícias recentes, informações de empresas, eventos, leis, qualquer site. "
+        "Prefira esta ferramenta a responder com dados desatualizados do treinamento."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Consulta de busca em linguagem natural.",
+            }
+        },
+        "required": ["query"],
     },
 }
 
@@ -193,7 +216,7 @@ def generate_report(
             max_tokens=2000,
             system=system,
             messages=messages,
-            tools=[_STOCK_TOOL, _AGRO_DATA_TOOL, _AGRO_SEARCH_TOOL],
+            tools=[_STOCK_TOOL, _AGRO_DATA_TOOL, _AGRO_SEARCH_TOOL, _WEB_SEARCH_TOOL],
         )
 
         if response.stop_reason == "tool_use":
@@ -217,6 +240,14 @@ def generate_report(
                 elif block.type == "tool_use" and block.name == "search_agro_web":
                     from backend.services import agro_search
                     result = agro_search.search(block.input["query"])
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": json.dumps(result, ensure_ascii=False, default=str),
+                    })
+                elif block.type == "tool_use" and block.name == "search_web":
+                    from backend.services import web_search
+                    result = web_search.search(block.input["query"])
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
