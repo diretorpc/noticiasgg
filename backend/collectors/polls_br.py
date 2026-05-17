@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 import httpx
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+from backend.services import supabase as supa
 
 load_dotenv()
 
@@ -51,7 +52,7 @@ def extract_poll_data(html: str) -> dict | None:
         return None
 
     CANDIDATOS = [
-        "Lula", "Flávio Bolsonaro", "Flavio Bolsonaro", "Jair Bolsonaro",
+        "Lula", "Flávio Bolsonaro", "Flavio Bolsonaro",
         "Ronaldo Caiado", "Romeu Zema", "Renan Santos", "Augusto Cury",
         "Cabo Daciolo", "Samara Martins", "Aldo Rebelo", "Hertz Dias",
         "Tarcísio de Freitas", "Tarcisio de Freitas", "Ratinho Junior",
@@ -60,13 +61,25 @@ def extract_poll_data(html: str) -> dict | None:
 
     candidates = {}
     for candidato in CANDIDATOS:
+        # nome antes da porcentagem: "Flávio Bolsonaro ... 45%"
         pattern = re.compile(
-            re.escape(candidato) + r"[^\d]{0,30}?(\d{1,2})%",
+            re.escape(candidato) + r"[^\d]{0,40}?(\d{1,2})%",
             re.IGNORECASE
         )
         match = pattern.search(text)
+        if not match:
+            # porcentagem antes do nome: "45% ... Flávio Bolsonaro"
+            pattern_rev = re.compile(
+                r"(\d{1,2})%[^\d]{0,40}?" + re.escape(candidato),
+                re.IGNORECASE
+            )
+            match = pattern_rev.search(text)
         if match:
-            candidates[candidato] = f"{match.group(1)}%"
+            # normaliza variantes sem acento para a forma acentuada
+            nome_final = candidato.replace("Flavio Bolsonaro", "Flávio Bolsonaro")
+            nome_final = nome_final.replace("Tarcisio de Freitas", "Tarcísio de Freitas")
+            if nome_final not in candidates:
+                candidates[nome_final] = f"{match.group(1)}%"
 
     if not candidates:
         return None
@@ -102,6 +115,17 @@ def collect() -> list[dict]:
                 resultados.append(data)
         except Exception:
             continue
+
+    if resultados:
+        try:
+            supa.save_polls(resultados)
+        except Exception:
+            pass
+    else:
+        try:
+            resultados = supa.get_polls()
+        except Exception:
+            pass
 
     return resultados
 

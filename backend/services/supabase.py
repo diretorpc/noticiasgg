@@ -113,6 +113,29 @@ def delete_preferences(phone: str) -> None:
         r.raise_for_status()
 
 
+def save_polls(polls: list[dict]) -> None:
+    with _client() as c:
+        for poll in polls:
+            c.post(
+                "/polls_cache",
+                json={
+                    "instituto": poll["instituto"],
+                    "data_pesquisa": poll.get("data_pesquisa"),
+                    "candidatos": poll["candidatos"],
+                    "fonte_url": poll.get("fonte_url"),
+                    "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                },
+                headers={"Prefer": "resolution=merge-duplicates,return=representation"},
+            )
+
+
+def get_polls() -> list[dict]:
+    with _client() as c:
+        r = c.get("/polls_cache?select=instituto,data_pesquisa,candidatos,fonte_url&order=updated_at.desc")
+        r.raise_for_status()
+        return r.json()
+
+
 def get_users_for_hour(hour_brt: str) -> list[dict]:
     if not re.fullmatch(r"\d{2}:00", hour_brt):
         return []
