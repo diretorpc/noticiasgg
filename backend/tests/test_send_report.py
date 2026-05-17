@@ -98,6 +98,24 @@ def test_send_report_personaliza_saudacao_para_outro_usuario():
     assert "Matheus" not in args[1]
 
 
+def test_send_report_lookup_normaliza_numero_sem_9():
+    """n8n envia número sem o 9 extra (12 dígitos), mas DB tem com 9 (13 dígitos)."""
+    n8n_text = "Bom dia, Matheus | 16/05/2026 07:00\n\nDados.\n\nBom dia, Matheus! Análise."
+    payload = {"number": "553496568291", "textMessage": {"text": n8n_text}}
+
+    def fake_lookup(phone):
+        return {"phone": "5534996568291", "name": "Cassiano Ribeiro"} if phone == "5534996568291" else None
+
+    with patch("backend.api.send_report.supabase.get_preferences", return_value=None), \
+         patch("backend.api.send_report.supabase.get_authorized_by_phone", side_effect=fake_lookup), \
+         patch("backend.api.send_report.whatsapp.send_message") as mock_send:
+        resp = client.post("/api/send-report", json=payload)
+    assert resp.status_code == 200
+    args = mock_send.call_args[0]
+    assert "Cassiano" in args[1]
+    assert "Matheus" not in args[1]
+
+
 def test_send_report_payload_invalido_retorna_422():
     resp = client.post("/api/send-report", json={"number": "5534999945010"})
     assert resp.status_code == 422

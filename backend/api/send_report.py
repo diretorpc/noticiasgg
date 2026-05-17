@@ -20,6 +20,20 @@ def _personalize(text: str, user_name: str) -> str:
     return _GREETING_RE.sub(lambda m: m.group(1) + primeiro_nome + m.group(3), text)
 
 
+def _lookup_user(number: str) -> dict | None:
+    """Busca usuário pelo telefone, tentando formatos brasileiros com e sem o 9 extra."""
+    user = supabase.get_authorized_by_phone(number)
+    if user:
+        return user
+    # Números brasileiros (55 + DDD + número): tenta adicionar ou remover o 9 extra
+    if number.startswith("55"):
+        if len(number) == 12:  # sem o 9 extra → tenta com
+            user = supabase.get_authorized_by_phone(number[:4] + "9" + number[4:])
+        elif len(number) == 13:  # com o 9 extra → tenta sem
+            user = supabase.get_authorized_by_phone(number[:4] + number[5:])
+    return user
+
+
 class TextMessage(BaseModel):
     text: str
 
@@ -41,8 +55,9 @@ async def send_report(payload: SendReportPayload):
         if prefs and prefs.get("report_time"):
             return {"status": "skipped", "reason": "custom_time"}
 
-        user = supabase.get_authorized_by_phone(number)
+        user = _lookup_user(number)
         user_name = (user.get("name") or "").strip() if user else ""
+        logger.info("send_report: number=%s user_name=%r", number, user_name)
 
         if prefs and prefs.get("sections"):
             try:
