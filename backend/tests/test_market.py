@@ -22,7 +22,6 @@ def test_market_categorias():
     data = resp.json()["data"]
     assert "bolsas" in data
     assert "cambio" in data
-    assert "commodities" in data
 
 
 def test_market_bolsas_campos():

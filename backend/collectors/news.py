@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException
 import httpx
 from dotenv import load_dotenv
@@ -8,10 +8,9 @@ load_dotenv()
 
 router = APIRouter()
 
-NEWSAPI_URL = "https://newsapi.org/v2/top-headlines"
+NEWSAPI_EVERYTHING = "https://newsapi.org/v2/everything"
+NEWSAPI_HEADLINES = "https://newsapi.org/v2/top-headlines"
 
-# IDs de fontes suportados pela NewsAPI (plano free exige sources ou country)
-# Mapeados a partir da lista de fontes confiáveis do projeto
 SOURCES_EN = ",".join([
     "reuters",
     "bloomberg",
@@ -19,14 +18,26 @@ SOURCES_EN = ",".join([
     "financial-times",
     "the-economist",
     "cnbc",
-    "cnn",
-    "bbc-news",
-    "the-guardian-uk",
     "forbes",
 ])
 
-# Notícias BR via categoria business
-PARAMS_BR = {"country": "br", "category": "business", "pageSize": 10}
+_FINANCE_QUERY = (
+    "economy OR market OR inflation OR stocks OR bonds OR commodities "
+    "OR GDP OR Fed OR interest rate OR trade OR dollar OR oil"
+)
+
+_MAX_AGE = timedelta(hours=48)
+
+
+def _is_fresh(published_at: str | None) -> bool:
+    """Retorna False se o artigo tiver mais de 48h."""
+    if not published_at:
+        return True
+    try:
+        dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+        return datetime.now(timezone.utc) - dt <= _MAX_AGE
+    except Exception:
+        return True
 
 
 def collect() -> list[dict]:
@@ -37,27 +48,50 @@ def collect() -> list[dict]:
     artigos = []
     vistos = set()
 
-    queries = [
-        {"sources": SOURCES_EN, "pageSize": 15},
-        PARAMS_BR,
-    ]
-
     with httpx.Client(timeout=15) as client:
-        for params in queries:
-            resp = client.get(NEWSAPI_URL, params={"apiKey": api_key, **params})
-            if resp.status_code != 200:
-                continue
-
-            for a in resp.json().get("articles", []):
+        # EN: /everything filtrado por fontes financeiras + keywords
+        resp_en = client.get(NEWSAPI_EVERYTHING, params={
+            "apiKey": api_key,
+            "sources": SOURCES_EN,
+            "q": _FINANCE_QUERY,
+            "language": "en",
+            "sortBy": "publishedAt",
+            "pageSize": 15,
+        })
+        if resp_en.status_code == 200:
+            for a in resp_en.json().get("articles", []):
                 url = a.get("url", "")
-                if url in vistos:
+                published_at = a.get("publishedAt")
+                if url in vistos or not _is_fresh(published_at):
                     continue
                 vistos.add(url)
                 artigos.append({
                     "titulo": a.get("title"),
                     "fonte": (a.get("source") or {}).get("name"),
                     "url": url,
-                    "publicado_em": a.get("publishedAt"),
+                    "publicado_em": published_at,
+                    "resumo": a.get("description"),
+                })
+
+        # BR: top-headlines categoria business
+        resp_br = client.get(NEWSAPI_HEADLINES, params={
+            "apiKey": api_key,
+            "country": "br",
+            "category": "business",
+            "pageSize": 10,
+        })
+        if resp_br.status_code == 200:
+            for a in resp_br.json().get("articles", []):
+                url = a.get("url", "")
+                published_at = a.get("publishedAt")
+                if url in vistos or not _is_fresh(published_at):
+                    continue
+                vistos.add(url)
+                artigos.append({
+                    "titulo": a.get("title"),
+                    "fonte": (a.get("source") or {}).get("name"),
+                    "url": url,
+                    "publicado_em": published_at,
                     "resumo": a.get("description"),
                 })
 

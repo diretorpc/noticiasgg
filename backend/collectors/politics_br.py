@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException
 import httpx
 from dotenv import load_dotenv
@@ -9,6 +9,7 @@ load_dotenv()
 router = APIRouter()
 
 NEWSAPI_URL = "https://newsapi.org/v2/everything"
+_MAX_AGE = timedelta(hours=72)
 
 QUERIES = [
     "política Brasil eleições 2026",
@@ -42,8 +43,16 @@ def collect() -> list[dict]:
 
             for a in resp.json().get("articles", []):
                 url = a.get("url", "")
+                published_at = a.get("publishedAt")
                 if url in vistos:
                     continue
+                if published_at:
+                    try:
+                        dt = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+                        if datetime.now(timezone.utc) - dt > _MAX_AGE:
+                            continue
+                    except Exception:
+                        pass
                 vistos.add(url)
                 artigos.append({
                     "titulo": a.get("title"),

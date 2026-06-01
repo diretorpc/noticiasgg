@@ -5,7 +5,9 @@ httpx==0.28.1
 anthropic==0.69.0
 beautifulsoup4==4.12.3
 yfinance==0.2.54
+curl_cffi>=0.7
 reportlab==4.4.1
 python-docx==1.1.2
+openai>=1.0.0
 pytest==8.3.5
 pytest-asyncio==0.26.0

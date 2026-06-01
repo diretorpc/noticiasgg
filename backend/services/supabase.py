@@ -92,16 +92,24 @@ def get_preferences(phone: str) -> dict | None:
         return rows[0] if rows else None
 
 
-def save_preferences(phone: str, sections: dict | None, report_time: str | None) -> None:
+def save_preferences(
+    phone: str,
+    sections: dict | None,
+    report_time: str | None,
+    audio_response: bool | None = None,
+) -> None:
+    payload: dict = {
+        "phone": phone,
+        "sections": sections,
+        "report_time": report_time,
+        "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    if audio_response is not None:
+        payload["audio_response"] = audio_response
     with _client() as c:
         r = c.post(
             "/user_preferences",
-            json={
-                "phone": phone,
-                "sections": sections,
-                "report_time": report_time,
-                "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            },
+            json=payload,
             headers={"Prefer": "resolution=merge-duplicates,return=representation"},
         )
         r.raise_for_status()
@@ -120,6 +128,7 @@ def save_polls(polls: list[dict]) -> None:
                 "/polls_cache",
                 json={
                     "instituto": poll["instituto"],
+                    "turno": poll.get("turno"),
                     "data_pesquisa": poll.get("data_pesquisa"),
                     "candidatos": poll["candidatos"],
                     "fonte_url": poll.get("fonte_url"),
@@ -131,7 +140,7 @@ def save_polls(polls: list[dict]) -> None:
 
 def get_polls() -> list[dict]:
     with _client() as c:
-        r = c.get("/polls_cache?select=instituto,data_pesquisa,candidatos,fonte_url&order=updated_at.desc")
+        r = c.get("/polls_cache?select=instituto,turno,data_pesquisa,candidatos,fonte_url&order=updated_at.desc")
         r.raise_for_status()
         return r.json()
 
@@ -156,4 +165,5 @@ def get_users_for_hour(hour_brt: str) -> list[dict]:
             "sections": p.get("sections"),
         }
         for p in prefs
+        if p["phone"] in users_by_phone
     ]

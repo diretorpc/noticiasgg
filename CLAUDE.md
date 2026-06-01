@@ -89,7 +89,7 @@ c:\noticiasgg\
 - **Sem comentários desnecessários** — apenas quando o "porquê" não é óbvio.
 - **Sem mock de banco em testes** — testes de integração usam APIs reais onde possível.
 - **YAGNI** — sem features fora do escopo.
-- **n8n:** NÃO mexer nos nodes — já está tudo configurado.
+- **n8n:** PROIBIDO usar qualquer ferramenta MCP do n8n (`mcp__n8n-mcp__update_workflow`, `mcp__n8n-mcp__create_workflow_from_code`, etc.) para modificar workflows existentes. Em mai/2026 um subagente usou `update_workflow` para corrigir um system prompt, não leu o arquivo inteiro, alucionou números de telefone e enviou mensagens para estranhos. Apenas leitura (`search_workflows`, `get_workflow_details`) é permitida.
 
 ---
 

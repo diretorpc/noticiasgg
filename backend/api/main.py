@@ -8,6 +8,7 @@ from anthropic import Anthropic
 
 from backend.collectors import market, crypto, indicators_us, indicators_br, news, commodities_br, politics_br, polls_br, agro_br
 from backend.services import reporter, whatsapp, supabase
+from backend.services import media as media_service
 from backend.api import send_report, cron_report
 
 logger = logging.getLogger("noticiasgg")
@@ -76,17 +77,96 @@ def _needs_market_data(text: str) -> bool:
     return bool(_DATA_KEYWORDS.search(text))
 
 
+@app.head("/api/health")
+async def health_head():
+    from fastapi.responses import Response
+    return Response(status_code=200)
+
+
 @app.get("/api/health")
 async def health():
-    return {"status": "ok"}
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    checks: dict = {}
+
+    # Chaves configuradas (sem chamadas externas)
+    missing_keys = [
+        k for k, v in {
+            "anthropic": os.getenv("ANTHROPIC_API_KEY"),
+            "news_api": os.getenv("NEWS_API_KEY"),
+            "scraper_api": os.getenv("SCRAPER_API_KEY"),
+            "evolution": os.getenv("EVOLUTION_API_URL"),
+            "supabase": os.getenv("SUPABASE_URL"),
+            "fred": os.getenv("FRED_API_KEY"),
+        }.items() if not v
+    ]
+    checks["keys"] = {
+        "status": "error" if missing_keys else "ok",
+        "faltando": missing_keys,
+    }
+
+    # Pesquisas eleitorais — lê do cache Supabase (rápido)
+    try:
+        polls = supabase.get_polls()
+        checks["polls"] = {
+            "status": "ok" if polls else "warn",
+            "institutos": len(polls) if polls else 0,
+            "nomes": [p.get("instituto") for p in polls] if polls else [],
+        }
+    except Exception as e:
+        checks["polls"] = {"status": "error", "message": str(e)}
+
+    has_error = any(v.get("status") == "error" for v in checks.values())
+    has_warn = any(v.get("status") == "warn" for v in checks.values())
+    overall = "error" if has_error else ("warn" if has_warn else "ok")
+
+    return {"status": overall, "checks": checks, "checked_at": now.isoformat()}
 
 
-def _extract_text(message: dict) -> str:
-    return (
-        message.get("conversation")
-        or message.get("extendedTextMessage", {}).get("text")
-        or ""
-    )
+@app.post("/api/save-polls")
+async def save_polls(request: Request):
+    body = await request.json()
+    polls = body.get("data", [])
+    if polls:
+        supabase.save_polls(polls)
+    return {"status": "ok", "saved": len(polls)}
+
+
+def _extract_message(message: dict) -> dict:
+    """Detecta o tipo da mensagem e retorna metadados para o webhook processar.
+
+    Retornos possíveis:
+      {"type": "text", "text": str}
+      {"type": "audio"}
+      {"type": "image", "caption": str}
+      {"type": "document", "caption": str, "filename": str, "mime": str}
+      {"type": "unknown"}
+    """
+    text = message.get("conversation") or message.get("extendedTextMessage", {}).get("text")
+    if text:
+        return {"type": "text", "text": text}
+    if message.get("audioMessage") or message.get("pttMessage"):
+        return {"type": "audio"}
+    if message.get("imageMessage"):
+        caption = message["imageMessage"].get("caption", "")
+        return {"type": "image", "caption": caption}
+    if message.get("documentMessage"):
+        doc = message["documentMessage"]
+        return {
+            "type": "document",
+            "caption": doc.get("caption", ""),
+            "filename": doc.get("fileName", "arquivo"),
+            "mime": doc.get("mimetype", "application/octet-stream"),
+        }
+    if message.get("documentWithCaptionMessage"):
+        inner = message["documentWithCaptionMessage"].get("message", {}).get("documentMessage", {})
+        return {
+            "type": "document",
+            "caption": inner.get("caption", ""),
+            "filename": inner.get("fileName", "arquivo"),
+            "mime": inner.get("mimetype", "application/octet-stream"),
+        }
+    return {"type": "unknown"}
 
 
 def _admin_phone() -> str:
@@ -122,20 +202,30 @@ def _handle_admin_command(text: str) -> str | None:
 
 _PREFERENCE_SYSTEM = """Você é um parser de intenções. Analise a mensagem e classifique em uma de duas categorias.
 
-CATEGORIA 1 — Pedido de configuração do relatório diário:
-Seções disponíveis: market, crypto, indicators_us, indicators_br, news, commodities_br, politics_br, polls_br.
+CATEGORIA 1 — Pedido de configuração do relatório diário ou preferências de resposta:
+Seções disponíveis e seus aliases em português:
+- market → bolsas, ações, mercado, índices, ibovespa, nasdaq, s&p
+- crypto → cripto, criptomoedas, bitcoin, btc, ethereum
+- indicators_us → indicadores eua, indicadores americanos, fed, cpi, juros eua
+- indicators_br → indicadores br, indicadores brasil, selic, ipca, juros brasil
+- news → notícias, news, manchetes
+- commodities_br → commodities, soja, milho, petróleo, agro commodities
+- politics_br → política, política brasil, notícias políticas
+- polls_br → pesquisas, pesquisas eleitorais, eleições, intenção de voto, polls
 
 Responda SOMENTE com JSON:
 {
   "intent": "preference",
-  "sections": {todas as 8 seções com true/false},
+  "sections": {todas as 8 seções com true/false} ou null se não mencionado,
   "report_time": "HH:00" ou null,
+  "audio_response": true/false ou null se não mencionado,
   "reset": false,
   "reply": "mensagem de confirmação amigável em português"
 }
 
 Regras de seções:
 - "quero só X e Y" → todas false exceto X e Y
+- "salve apenas X" ou "somente X" → todas false exceto X
 - "remove X" → apenas X=false (manter restante do contexto atual)
 - "adiciona X" → apenas X=true (manter restante do contexto atual)
 
@@ -143,7 +233,12 @@ Regras de horário:
 - "às 8h" → "08:00"
 - "às 20h30" ou "8 e meia" → arredondar para próxima hora cheia
 
-Reset: "volta pro padrão", "quero tudo de volta", "cancela preferências" → {"intent": "preference", "sections": null, "report_time": null, "reset": true, "reply": "..."}
+Regras de áudio:
+- "quero resposta em áudio", "responde em áudio", "ativa áudio", "modo áudio" → audio_response: true
+- "desativa áudio", "resposta em texto", "para de responder em áudio", "modo texto" → audio_response: false
+- Se não mencionado → audio_response: null
+
+Reset: "volta pro padrão", "quero tudo de volta", "cancela preferências" → {"intent": "preference", "sections": null, "report_time": null, "audio_response": null, "reset": true, "reply": "..."}
 
 CATEGORIA 2 — Qualquer outra mensagem:
 Responda SOMENTE com JSON: {"intent": "message"}"""
@@ -179,9 +274,11 @@ async def whatsapp_webhook(request: Request):
 
         remote_jid = key.get("remoteJid", "")
         push_name = data.get("pushName", "")
-        text = _extract_text(data.get("message", {}))
-        if not text:
-            return {"status": "ignored", "reason": "no text"}
+        msg_info = _extract_message(data.get("message", {}))
+        if msg_info["type"] == "unknown":
+            return {"status": "ignored", "reason": "unsupported media type"}
+        # Para texto usa o conteúdo direto; para mídia o texto é extraído depois da transcrição/análise
+        text = msg_info.get("text", "") if msg_info["type"] == "text" else "[mídia]"
 
         admin_phone = _admin_phone()
         authorized = supabase.get_authorized(remote_jid)
@@ -216,10 +313,14 @@ async def whatsapp_webhook(request: Request):
                 whatsapp.send_message(admin_phone, admin_response)
                 return {"status": "ok", "reason": "admin command"}
 
-        # Detectar intenção de preferência antes de gerar resposta
+        # Detectar intenção de preferência — apenas para mensagens de texto
         current_prefs = supabase.get_preferences(target_phone)
         current_sections = current_prefs.get("sections") if current_prefs else None
-        intent = _detect_preference_intent(text, current_sections=current_sections)
+        intent = (
+            _detect_preference_intent(text, current_sections=current_sections)
+            if msg_info["type"] == "text"
+            else {"intent": "message"}
+        )
 
         if intent.get("intent") == "preference":
             if intent.get("reset"):
@@ -227,22 +328,85 @@ async def whatsapp_webhook(request: Request):
             else:
                 new_sections = intent.get("sections")
                 new_time = intent.get("report_time")
-                if new_sections is not None or new_time is not None:
-                    supabase.save_preferences(target_phone, sections=new_sections, report_time=new_time)
+                new_audio = intent.get("audio_response")
+                if new_sections is not None or new_time is not None or new_audio is not None:
+                    supabase.save_preferences(
+                        target_phone,
+                        sections=new_sections,
+                        report_time=new_time,
+                        audio_response=new_audio,
+                    )
             reply = intent.get("reply", "Preferências atualizadas!")
             whatsapp.send_message(target_phone, reply)
             return {"status": "ok", "reason": "preference_updated"}
 
-        # Buscar histórico e gerar resposta
+        # Buscar histórico
         history = supabase.get_history(target_phone, limit=10)
         anthropic_history = [{"role": h["role"], "content": h["content"]} for h in history]
+        audio_response_pref = bool((current_prefs or {}).get("audio_response", False))
 
+        # ── Áudio ──────────────────────────────────────────────────────────────
+        if msg_info["type"] == "audio":
+            try:
+                media = whatsapp.download_media(data)
+            except Exception:
+                whatsapp.send_message(target_phone, "Não consegui baixar o áudio, tente novamente.")
+                return {"status": "ok", "reason": "media_download_failed"}
+            try:
+                text = media_service.transcribe_audio(media["base64"], media.get("mimetype", "audio/ogg"))
+            except Exception:
+                whatsapp.send_message(target_phone, "Não consegui transcrever o áudio.")
+                return {"status": "ok", "reason": "transcription_failed"}
+
+            sections = current_sections if _needs_market_data(text) else {}
+            supabase.save_message(target_phone, "user", f"[áudio transcrito] {text}")
+            reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"), sections=sections)
+            supabase.save_message(target_phone, "assistant", reply)
+
+            if audio_response_pref:
+                try:
+                    audio_bytes = media_service.text_to_speech(reply)
+                    whatsapp.send_audio(target_phone, audio_bytes)
+                    return {"status": "ok"}
+                except Exception:
+                    pass  # fallback para texto se TTS falhar
+            whatsapp.send_message(target_phone, reply)
+            return {"status": "ok"}
+
+        # ── Imagem ou Documento ────────────────────────────────────────────────
+        if msg_info["type"] in ("image", "document"):
+            try:
+                media = whatsapp.download_media(data)
+            except Exception:
+                whatsapp.send_message(target_phone, "Não consegui baixar a mídia, tente novamente.")
+                return {"status": "ok", "reason": "media_download_failed"}
+
+            caption = msg_info.get("caption", "")
+            mime = media.get("mimetype", "image/jpeg")
+
+            # Limite de tamanho: base64 de 20MB ≈ ~27M chars
+            if len(media.get("base64", "")) > 27_000_000:
+                whatsapp.send_message(target_phone, "Arquivo muito grande para processar (limite: 20 MB).")
+                return {"status": "ok", "reason": "file_too_large"}
+
+            user_text = caption or ("Analise este documento" if msg_info["type"] == "document" else "Analise esta imagem")
+            supabase.save_message(target_phone, "user", f"[{msg_info['type']}] {caption}")
+            reply = reporter.generate_report(
+                user_text,
+                history=anthropic_history,
+                user_name=authorized.get("name"),
+                sections={},
+                media_attachment={"type": msg_info["type"], "b64": media["base64"], "mime": mime},
+            )
+            supabase.save_message(target_phone, "assistant", reply)
+            whatsapp.send_message(target_phone, reply)
+            return {"status": "ok"}
+
+        # ── Texto (fluxo original) ─────────────────────────────────────────────
         sections = current_sections if _needs_market_data(text) else {}
-
         supabase.save_message(target_phone, "user", text)
         reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"), sections=sections)
         supabase.save_message(target_phone, "assistant", reply)
-
         whatsapp.send_message(target_phone, reply)
         return {"status": "ok"}
     except Exception as e:

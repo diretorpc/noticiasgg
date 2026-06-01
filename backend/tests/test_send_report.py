@@ -11,16 +11,18 @@ PAYLOAD_DEFAULT = {
 
 
 def test_send_report_sem_preferencias_envia_texto_n8n():
+    n8n_text = "Bom dia, Matheus | 18/05/2026 07:00\n\nRelatório do n8n aqui."
+    payload = {"number": "5534999945010", "textMessage": {"text": n8n_text}}
     with patch("backend.api.send_report.supabase.get_preferences", return_value=None), \
          patch("backend.api.send_report.supabase.get_authorized_by_phone",
                return_value={"phone": "5534999945010", "name": "Matheus"}), \
          patch("backend.api.send_report.whatsapp.send_message") as mock_send:
-        resp = client.post("/api/send-report", json=PAYLOAD_DEFAULT)
+        resp = client.post("/api/send-report", json=payload)
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
     mock_send.assert_called_once()
     args = mock_send.call_args[0]
-    assert args[1] == "Relatório do n8n aqui."
+    assert "Matheus" in args[1]
 
 
 def test_send_report_com_horario_customizado_pula():
@@ -51,14 +53,14 @@ def test_send_report_com_sections_gera_novo_relatorio():
     mock_send.assert_called_once_with("5534999945010", "relatório filtrado")
 
 
-def test_send_report_usuario_nao_encontrado_envia_sem_nome():
-    with patch("backend.api.send_report.supabase.get_preferences", return_value=None), \
-         patch("backend.api.send_report.supabase.get_authorized_by_phone", return_value=None), \
+def test_send_report_usuario_nao_autorizado_ignorado():
+    with patch("backend.api.send_report.supabase.get_authorized_by_phone", return_value=None), \
          patch("backend.api.send_report.whatsapp.send_message") as mock_send:
         resp = client.post("/api/send-report", json=PAYLOAD_DEFAULT)
     assert resp.status_code == 200
-    assert resp.json()["status"] == "ok"
-    mock_send.assert_called_once_with("5534999945010", "Relatório do n8n aqui.")
+    assert resp.json()["status"] == "skipped"
+    assert resp.json()["reason"] == "unauthorized"
+    mock_send.assert_not_called()
 
 
 def test_send_report_supabase_error_retorna_erro():
@@ -71,6 +73,8 @@ def test_send_report_supabase_error_retorna_erro():
 def test_send_report_reporter_error_usa_fallback():
     sections = {"market": True, "crypto": False, "indicators_us": False, "indicators_br": False,
                 "news": True, "commodities_br": False, "politics_br": False, "polls_br": False}
+    n8n_text = "Bom dia, Matheus | 18/05/2026 07:00\n\nRelatório do n8n aqui."
+    payload = {"number": "5534999945010", "textMessage": {"text": n8n_text}}
     with patch("backend.api.send_report.supabase.get_preferences",
                return_value={"phone": "5534999945010", "sections": sections, "report_time": None}), \
          patch("backend.api.send_report.supabase.get_authorized_by_phone",
@@ -78,10 +82,11 @@ def test_send_report_reporter_error_usa_fallback():
          patch("backend.api.send_report.reporter.generate_report",
                side_effect=Exception("Claude timeout")), \
          patch("backend.api.send_report.whatsapp.send_message") as mock_send:
-        resp = client.post("/api/send-report", json=PAYLOAD_DEFAULT)
+        resp = client.post("/api/send-report", json=payload)
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
-    mock_send.assert_called_once_with("5534999945010", "Relatório do n8n aqui.")
+    args = mock_send.call_args[0]
+    assert "Matheus" in args[1]
 
 
 def test_send_report_personaliza_saudacao_para_outro_usuario():
@@ -114,6 +119,36 @@ def test_send_report_lookup_normaliza_numero_sem_9():
     args = mock_send.call_args[0]
     assert "Cassiano" in args[1]
     assert "Matheus" not in args[1]
+
+
+def test_send_report_personaliza_nome_em_negrito():
+    """Regex captura 'Bom dia, *Matheus*!' (nome em negrito WhatsApp)."""
+    n8n_text = "📊 ANÁLISE DO CENÁRIO\n\n*Visão Macro Global*\nMercados globais estáveis.\n\nBom dia, *Matheus*! Bons negócios."
+    payload = {"number": "5516991016898", "textMessage": {"text": n8n_text}}
+    with patch("backend.api.send_report.supabase.get_preferences", return_value=None), \
+         patch("backend.api.send_report.supabase.get_authorized_by_phone",
+               return_value={"phone": "5516991016898", "name": "G.Mouro"}), \
+         patch("backend.api.send_report.whatsapp.send_message") as mock_send:
+        resp = client.post("/api/send-report", json=payload)
+    assert resp.status_code == 200
+    args = mock_send.call_args[0]
+    assert "G.Mouro" in args[1]
+    assert "Matheus" not in args[1]
+
+
+def test_send_report_prefixa_saudacao_quando_nao_ha_greeting():
+    """Análise sem saudação no texto recebe greeting personalizado prefixado."""
+    n8n_text = "📊 ANÁLISE DO CENÁRIO\n\n*Visão Macro Global*\nMercados em alta.\n\n*Visão Brasil*\nIbovespa subiu 1%."
+    payload = {"number": "5534996568291", "textMessage": {"text": n8n_text}}
+    with patch("backend.api.send_report.supabase.get_preferences", return_value=None), \
+         patch("backend.api.send_report.supabase.get_authorized_by_phone",
+               return_value={"phone": "5534996568291", "name": "Cassiano Ribeiro"}), \
+         patch("backend.api.send_report.whatsapp.send_message") as mock_send:
+        resp = client.post("/api/send-report", json=payload)
+    assert resp.status_code == 200
+    args = mock_send.call_args[0]
+    assert "*Cassiano!*" in args[1]
+    assert args[1].index("Cassiano") < args[1].index("ANÁLISE")
 
 
 def test_send_report_payload_invalido_retorna_422():
