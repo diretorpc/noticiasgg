@@ -395,6 +395,13 @@ async def whatsapp_webhook(request: Request):
                 media_attachment={"type": msg_info["type"], "b64": media["base64"], "mime": mime},
             )
             supabase.save_message(target_phone, "assistant", reply)
+            if audio_response_pref:
+                try:
+                    audio_bytes = media_service.text_to_speech(reply)
+                    whatsapp.send_audio(target_phone, audio_bytes)
+                    return {"status": "ok"}
+                except Exception:
+                    pass  # fallback para texto se TTS falhar
             whatsapp.send_message(target_phone, reply)
             return {"status": "ok"}
 
