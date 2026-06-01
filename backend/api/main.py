@@ -63,9 +63,8 @@ _DATA_KEYWORDS = re.compile(
     r"commodity|commodities|petr[oó]leo|brent|wti|g[aá]s|"
     r"ouro|prata|cobre|min[eé]rio|"
     r"soja|milho|caf[eé]|a[çc][uú]car|algod[ãa]o|trigo|boi|"
-    # tempo e atualidade
-    r"hoje|agora|atual|atualmente|esta\s*semana|esse\s*m[eê]s|"
-    r"cota[çc][ãa]o|pre[çc]o|valor|quanto\s*est[aá]|como\s*est[aá]|"
+    # cotações e preços (requer contexto — não usar palavras genéricas de tempo)
+    r"cota[çc][ãa]o|pregão|pregao|"
     # notícias
     r"not[ií]cia|not[ií]cias|novidade|acontec"
     r")\b",
