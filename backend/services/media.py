@@ -45,5 +45,6 @@ def text_to_speech(text: str) -> bytes:
         voice="nova",
         input=text,
         response_format="mp3",
+        speed=0.85,
     )
     return response.content
