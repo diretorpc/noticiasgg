@@ -404,6 +404,27 @@ async def whatsapp_webhook(request: Request):
                 whatsapp.send_message(target_phone, "Não consegui transcrever o áudio.")
                 return {"status": "ok", "reason": "transcription_failed"}
 
+            # Preferência enviada via áudio → detecta e confirma em áudio
+            audio_intent = _quick_audio_check(text)
+            if audio_intent and audio_intent.get("intent") == "preference":
+                new_audio_text = audio_intent.get("audio_for_text")
+                new_audio_media = audio_intent.get("audio_for_media")
+                if new_audio_text is not None or new_audio_media is not None:
+                    supabase.save_preferences(
+                        target_phone,
+                        sections=None,
+                        report_time=None,
+                        audio_for_text=new_audio_text,
+                        audio_for_media=new_audio_media,
+                    )
+                reply = audio_intent.get("reply", "Preferências atualizadas!")
+                try:
+                    audio_bytes = media_service.text_to_speech(reply)
+                    whatsapp.send_audio(target_phone, audio_bytes)
+                except Exception:
+                    whatsapp.send_message(target_phone, reply)
+                return {"status": "ok", "reason": "preference_updated"}
+
             supabase.save_message(target_phone, "user", f"[áudio transcrito] {text}")
             reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"), sections={})
             supabase.save_message(target_phone, "assistant", reply)
