@@ -96,7 +96,8 @@ def save_preferences(
     phone: str,
     sections: dict | None,
     report_time: str | None,
-    audio_response: bool | None = None,
+    audio_for_text: bool | None = None,
+    audio_for_media: bool | None = None,
 ) -> None:
     payload: dict = {
         "phone": phone,
@@ -104,8 +105,10 @@ def save_preferences(
         "report_time": report_time,
         "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
-    if audio_response is not None:
-        payload["audio_response"] = audio_response
+    if audio_for_text is not None:
+        payload["audio_for_text"] = audio_for_text
+    if audio_for_media is not None:
+        payload["audio_for_media"] = audio_for_media
     with _client() as c:
         r = c.post(
             "/user_preferences",

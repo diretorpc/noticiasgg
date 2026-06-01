@@ -162,37 +162,78 @@ def _handle_admin_command(text: str) -> str | None:
     return None
 
 
-_AUDIO_ON_RE = re.compile(
-    r"\b(quero|ativa|liga|habilita|modo|prefiro|manda|envia|responde)\b.{0,25}\b(áudio|audio)\b"
+_AUDIO_TEXT_ON_RE = re.compile(
+    r"\b(texto|textos|mensagens?\s+de\s+texto)\b.{0,25}\b(áudio|audio)\b"
+    r"|\b(responde|resposta|respostas)\b.{0,25}\b(texto|textos)\b.{0,25}\b(áudio|audio)\b"
+    r"|\b(quero|ativa|liga)\b.{0,15}\b(áudio|audio)\b.{0,25}\b(texto|textos|mensagens?)\b",
+    re.IGNORECASE,
+)
+_AUDIO_MEDIA_ON_RE = re.compile(
+    r"\b(imagens?|fotos?|documentos?|pdf|mídia|mídias|arquivos?)\b.{0,25}\b(áudio|audio)\b"
+    r"|\b(responde|resposta)\b.{0,25}\b(imagens?|fotos?|documentos?|mídia)\b.{0,25}\b(áudio|audio)\b",
+    re.IGNORECASE,
+)
+_AUDIO_ALL_ON_RE = re.compile(
+    r"\b(tudo|todos?|qualquer)\b.{0,20}\b(áudio|audio)\b"
+    r"|\b(quero|ativa|liga|habilita|modo|prefiro|responde)\b.{0,25}\b(áudio|audio)\b"
     r"|\b(áudio|audio)\b.{0,25}\b(ativa|liga|resposta|modo|por\s+favor)\b",
     re.IGNORECASE,
 )
-_AUDIO_OFF_RE = re.compile(
+_AUDIO_TEXT_OFF_RE = re.compile(
+    r"\b(texto|textos|mensagens?\s+de\s+texto)\b.{0,25}\b(texto|sem\s+áudio|desativa|só\s+texto)\b"
+    r"|\b(desativa|desliga|sem)\b.{0,15}\b(áudio|audio)\b.{0,25}\b(texto|textos|mensagens?)\b",
+    re.IGNORECASE,
+)
+_AUDIO_MEDIA_OFF_RE = re.compile(
+    r"\b(imagens?|fotos?|documentos?|pdf|mídia|mídias)\b.{0,25}\b(texto|sem\s+áudio|desativa)\b"
+    r"|\b(desativa|desliga|sem)\b.{0,15}\b(áudio|audio)\b.{0,25}\b(imagens?|fotos?|mídia)\b",
+    re.IGNORECASE,
+)
+_AUDIO_ALL_OFF_RE = re.compile(
     r"\b(desativa|desliga|para|cancela|sem|desabilita|desativar)\b.{0,25}\b(áudio|audio)\b"
-    r"|\b(resposta\s+em\s+texto|modo\s+texto|só\s+texto|somente\s+texto)\b",
+    r"|\b(resposta\s+em\s+texto|modo\s+texto|tudo\s+em\s+texto|só\s+texto|somente\s+texto)\b",
     re.IGNORECASE,
 )
 
 
 def _quick_audio_check(text: str) -> dict | None:
     """Pré-check determinístico para preferência de áudio, evitando falsos negativos do LLM."""
-    if _AUDIO_ON_RE.search(text):
+    # Verificar padrões específicos antes do padrão geral
+    if _AUDIO_TEXT_ON_RE.search(text) and not _AUDIO_MEDIA_ON_RE.search(text):
         return {
-            "intent": "preference",
-            "sections": None,
-            "report_time": None,
-            "audio_response": True,
-            "reset": False,
-            "reply": "Certo! A partir de agora vou responder seus áudios com mensagens de voz. 🎙️ Para voltar ao texto, é só falar 'desativa áudio'.",
+            "intent": "preference", "sections": None, "report_time": None,
+            "audio_for_text": True, "audio_for_media": None, "reset": False,
+            "reply": "Certo! Vou responder suas mensagens de texto em áudio. Para imagens e documentos continuo em texto.",
         }
-    if _AUDIO_OFF_RE.search(text):
+    if _AUDIO_MEDIA_ON_RE.search(text) and not _AUDIO_TEXT_ON_RE.search(text):
         return {
-            "intent": "preference",
-            "sections": None,
-            "report_time": None,
-            "audio_response": False,
-            "reset": False,
-            "reply": "Entendido! Vou responder apenas com texto daqui pra frente.",
+            "intent": "preference", "sections": None, "report_time": None,
+            "audio_for_text": None, "audio_for_media": True, "reset": False,
+            "reply": "Certo! Vou responder imagens, fotos e documentos em áudio. Textos continuam em texto.",
+        }
+    if _AUDIO_TEXT_OFF_RE.search(text) and not _AUDIO_MEDIA_OFF_RE.search(text):
+        return {
+            "intent": "preference", "sections": None, "report_time": None,
+            "audio_for_text": False, "audio_for_media": None, "reset": False,
+            "reply": "Entendido! Vou responder suas mensagens de texto em texto novamente.",
+        }
+    if _AUDIO_MEDIA_OFF_RE.search(text) and not _AUDIO_TEXT_OFF_RE.search(text):
+        return {
+            "intent": "preference", "sections": None, "report_time": None,
+            "audio_for_text": None, "audio_for_media": False, "reset": False,
+            "reply": "Entendido! Vou responder imagens e documentos em texto novamente.",
+        }
+    if _AUDIO_ALL_ON_RE.search(text):
+        return {
+            "intent": "preference", "sections": None, "report_time": None,
+            "audio_for_text": True, "audio_for_media": True, "reset": False,
+            "reply": "Certo! A partir de agora respondo tudo em áudio — textos, imagens e documentos. Para voltar ao texto, é só falar 'desativa áudio'.",
+        }
+    if _AUDIO_ALL_OFF_RE.search(text):
+        return {
+            "intent": "preference", "sections": None, "report_time": None,
+            "audio_for_text": False, "audio_for_media": False, "reset": False,
+            "reply": "Entendido! Vou responder tudo em texto daqui pra frente.",
         }
     return None
 
@@ -215,7 +256,8 @@ Responda SOMENTE com JSON:
   "intent": "preference",
   "sections": {todas as 8 seções com true/false} ou null se não mencionado,
   "report_time": "HH:00" ou null,
-  "audio_response": true/false ou null se não mencionado,
+  "audio_for_text": true/false ou null se não mencionado,
+  "audio_for_media": true/false ou null se não mencionado,
   "reset": false,
   "reply": "mensagem de confirmação amigável em português"
 }
@@ -230,12 +272,16 @@ Regras de horário:
 - "às 8h" → "08:00"
 - "às 20h30" ou "8 e meia" → arredondar para próxima hora cheia
 
-Regras de áudio:
-- "quero resposta em áudio", "responde em áudio", "ativa áudio", "modo áudio" → audio_response: true
-- "desativa áudio", "resposta em texto", "para de responder em áudio", "modo texto" → audio_response: false
-- Se não mencionado → audio_response: null
+Regras de áudio — dois campos independentes (audio_for_text e audio_for_media):
+- "tudo em áudio", "quero resposta em áudio", "ativa áudio" → audio_for_text: true, audio_for_media: true
+- "textos em áudio", "responde meus textos em áudio" → audio_for_text: true, audio_for_media: null
+- "imagens em áudio", "fotos em áudio", "documentos em áudio", "mídias em áudio" → audio_for_text: null, audio_for_media: true
+- "desativa áudio", "tudo em texto", "modo texto" → audio_for_text: false, audio_for_media: false
+- "textos em texto", "desativa áudio nos textos" → audio_for_text: false, audio_for_media: null
+- "imagens em texto", "fotos em texto", "mídias em texto" → audio_for_text: null, audio_for_media: false
+- Se não mencionado → audio_for_text: null, audio_for_media: null
 
-Reset: "volta pro padrão", "quero tudo de volta", "cancela preferências" → {"intent": "preference", "sections": null, "report_time": null, "audio_response": null, "reset": true, "reply": "..."}
+Reset: "volta pro padrão", "quero tudo de volta", "cancela preferências" → {"intent": "preference", "sections": null, "report_time": null, "audio_for_text": null, "audio_for_media": null, "reset": true, "reply": "..."}
 
 CATEGORIA 2 — Qualquer outra mensagem:
 Responda SOMENTE com JSON: {"intent": "message"}"""
@@ -325,13 +371,15 @@ async def whatsapp_webhook(request: Request):
             else:
                 new_sections = intent.get("sections")
                 new_time = intent.get("report_time")
-                new_audio = intent.get("audio_response")
-                if new_sections is not None or new_time is not None or new_audio is not None:
+                new_audio_text = intent.get("audio_for_text")
+                new_audio_media = intent.get("audio_for_media")
+                if new_sections is not None or new_time is not None or new_audio_text is not None or new_audio_media is not None:
                     supabase.save_preferences(
                         target_phone,
                         sections=new_sections,
                         report_time=new_time,
-                        audio_response=new_audio,
+                        audio_for_text=new_audio_text,
+                        audio_for_media=new_audio_media,
                     )
             reply = intent.get("reply", "Preferências atualizadas!")
             whatsapp.send_message(target_phone, reply)
@@ -340,7 +388,8 @@ async def whatsapp_webhook(request: Request):
         # Buscar histórico
         history = supabase.get_history(target_phone, limit=10)
         anthropic_history = [{"role": h["role"], "content": h["content"]} for h in history]
-        audio_response_pref = bool((current_prefs or {}).get("audio_response", False))
+        audio_for_text = bool((current_prefs or {}).get("audio_for_text", False))
+        audio_for_media = bool((current_prefs or {}).get("audio_for_media", False))
 
         # ── Áudio ──────────────────────────────────────────────────────────────
         if msg_info["type"] == "audio":
@@ -359,7 +408,7 @@ async def whatsapp_webhook(request: Request):
             reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"), sections={})
             supabase.save_message(target_phone, "assistant", reply)
 
-            if audio_response_pref:
+            if audio_for_media:
                 try:
                     audio_bytes = media_service.text_to_speech(reply)
                     whatsapp.send_audio(target_phone, audio_bytes)
@@ -395,7 +444,7 @@ async def whatsapp_webhook(request: Request):
                 media_attachment={"type": msg_info["type"], "b64": media["base64"], "mime": mime},
             )
             supabase.save_message(target_phone, "assistant", reply)
-            if audio_response_pref:
+            if audio_for_media:
                 try:
                     audio_bytes = media_service.text_to_speech(reply)
                     whatsapp.send_audio(target_phone, audio_bytes)
@@ -409,6 +458,13 @@ async def whatsapp_webhook(request: Request):
         supabase.save_message(target_phone, "user", text)
         reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"), sections={})
         supabase.save_message(target_phone, "assistant", reply)
+        if audio_for_text:
+            try:
+                audio_bytes = media_service.text_to_speech(reply)
+                whatsapp.send_audio(target_phone, audio_bytes)
+                return {"status": "ok"}
+            except Exception:
+                pass  # fallback para texto se TTS falhar
         whatsapp.send_message(target_phone, reply)
         return {"status": "ok"}
     except Exception as e:
