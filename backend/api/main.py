@@ -200,6 +200,41 @@ def _handle_admin_command(text: str) -> str | None:
     return None
 
 
+_AUDIO_ON_RE = re.compile(
+    r"\b(quero|ativa|liga|habilita|modo|prefiro|manda|envia|responde)\b.{0,25}\b(áudio|audio)\b"
+    r"|\b(áudio|audio)\b.{0,25}\b(ativa|liga|resposta|modo|por\s+favor)\b",
+    re.IGNORECASE,
+)
+_AUDIO_OFF_RE = re.compile(
+    r"\b(desativa|desliga|para|cancela|sem|desabilita|desativar)\b.{0,25}\b(áudio|audio)\b"
+    r"|\b(resposta\s+em\s+texto|modo\s+texto|só\s+texto|somente\s+texto)\b",
+    re.IGNORECASE,
+)
+
+
+def _quick_audio_check(text: str) -> dict | None:
+    """Pré-check determinístico para preferência de áudio, evitando falsos negativos do LLM."""
+    if _AUDIO_ON_RE.search(text):
+        return {
+            "intent": "preference",
+            "sections": None,
+            "report_time": None,
+            "audio_response": True,
+            "reset": False,
+            "reply": "Certo! A partir de agora vou responder seus áudios com mensagens de voz. 🎙️ Para voltar ao texto, é só falar 'desativa áudio'.",
+        }
+    if _AUDIO_OFF_RE.search(text):
+        return {
+            "intent": "preference",
+            "sections": None,
+            "report_time": None,
+            "audio_response": False,
+            "reset": False,
+            "reply": "Entendido! Vou responder apenas com texto daqui pra frente.",
+        }
+    return None
+
+
 _PREFERENCE_SYSTEM = """Você é um parser de intenções. Analise a mensagem e classifique em uma de duas categorias.
 
 CATEGORIA 1 — Pedido de configuração do relatório diário ou preferências de resposta:
@@ -317,7 +352,7 @@ async def whatsapp_webhook(request: Request):
         current_prefs = supabase.get_preferences(target_phone)
         current_sections = current_prefs.get("sections") if current_prefs else None
         intent = (
-            _detect_preference_intent(text, current_sections=current_sections)
+            (_quick_audio_check(text) or _detect_preference_intent(text, current_sections=current_sections))
             if msg_info["type"] == "text"
             else {"intent": "message"}
         )
