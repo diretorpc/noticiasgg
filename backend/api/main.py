@@ -38,43 +38,6 @@ app.include_router(cron_report.router)
 
 PHONE_RE = re.compile(r"^\D*(\d{10,13})\D*$")
 
-_DATA_KEYWORDS = re.compile(
-    r"\b("
-    # relatório explícito
-    r"relat[oó]rio|resumo|an[áa]lise|panorama|overview|briefing|"
-    # câmbio e moedas
-    r"d[oó]lar|dolar|euro|libra|iene|yuan|renminbi|peso|"
-    r"c[âa]mbio|forex|moeda|convers[ãa]o|"
-    # cripto
-    r"bitcoin|btc|ethereum|eth|cripto|crypto|altcoin|blockchain|"
-    r"solana|sol|bnb|xrp|ripple|cardano|ada|dogecoin|doge|"
-    # bolsas e índices
-    r"bolsa|ibovespa|ibrx|nasdaq|s&p|s&p500|dow\s*jones|nikkei|ftse|"
-    r"dax|cac|shanghai|hang\s*seng|b3|nyse|"
-    # ações e mercado
-    r"a[çc][ãa]o|a[çc][õo]es|papel|papeis|ticker|pregão|pregao|"
-    r"mercado|investimento|carteira|portf[oó]lio|"
-    # indicadores BR
-    r"selic|ipca|igpm|igp-m|pib|c[âa]mbio|inpc|"
-    # indicadores EUA
-    r"cpi|ppi|gdp|fed|federal\s*reserve|taxa\s*de\s*juros|juros|"
-    r"desemprego|emprego|payroll|inflac[ãa]o|infla[çc][ãa]o|"
-    # commodities
-    r"commodity|commodities|petr[oó]leo|brent|wti|g[aá]s|"
-    r"ouro|prata|cobre|min[eé]rio|"
-    r"soja|milho|caf[eé]|a[çc][uú]car|algod[ãa]o|trigo|boi|"
-    # cotações e preços (requer contexto — não usar palavras genéricas de tempo)
-    r"cota[çc][ãa]o|pregão|pregao|"
-    # notícias
-    r"not[ií]cia|not[ií]cias|novidade|acontec"
-    r")\b",
-    re.IGNORECASE,
-)
-
-
-def _needs_market_data(text: str) -> bool:
-    return bool(_DATA_KEYWORDS.search(text))
-
 
 @app.head("/api/health")
 async def health_head():
@@ -392,9 +355,8 @@ async def whatsapp_webhook(request: Request):
                 whatsapp.send_message(target_phone, "Não consegui transcrever o áudio.")
                 return {"status": "ok", "reason": "transcription_failed"}
 
-            sections = current_sections if _needs_market_data(text) else {}
             supabase.save_message(target_phone, "user", f"[áudio transcrito] {text}")
-            reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"), sections=sections)
+            reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"), sections={})
             supabase.save_message(target_phone, "assistant", reply)
 
             if audio_response_pref:
@@ -437,9 +399,8 @@ async def whatsapp_webhook(request: Request):
             return {"status": "ok"}
 
         # ── Texto (fluxo original) ─────────────────────────────────────────────
-        sections = current_sections if _needs_market_data(text) else {}
         supabase.save_message(target_phone, "user", text)
-        reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"), sections=sections)
+        reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"), sections={})
         supabase.save_message(target_phone, "assistant", reply)
         whatsapp.send_message(target_phone, reply)
         return {"status": "ok"}
