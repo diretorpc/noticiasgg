@@ -174,9 +174,12 @@ _AUDIO_MEDIA_ON_RE = re.compile(
     re.IGNORECASE,
 )
 _AUDIO_ALL_ON_RE = re.compile(
-    r"\b(tudo|todos?|qualquer)\b.{0,20}\b(áudio|audio)\b"
-    r"|\b(quero|ativa|liga|habilita|modo|prefiro|responde)\b.{0,25}\b(áudio|audio)\b"
-    r"|\b(áudio|audio)\b.{0,25}\b(ativa|liga|resposta|modo|por\s+favor)\b",
+    # "tudo/qualquer coisa em áudio"
+    r"\b(tudo|todos?|qualquer)\b.{0,20}\b(áudio|audio|voz)\b"
+    # verbo de ação (qualquer conjugação via radical) + áudio
+    r"|\b(quer\w*|ativ\w*|lig\w*|habilit\w*|prefer\w*|respond\w*|pod\w*|consegu\w*|fal\w*|mand\w*|envi\w*)\b.{0,30}\b(áudio|audio|voz)\b"
+    # áudio + confirmação/pedido
+    r"|\b(áudio|audio|voz)\b.{0,25}\b(ativ\w*|lig\w*|resposta|modo|por\s+favor|pfv|pls|please)\b",
     re.IGNORECASE,
 )
 _AUDIO_TEXT_OFF_RE = re.compile(
