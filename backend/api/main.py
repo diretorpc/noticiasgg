@@ -405,7 +405,7 @@ async def whatsapp_webhook(request: Request):
                 return {"status": "ok", "reason": "transcription_failed"}
 
             # Preferência enviada via áudio → detecta e confirma em áudio
-            audio_intent = _quick_audio_check(text)
+            audio_intent = _quick_audio_check(text) or _detect_preference_intent(text, current_sections=current_sections)
             if audio_intent and audio_intent.get("intent") == "preference":
                 new_audio_text = audio_intent.get("audio_for_text")
                 new_audio_media = audio_intent.get("audio_for_media")
