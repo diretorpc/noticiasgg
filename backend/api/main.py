@@ -423,16 +423,9 @@ async def whatsapp_webhook(request: Request):
         tts_voice = (current_prefs or {}).get("tts_voice") or "nova"
         tts_speed = float((current_prefs or {}).get("tts_speed") or 0.85)
 
-        # Comando !ajustes — responde com resumo de configurações sem chamar LLM
+        # Comando !ajustes — sempre em texto para o usuário ver as configurações claramente
         if msg_info["type"] == "text" and text.strip().lower() == "!ajustes":
-            reply = _build_settings_summary(current_prefs)
-            if bool((current_prefs or {}).get("audio_for_text", False)):
-                try:
-                    whatsapp.send_audio(target_phone, media_service.text_to_speech(reply, voice=tts_voice, speed=tts_speed))
-                    return {"status": "ok"}
-                except Exception:
-                    pass
-            whatsapp.send_message(target_phone, reply)
+            whatsapp.send_message(target_phone, _build_settings_summary(current_prefs))
             return {"status": "ok"}
 
         # Detectar intenção de preferência — apenas para mensagens de texto
