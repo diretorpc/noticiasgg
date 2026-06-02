@@ -261,8 +261,11 @@ Responda SOMENTE com JSON:
   "report_time": "HH:00" ou null,
   "audio_for_text": true/false ou null se não mencionado,
   "audio_for_media": true/false ou null se não mencionado,
+  "tts_voice": "nome_da_voz" ou null se não mencionado,
+  "tts_speed": 0.00 ou null se não mencionado,
+  "list_voices": false,
   "reset": false,
-  "reply": "mensagem de confirmação amigável em português"
+  "reply": "confirmação direta, sem bajulação"
 }
 
 Regras de seções:
@@ -284,16 +287,71 @@ Regras de áudio — dois campos independentes (audio_for_text e audio_for_media
 - "imagens em texto", "fotos em texto", "mídias em texto" → audio_for_text: null, audio_for_media: false
 - Se não mencionado → audio_for_text: null, audio_for_media: null
 
-Reset: "volta pro padrão", "quero tudo de volta", "cancela preferências" → {"intent": "preference", "sections": null, "report_time": null, "audio_for_text": null, "audio_for_media": null, "reset": true, "reply": "..."}
+Regras de voz TTS (tts_voice):
+- "muda a voz para X", "quero a voz X", "usa a voz X", "voz X" → tts_voice: "X"
+- Vozes válidas: alloy, echo, fable, nova, onyx, shimmer. Ignorar se não for uma dessas.
+- Se não mencionado → tts_voice: null
+
+Regras de velocidade TTS (tts_speed):
+- A velocidade atual está no contexto como "velocidade_atual: X.XX"
+- "fala mais devagar", "um pouco mais devagar" → tts_speed: max(0.5, velocidade_atual - 0.07), 2 casas decimais
+- "fala bem mais devagar", "muito mais devagar", "bem mais lento" → tts_speed: max(0.5, velocidade_atual - 0.15), 2 casas decimais
+- "fala mais rápido", "um pouco mais rápido" → tts_speed: min(1.5, velocidade_atual + 0.07), 2 casas decimais
+- "fala bem mais rápido", "muito mais rápido", "bem mais rápido" → tts_speed: min(1.5, velocidade_atual + 0.15), 2 casas decimais
+- "velocidade normal", "velocidade padrão", "velocidade original" → tts_speed: 0.95
+- Se não mencionado → tts_speed: null
+
+Listagem de vozes:
+- "quais vozes têm?", "lista as vozes", "mostra as vozes", "que vozes existem", "opções de voz" → list_voices: true
+- Nesse caso, reply deve ser EXATAMENTE:
+  "🎙 *Vozes disponíveis:*\n• *nova* — feminina, suave (padrão)\n• *shimmer* — feminina, expressiva\n• *alloy* — neutra\n• *echo* — masculina\n• *fable* — expressiva\n• *onyx* — grave\n\nPara mudar: \"muda a voz para onyx\""
+- Se não mencionado → list_voices: false
+
+Reset: "volta pro padrão", "quero tudo de volta", "cancela preferências" → {"intent": "preference", "sections": null, "report_time": null, "audio_for_text": null, "audio_for_media": null, "tts_voice": null, "tts_speed": null, "list_voices": false, "reset": true, "reply": "Preferências resetadas."}
 
 CATEGORIA 2 — Qualquer outra mensagem:
 Responda SOMENTE com JSON: {"intent": "message"}"""
 
+_SECTION_LABELS: dict[str, str] = {
+    "market": "mercado",
+    "crypto": "cripto",
+    "indicators_us": "indicadores EUA",
+    "indicators_br": "indicadores BR",
+    "news": "notícias",
+    "commodities_br": "commodities",
+    "politics_br": "política",
+    "polls_br": "pesquisas",
+}
 
-def _detect_preference_intent(text: str, current_sections: dict | None = None) -> dict:
-    context = ""
+
+def _build_settings_summary(prefs: dict | None) -> str:
+    p = prefs or {}
+    audio_text = "sim" if p.get("audio_for_text") else "não"
+    audio_media = "sim" if p.get("audio_for_media") else "não"
+    voice = p.get("tts_voice") or "nova"
+    speed = p.get("tts_speed") or 0.85
+    report_time = p.get("report_time") or "não configurado"
+    sections = p.get("sections") or {}
+    active = [_SECTION_LABELS.get(k, k) for k, v in sections.items() if v] if sections else list(_SECTION_LABELS.values())
+    sections_str = ", ".join(active) if active else "nenhuma"
+    return (
+        "⚙️ *Suas configurações*\n\n"
+        "*Áudio*\n"
+        f"• Textos em áudio: {audio_text}\n"
+        f"• Mídias em áudio: {audio_media}\n"
+        f"• Voz: {voice}\n"
+        f"• Velocidade: {speed}\n\n"
+        "*Relatório diário*\n"
+        f"• Horário: {report_time}\n"
+        f"• Seções ativas: {sections_str}\n\n"
+        "Para alterar: \"muda a voz para onyx\", \"fala mais devagar\", \"ativa áudio\", etc."
+    )
+
+
+def _detect_preference_intent(text: str, current_sections: dict | None = None, tts_speed: float = 0.85) -> dict:
+    context = f"\nvelocidade_atual: {tts_speed:.2f}"
     if current_sections:
-        context = f"\n\nConfiguração atual do usuário: {json.dumps(current_sections, ensure_ascii=False)}"
+        context += f"\nseções_atuais: {json.dumps(current_sections, ensure_ascii=False)}"
     try:
         client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         response = client.messages.create(
@@ -359,11 +417,27 @@ async def whatsapp_webhook(request: Request):
                 whatsapp.send_message(admin_phone, admin_response)
                 return {"status": "ok", "reason": "admin command"}
 
-        # Detectar intenção de preferência — apenas para mensagens de texto
+        # Carregar preferências e extrair parâmetros TTS
         current_prefs = supabase.get_preferences(target_phone)
         current_sections = current_prefs.get("sections") if current_prefs else None
+        tts_voice = (current_prefs or {}).get("tts_voice") or "nova"
+        tts_speed = float((current_prefs or {}).get("tts_speed") or 0.85)
+
+        # Comando !ajustes — responde com resumo de configurações sem chamar LLM
+        if msg_info["type"] == "text" and text.strip().lower() == "!ajustes":
+            reply = _build_settings_summary(current_prefs)
+            if bool((current_prefs or {}).get("audio_for_text", False)):
+                try:
+                    whatsapp.send_audio(target_phone, media_service.text_to_speech(reply, voice=tts_voice, speed=tts_speed))
+                    return {"status": "ok"}
+                except Exception:
+                    pass
+            whatsapp.send_message(target_phone, reply)
+            return {"status": "ok"}
+
+        # Detectar intenção de preferência — apenas para mensagens de texto
         intent = (
-            (_quick_audio_check(text) or _detect_preference_intent(text, current_sections=current_sections))
+            (_quick_audio_check(text) or _detect_preference_intent(text, current_sections=current_sections, tts_speed=tts_speed))
             if msg_info["type"] == "text"
             else {"intent": "message"}
         )
@@ -376,15 +450,30 @@ async def whatsapp_webhook(request: Request):
                 new_time = intent.get("report_time")
                 new_audio_text = intent.get("audio_for_text")
                 new_audio_media = intent.get("audio_for_media")
-                if new_sections is not None or new_time is not None or new_audio_text is not None or new_audio_media is not None:
+                new_tts_voice = intent.get("tts_voice")
+                new_tts_speed = intent.get("tts_speed")
+                if any(v is not None for v in [new_sections, new_time, new_audio_text, new_audio_media, new_tts_voice, new_tts_speed]):
                     supabase.save_preferences(
                         target_phone,
                         sections=new_sections,
                         report_time=new_time,
                         audio_for_text=new_audio_text,
                         audio_for_media=new_audio_media,
+                        tts_voice=new_tts_voice,
+                        tts_speed=new_tts_speed,
                     )
+                    if new_tts_voice:
+                        tts_voice = new_tts_voice
+                    if new_tts_speed is not None:
+                        tts_speed = new_tts_speed
             reply = intent.get("reply", "Preferências atualizadas!")
+            # list_voices nunca é enviado como áudio — é uma lista visual
+            if not intent.get("list_voices") and bool((current_prefs or {}).get("audio_for_text", False)):
+                try:
+                    whatsapp.send_audio(target_phone, media_service.text_to_speech(reply, voice=tts_voice, speed=tts_speed))
+                    return {"status": "ok", "reason": "preference_updated"}
+                except Exception:
+                    pass
             whatsapp.send_message(target_phone, reply)
             return {"status": "ok", "reason": "preference_updated"}
 
@@ -412,17 +501,25 @@ async def whatsapp_webhook(request: Request):
             if audio_intent and audio_intent.get("intent") == "preference":
                 new_audio_text = audio_intent.get("audio_for_text")
                 new_audio_media = audio_intent.get("audio_for_media")
-                if new_audio_text is not None or new_audio_media is not None:
+                new_tts_voice = audio_intent.get("tts_voice")
+                new_tts_speed = audio_intent.get("tts_speed")
+                if any(v is not None for v in [new_audio_text, new_audio_media, new_tts_voice, new_tts_speed]):
                     supabase.save_preferences(
                         target_phone,
                         sections=None,
                         report_time=None,
                         audio_for_text=new_audio_text,
                         audio_for_media=new_audio_media,
+                        tts_voice=new_tts_voice,
+                        tts_speed=new_tts_speed,
                     )
+                    if new_tts_voice:
+                        tts_voice = new_tts_voice
+                    if new_tts_speed is not None:
+                        tts_speed = new_tts_speed
                 reply = audio_intent.get("reply", "Preferências atualizadas!")
                 try:
-                    audio_bytes = media_service.text_to_speech(reply)
+                    audio_bytes = media_service.text_to_speech(reply, voice=tts_voice, speed=tts_speed)
                     whatsapp.send_audio(target_phone, audio_bytes)
                 except Exception:
                     whatsapp.send_message(target_phone, reply)
@@ -434,7 +531,7 @@ async def whatsapp_webhook(request: Request):
 
             if audio_for_media:
                 try:
-                    audio_bytes = media_service.text_to_speech(reply)
+                    audio_bytes = media_service.text_to_speech(reply, voice=tts_voice, speed=tts_speed)
                     whatsapp.send_audio(target_phone, audio_bytes)
                     return {"status": "ok"}
                 except Exception:
@@ -470,7 +567,7 @@ async def whatsapp_webhook(request: Request):
             supabase.save_message(target_phone, "assistant", reply)
             if audio_for_media:
                 try:
-                    audio_bytes = media_service.text_to_speech(reply)
+                    audio_bytes = media_service.text_to_speech(reply, voice=tts_voice, speed=tts_speed)
                     whatsapp.send_audio(target_phone, audio_bytes)
                     return {"status": "ok"}
                 except Exception:
@@ -484,7 +581,7 @@ async def whatsapp_webhook(request: Request):
         supabase.save_message(target_phone, "assistant", reply)
         if audio_for_text:
             try:
-                audio_bytes = media_service.text_to_speech(reply)
+                audio_bytes = media_service.text_to_speech(reply, voice=tts_voice, speed=tts_speed)
                 whatsapp.send_audio(target_phone, audio_bytes)
                 return {"status": "ok"}
             except Exception:

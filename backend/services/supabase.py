@@ -98,6 +98,8 @@ def save_preferences(
     report_time: str | None,
     audio_for_text: bool | None = None,
     audio_for_media: bool | None = None,
+    tts_voice: str | None = None,
+    tts_speed: float | None = None,
 ) -> None:
     payload: dict = {
         "phone": phone,
@@ -109,6 +111,10 @@ def save_preferences(
         payload["audio_for_text"] = audio_for_text
     if audio_for_media is not None:
         payload["audio_for_media"] = audio_for_media
+    if tts_voice is not None:
+        payload["tts_voice"] = tts_voice
+    if tts_speed is not None:
+        payload["tts_speed"] = tts_speed
     with _client() as c:
         r = c.post(
             "/user_preferences",

@@ -52,6 +52,10 @@ def test_webhook_preferencia_salva_e_responde():
         "5534999301855",
         sections=intent_result["sections"],
         report_time=intent_result["report_time"],
+        audio_for_text=None,
+        audio_for_media=None,
+        tts_voice=None,
+        tts_speed=None,
     )
     mock_send.assert_called_once_with(
         "5534999301855",
