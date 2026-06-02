@@ -162,27 +162,35 @@ def _handle_admin_command(text: str) -> str | None:
     return None
 
 
+_VERB_FALA = r"\bfal[ae][r]?\b"  # fala / fale / falar / faler
 _TTS_SPEED_BIG_DOWN_RE = re.compile(
-    r"\bfala[r]?\b.{0,10}\b(bem|muito|bastante)\b.{0,10}\b(mais\s+)?(devagar|lento|pausad)",
+    _VERB_FALA + r".{0,10}\b(bem|muito|bastante)\b.{0,10}\b(mais\s+)?(devagar|lento|pausad)",
     re.IGNORECASE,
 )
 _TTS_SPEED_SMALL_DOWN_RE = re.compile(
-    r"\bfala[r]?\b.{0,10}\b(mais\s+)?(devagar|lento|pausad)"
-    r"|\b(mais\s+)?(devagar|lento|pausad)\b.{0,10}\bpor\s+favor\b",
+    _VERB_FALA + r".{0,10}\b(mais\s+)?(devagar|lento|pausad)"
+    r"|\b(mais\s+)?(devagar|lento|pausad)\b.{0,10}\bpor\s+favor\b"
+    r"|\bvelocidade\b.{0,15}\b(mais\s+)?(devagar|lento|baixa|menor)\b",
     re.IGNORECASE,
 )
 _TTS_SPEED_BIG_UP_RE = re.compile(
-    r"\bfala[r]?\b.{0,10}\b(bem|muito|bastante)\b.{0,10}\b(mais\s+)?(r[áa]pido|veloz|acelerado)",
+    _VERB_FALA + r".{0,10}\b(bem|muito|bastante)\b.{0,10}\b(mais\s+)?(r[áa]pido|veloz|acelerado)"
+    r"|\bvelocidade\b.{0,15}\b(bem|muito|bastante)\b.{0,15}\b(mais\s+)?(r[áa]pido|alta|maior)\b",
     re.IGNORECASE,
 )
 _TTS_SPEED_SMALL_UP_RE = re.compile(
-    r"\bfala[r]?\b.{0,10}\b(mais\s+)?(r[áa]pido|veloz|acelera)"
-    r"|\bacelera\b",
+    _VERB_FALA + r".{0,10}\b(mais\s+)?(r[áa]pid[oa]|veloz|acelera)"
+    r"|\bacelera\b"
+    r"|\bvelocidade\b.{0,15}\b(mais\s+)?(r[áa]pid[oa]|alta|maior)\b",
     re.IGNORECASE,
 )
 _TTS_SPEED_NORMAL_RE = re.compile(
     r"\bvelocidade\s+(normal|padr[ãa]o|original|default)\b"
     r"|\bvolta\b.{0,15}\bvelocidade\b",
+    re.IGNORECASE,
+)
+_TTS_SPEED_ANY_RE = re.compile(
+    r"\b(r[áa]pido|devagar|veloz|lento|acelerado|pausado)\b",
     re.IGNORECASE,
 )
 _TTS_VOICE_RE = re.compile(
@@ -287,6 +295,9 @@ _AUDIO_ALL_OFF_RE = re.compile(
 
 def _quick_audio_check(text: str) -> dict | None:
     """Pré-check determinístico para preferência de áudio, evitando falsos negativos do LLM."""
+    # Se tem palavras de velocidade (rápido, devagar, veloz...), não é ativação de áudio
+    if _TTS_SPEED_ANY_RE.search(text):
+        return None
     # Verificar padrões específicos antes do padrão geral
     if _AUDIO_TEXT_ON_RE.search(text) and not _AUDIO_MEDIA_ON_RE.search(text):
         return {
@@ -379,10 +390,11 @@ Regras de voz TTS (tts_voice):
 - Se não mencionado → tts_voice: null
 
 Regras de velocidade TTS (tts_speed):
+- ATENÇÃO: mensagens com "rápido", "devagar", "veloz" ou "lento" são SEMPRE tts_speed. Nunca audio_for_text.
 - A velocidade atual está no contexto como "velocidade_atual: X.XX"
-- "fala mais devagar", "um pouco mais devagar" → tts_speed: max(0.5, velocidade_atual - 0.07), 2 casas decimais
+- "fala mais devagar", "fale mais devagar", "um pouco mais devagar", "velocidade mais baixa" → tts_speed: max(0.5, velocidade_atual - 0.07), 2 casas decimais
 - "fala bem mais devagar", "muito mais devagar", "bem mais lento" → tts_speed: max(0.5, velocidade_atual - 0.15), 2 casas decimais
-- "fala mais rápido", "um pouco mais rápido" → tts_speed: min(1.5, velocidade_atual + 0.07), 2 casas decimais
+- "fala mais rápido", "fale mais rápido", "um pouco mais rápido", "velocidade mais alta" → tts_speed: min(1.5, velocidade_atual + 0.07), 2 casas decimais
 - "fala bem mais rápido", "muito mais rápido", "bem mais rápido" → tts_speed: min(1.5, velocidade_atual + 0.15), 2 casas decimais
 - "velocidade normal", "velocidade padrão", "velocidade original" → tts_speed: 0.95
 - Se não mencionado → tts_speed: null
