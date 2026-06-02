@@ -162,6 +162,92 @@ def _handle_admin_command(text: str) -> str | None:
     return None
 
 
+_TTS_SPEED_BIG_DOWN_RE = re.compile(
+    r"\bfala[r]?\b.{0,10}\b(bem|muito|bastante)\b.{0,10}\b(mais\s+)?(devagar|lento|pausad)",
+    re.IGNORECASE,
+)
+_TTS_SPEED_SMALL_DOWN_RE = re.compile(
+    r"\bfala[r]?\b.{0,10}\b(mais\s+)?(devagar|lento|pausad)"
+    r"|\b(mais\s+)?(devagar|lento|pausad)\b.{0,10}\bpor\s+favor\b",
+    re.IGNORECASE,
+)
+_TTS_SPEED_BIG_UP_RE = re.compile(
+    r"\bfala[r]?\b.{0,10}\b(bem|muito|bastante)\b.{0,10}\b(mais\s+)?(rápido|veloz|acelerado)",
+    re.IGNORECASE,
+)
+_TTS_SPEED_SMALL_UP_RE = re.compile(
+    r"\bfala[r]?\b.{0,10}\b(mais\s+)?(rápido|veloz|acelera)"
+    r"|\bacelera\b",
+    re.IGNORECASE,
+)
+_TTS_SPEED_NORMAL_RE = re.compile(
+    r"\bvelocidade\s+(normal|padrão|original|default)\b"
+    r"|\bvolta\b.{0,15}\bvelocidade\b",
+    re.IGNORECASE,
+)
+_TTS_VOICE_RE = re.compile(
+    r"\b(muda[r]?|usa[r]?|quero|coloca[r]?|ativa[r]?|testa[r]?|bota[r]?|tenta[r]?)\b.{0,20}\bvoz\b.{0,15}(alloy|echo|fable|nova|onyx|shimmer)"
+    r"|\bvoz\s+(para\s+|pra\s+)?(alloy|echo|fable|nova|onyx|shimmer)"
+    r"|\b(alloy|echo|fable|nova|onyx|shimmer)\b.{0,10}\b(voz|voice)\b",
+    re.IGNORECASE,
+)
+_TTS_LIST_VOICES_RE = re.compile(
+    r"\b(quais?|que|mostre?|lista[r]?|ver?|quero\s+ver)\b.{0,20}\b(vozes?|opções?\s+de\s+voz)\b"
+    r"|\bvozes?\s+(disponíveis?|tem|existem|há|posso\s+escolher)\b"
+    r"|\bque\s+vozes?\s+(tem|há|existem)\b",
+    re.IGNORECASE,
+)
+
+_VOICES_LIST_REPLY = (
+    "🎙 *Vozes disponíveis:*\n"
+    "• *nova* — feminina, suave (padrão)\n"
+    "• *shimmer* — feminina, expressiva\n"
+    "• *alloy* — neutra\n"
+    "• *echo* — masculina\n"
+    "• *fable* — expressiva\n"
+    "• *onyx* — grave\n\n"
+    "Para mudar: \"muda a voz para onyx\""
+)
+
+
+def _quick_tts_check(text: str, current_speed: float = 0.85) -> dict | None:
+    """Pré-check determinístico para comandos de velocidade e voz TTS."""
+    base = {"intent": "preference", "sections": None, "report_time": None,
+            "audio_for_text": None, "audio_for_media": None, "reset": False,
+            "list_voices": False}
+
+    if _TTS_LIST_VOICES_RE.search(text):
+        return {**base, "list_voices": True, "tts_voice": None, "tts_speed": None, "reply": _VOICES_LIST_REPLY}
+
+    voice_match = _TTS_VOICE_RE.search(text)
+    if voice_match:
+        # Extrai o nome da voz de qualquer grupo que tenha capturado
+        voice = next((g for g in voice_match.groups() if g and g.lower() in ("alloy", "echo", "fable", "nova", "onyx", "shimmer")), None)
+        if voice:
+            return {**base, "tts_voice": voice.lower(), "tts_speed": None, "reply": f"Voz alterada para *{voice.lower()}*."}
+
+    if _TTS_SPEED_BIG_DOWN_RE.search(text):
+        new_speed = round(max(0.5, current_speed - 0.15), 2)
+        return {**base, "tts_voice": None, "tts_speed": new_speed, "reply": f"Falando mais devagar agora (velocidade: {new_speed})."}
+
+    if _TTS_SPEED_SMALL_DOWN_RE.search(text):
+        new_speed = round(max(0.5, current_speed - 0.07), 2)
+        return {**base, "tts_voice": None, "tts_speed": new_speed, "reply": f"Um pouco mais devagar (velocidade: {new_speed})."}
+
+    if _TTS_SPEED_BIG_UP_RE.search(text):
+        new_speed = round(min(1.5, current_speed + 0.15), 2)
+        return {**base, "tts_voice": None, "tts_speed": new_speed, "reply": f"Falando mais rápido agora (velocidade: {new_speed})."}
+
+    if _TTS_SPEED_SMALL_UP_RE.search(text):
+        new_speed = round(min(1.5, current_speed + 0.07), 2)
+        return {**base, "tts_voice": None, "tts_speed": new_speed, "reply": f"Um pouco mais rápido (velocidade: {new_speed})."}
+
+    if _TTS_SPEED_NORMAL_RE.search(text):
+        return {**base, "tts_voice": None, "tts_speed": 0.95, "reply": "Velocidade normal (0.95)."}
+
+    return None
+
+
 _AUDIO_TEXT_ON_RE = re.compile(
     r"\b(texto|textos|mensagens?\s+de\s+texto)\b.{0,25}\b(áudio|audio)\b"
     r"|\b(responde|resposta|respostas)\b.{0,25}\b(texto|textos)\b.{0,25}\b(áudio|audio)\b"
@@ -429,8 +515,9 @@ async def whatsapp_webhook(request: Request):
             return {"status": "ok"}
 
         # Detectar intenção de preferência — apenas para mensagens de texto
+        # TTS check primeiro: evita que "fala mais rápido" seja classificado como ativar áudio
         intent = (
-            (_quick_audio_check(text) or _detect_preference_intent(text, current_sections=current_sections, tts_speed=tts_speed))
+            (_quick_tts_check(text, tts_speed) or _quick_audio_check(text) or _detect_preference_intent(text, current_sections=current_sections, tts_speed=tts_speed))
             if msg_info["type"] == "text"
             else {"intent": "message"}
         )
@@ -490,7 +577,7 @@ async def whatsapp_webhook(request: Request):
                 return {"status": "ok", "reason": "transcription_failed"}
 
             # Preferência enviada via áudio → detecta e confirma em áudio
-            audio_intent = _quick_audio_check(text) or _detect_preference_intent(text, current_sections=current_sections)
+            audio_intent = _quick_tts_check(text, tts_speed) or _quick_audio_check(text) or _detect_preference_intent(text, current_sections=current_sections, tts_speed=tts_speed)
             if audio_intent and audio_intent.get("intent") == "preference":
                 new_audio_text = audio_intent.get("audio_for_text")
                 new_audio_media = audio_intent.get("audio_for_media")
