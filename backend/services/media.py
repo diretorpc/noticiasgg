@@ -32,18 +32,18 @@ def transcribe_audio(audio_b64: str, mime_type: str = "audio/ogg") -> str:
     return transcript.text
 
 
-def text_to_speech(text: str) -> bytes:
+def text_to_speech(text: str, voice: str = "nova", speed: float = 0.85) -> bytes:
     """Converte texto em áudio MP3 via OpenAI TTS. Retorna bytes do MP3."""
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
-    # TTS tem limite de 4096 caracteres por chamada
     if len(text) > 4096:
         text = text[:4093] + "..."
 
     response = client.audio.speech.create(
         model="tts-1",
-        voice="nova",
+        voice=voice,
         input=text,
         response_format="mp3",
+        speed=speed,
     )
     return response.content
