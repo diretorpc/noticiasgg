@@ -172,16 +172,16 @@ _TTS_SPEED_SMALL_DOWN_RE = re.compile(
     re.IGNORECASE,
 )
 _TTS_SPEED_BIG_UP_RE = re.compile(
-    r"\bfala[r]?\b.{0,10}\b(bem|muito|bastante)\b.{0,10}\b(mais\s+)?(rápido|veloz|acelerado)",
+    r"\bfala[r]?\b.{0,10}\b(bem|muito|bastante)\b.{0,10}\b(mais\s+)?(r[áa]pido|veloz|acelerado)",
     re.IGNORECASE,
 )
 _TTS_SPEED_SMALL_UP_RE = re.compile(
-    r"\bfala[r]?\b.{0,10}\b(mais\s+)?(rápido|veloz|acelera)"
+    r"\bfala[r]?\b.{0,10}\b(mais\s+)?(r[áa]pido|veloz|acelera)"
     r"|\bacelera\b",
     re.IGNORECASE,
 )
 _TTS_SPEED_NORMAL_RE = re.compile(
-    r"\bvelocidade\s+(normal|padrão|original|default)\b"
+    r"\bvelocidade\s+(normal|padr[ãa]o|original|default)\b"
     r"|\bvolta\b.{0,15}\bvelocidade\b",
     re.IGNORECASE,
 )
