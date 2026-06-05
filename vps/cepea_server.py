@@ -1,3 +1,4 @@
+import os
 from flask import Flask, jsonify
 from bs4 import BeautifulSoup
 import requests
@@ -5,7 +6,7 @@ import re
 
 app = Flask(__name__)
 
-SCRAPINGBEE_KEY = "YF2JLMZMBCS1H9ACWY62CYUW3S3AOE0W00YB78JFTONN2CFCX2F3MMMYQAPUTI7T07RS08L6PK4WORNJ"
+SCRAPINGBEE_KEY = os.environ["SCRAPINGBEE_KEY"]
 SCRAPINGBEE_URL = "https://app.scrapingbee.com/api/v1/"
 
 CEPEA_PRODUTOS = {
