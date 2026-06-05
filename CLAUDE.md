@@ -127,6 +127,18 @@ WhatsApp (usuário)
 
 ---
 
+## Squad Studio
+
+Squad de IA disponível neste projeto. Invocação por prefixo: `Zeus:`, `Atlas:`, `Hermes:`, `Atena:`, `Apolo:`.
+
+**Notas de contexto para este projeto:**
+- **Atlas** — Python 3.12 + FastAPI é a linguagem primária aqui. TypeScript/Next.js apenas para o frontend planejado.
+- **Apolo** — testes com `pytest` em `backend/tests/`; foco em collectors e webhook `/api/webhook`.
+- **Gaia** — relevante para o módulo `plant_id.py`: identificação de plantas, pragas e doenças via foto. Domínio agro presente mesmo fora do agromouro-base.
+- **n8n:** NUNCA modificar workflows via MCP — apenas leitura (`search_workflows`, `get_workflow_details`). Ver regra completa em Convenções.
+
+---
+
 ## Como Rodar Localmente
 
 ```bash
