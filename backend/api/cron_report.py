@@ -1,4 +1,6 @@
+import hmac
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Request, HTTPException
@@ -16,7 +18,11 @@ def _current_hour_brt() -> str:
 
 @router.get("/api/cron/report")
 async def cron_report(request: Request):
-    if not request.headers.get("x-vercel-cron"):
+    secret = os.environ.get("CRON_SECRET")
+    if not secret:
+        raise HTTPException(status_code=503, detail="CRON_SECRET not configured")
+    provided = request.headers.get("x-cron-secret", "")
+    if not provided or not hmac.compare_digest(provided, secret):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     hour = _current_hour_brt()

@@ -48,13 +48,18 @@ def test_delete_preferences():
 
 
 def test_get_users_for_hour_retorna_usuario_com_horario():
-    supabase.save_preferences(PHONE_TEST, sections=None, report_time="08:00")
-    users = supabase.get_users_for_hour("08:00")
-    phones = [u["phone"] for u in users]
-    assert PHONE_TEST in phones
-    match = next(u for u in users if u["phone"] == PHONE_TEST)
-    assert "name" in match
-    assert "sections" in match
+    supabase.delete_authorized_by_phone(PHONE_TEST)
+    supabase.add_authorized("test_lid_0000000000", PHONE_TEST, "Test User")
+    try:
+        supabase.save_preferences(PHONE_TEST, sections=None, report_time="08:00")
+        users = supabase.get_users_for_hour("08:00")
+        phones = [u["phone"] for u in users]
+        assert PHONE_TEST in phones
+        match = next(u for u in users if u["phone"] == PHONE_TEST)
+        assert "name" in match
+        assert "sections" in match
+    finally:
+        supabase.delete_authorized_by_phone(PHONE_TEST)
 
 
 def test_get_users_for_hour_nao_retorna_outros_horarios():
