@@ -13,7 +13,7 @@ router = APIRouter()
 NEWSAPI_EVERYTHING = "https://newsapi.org/v2/everything"
 NEWSAPI_HEADLINES = "https://newsapi.org/v2/top-headlines"
 
-SOURCES_EN = ",".join([
+SOURCES_FINANCE = ",".join([
     "reuters",
     "the-wall-street-journal",
     "financial-times",
@@ -23,6 +23,17 @@ SOURCES_EN = ",".join([
     "bbc-news",
     "the-guardian-uk",
     "cnn",
+    "associated-press",
+    "the-washington-post",
+    "business-insider",
+    "politico",
+])
+
+SOURCES_TECH = ",".join([
+    "techcrunch",
+    "wired",
+    "the-verge",
+    "ars-technica",
 ])
 
 _FINANCE_QUERY = (
@@ -30,9 +41,15 @@ _FINANCE_QUERY = (
     "OR GDP OR Fed OR interest rate OR trade OR dollar OR oil"
 )
 
+_AI_QUERY = (
+    '"artificial intelligence" OR "machine learning" OR "LLM" OR '
+    '"OpenAI" OR "Anthropic" OR "Google AI" OR "generative AI" OR '
+    '"AI model" OR "large language model"'
+)
+
 _MAX_AGE = timedelta(hours=48)
 
-# RSS feeds públicos sem paywall
+# RSS feeds internacionais sem paywall
 _RSS_FEEDS = [
     ("World Economic Forum", "https://www.weforum.org/agenda/feed/rss2"),
     ("DW News", "https://rss.dw.com/rdf/rss-en-all"),
@@ -40,6 +57,12 @@ _RSS_FEEDS = [
     ("Le Monde", "https://www.lemonde.fr/rss/une.xml"),
     ("Japan Times", "https://www.japantimes.co.jp/feed/topstories/"),
     ("Global Times", "https://www.globaltimes.cn/rss/outbrain.xml"),
+]
+
+# RSS feeds especializados em IA
+_RSS_FEEDS_AI = [
+    ("MIT Technology Review", "https://www.technologyreview.com/feed/"),
+    ("VentureBeat AI", "https://venturebeat.com/category/ai/feed/"),
 ]
 
 
@@ -109,17 +132,17 @@ def collect() -> list[dict]:
     vistos: set = set()
 
     with httpx.Client(timeout=15) as client:
-        # EN: /everything filtrado por fontes financeiras + keywords
-        resp_en = client.get(NEWSAPI_EVERYTHING, params={
+        # Finanças: /everything filtrado por fontes financeiras + keywords
+        resp_finance = client.get(NEWSAPI_EVERYTHING, params={
             "apiKey": api_key,
-            "sources": SOURCES_EN,
+            "sources": SOURCES_FINANCE,
             "q": _FINANCE_QUERY,
             "language": "en",
             "sortBy": "publishedAt",
             "pageSize": 15,
         })
-        if resp_en.status_code == 200:
-            for a in resp_en.json().get("articles", []):
+        if resp_finance.status_code == 200:
+            for a in resp_finance.json().get("articles", []):
                 url = a.get("url", "")
                 published_at = a.get("publishedAt")
                 if url in vistos or not _is_fresh(published_at):
@@ -155,11 +178,34 @@ def collect() -> list[dict]:
                     "resumo": a.get("description"),
                 })
 
-        # RSS feeds internacionais
-        rss_artigos = _collect_rss(client, _RSS_FEEDS, vistos)
-        artigos.extend(rss_artigos)
+        # IA/Tech: /everything com fontes tech + query de IA
+        resp_ai = client.get(NEWSAPI_EVERYTHING, params={
+            "apiKey": api_key,
+            "sources": SOURCES_TECH,
+            "q": _AI_QUERY,
+            "language": "en",
+            "sortBy": "publishedAt",
+            "pageSize": 10,
+        })
+        if resp_ai.status_code == 200:
+            for a in resp_ai.json().get("articles", []):
+                url = a.get("url", "")
+                published_at = a.get("publishedAt")
+                if url in vistos or not _is_fresh(published_at):
+                    continue
+                vistos.add(url)
+                artigos.append({
+                    "titulo": a.get("title"),
+                    "fonte": (a.get("source") or {}).get("name"),
+                    "url": url,
+                    "publicado_em": published_at,
+                    "resumo": a.get("description"),
+                })
 
-    return artigos[:30]
+        # RSS feeds internacionais + IA
+        artigos.extend(_collect_rss(client, _RSS_FEEDS + _RSS_FEEDS_AI, vistos))
+
+    return artigos[:40]
 
 
 @router.get("/api/collectors/news")

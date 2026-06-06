@@ -5,7 +5,10 @@ from email.utils import format_datetime
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from backend.api.main import app
-from backend.collectors.news import _parse_rss_date, _collect_rss, _is_fresh
+from backend.collectors.news import (
+    _parse_rss_date, _collect_rss, _is_fresh,
+    SOURCES_FINANCE, SOURCES_TECH, _AI_QUERY, _RSS_FEEDS_AI,
+)
 
 client = TestClient(app)
 
@@ -137,3 +140,52 @@ def test_collect_rss_ignora_xml_invalido():
 
     artigos = _collect_rss(mock_client, [("Bad XML", "https://bad.url/rss")], set())
     assert artigos == []
+
+
+def test_sources_finance_contem_novas_fontes():
+    for source in ("associated-press", "the-washington-post", "business-insider", "politico"):
+        assert source in SOURCES_FINANCE
+
+
+def test_sources_tech_contem_fontes_ia():
+    for source in ("techcrunch", "wired", "the-verge", "ars-technica"):
+        assert source in SOURCES_TECH
+
+
+def test_ai_query_contem_termos_relevantes():
+    for term in ("artificial intelligence", "OpenAI", "Anthropic", "LLM"):
+        assert term in _AI_QUERY
+
+
+def test_rss_feeds_ai_contem_mit_e_venturebeat():
+    nomes = [nome for nome, _ in _RSS_FEEDS_AI]
+    assert "MIT Technology Review" in nomes
+    assert "VentureBeat AI" in nomes
+
+
+def test_collect_rss_multiplos_feeds_deduplicados():
+    """Dois feeds com a mesma URL em artigos distintos — sem duplicata."""
+    now = datetime.now(timezone.utc)
+    d = format_datetime(now - timedelta(hours=1))
+
+    def _rss(link: str, title: str) -> bytes:
+        return f"""<?xml version="1.0"?><rss version="2.0"><channel>
+        <item><title>{title}</title><link>{link}</link><pubDate>{d}</pubDate></item>
+        </channel></rss>""".encode()
+
+    responses = [
+        MagicMock(status_code=200, content=_rss("https://example.com/a1", "AI news 1")),
+        MagicMock(status_code=200, content=_rss("https://example.com/a1", "AI news 1")),  # duplicada
+        MagicMock(status_code=200, content=_rss("https://example.com/a2", "AI news 2")),
+    ]
+    mock_client = MagicMock()
+    mock_client.get.side_effect = responses
+
+    feeds = [
+        ("Feed A", "https://feed-a.com/rss"),
+        ("Feed B", "https://feed-b.com/rss"),
+        ("Feed C", "https://feed-c.com/rss"),
+    ]
+    artigos = _collect_rss(mock_client, feeds, set())
+    urls = [a["url"] for a in artigos]
+    assert len(urls) == len(set(urls)), "URLs duplicadas encontradas"
