@@ -203,7 +203,7 @@ def _check_news(recipients: list[dict]) -> int:
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     total = 0
 
-    for article in articles[:20]:
+    for article in articles[:5]:
         title = article.get("titulo") or article.get("title", "")
         if not title:
             continue
