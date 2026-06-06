@@ -115,14 +115,7 @@ def _format_price_alert(rule: AlertRule, value: float) -> str:
 def _get_recipients() -> list[dict]:
     try:
         with supabase._client() as c:
-            r = c.get("/user_preferences?report_time=not.is.null&select=phone")
-            r.raise_for_status()
-            phones = [row["phone"] for row in r.json()]
-        if not phones:
-            return []
-        phones_param = ",".join(phones)
-        with supabase._client() as c:
-            r = c.get(f"/authorized_users?phone=in.({phones_param})&select=phone,name")
+            r = c.get("/authorized_users?alerts_enabled=eq.true&select=phone,name")
             r.raise_for_status()
             return r.json()
     except Exception as e:
