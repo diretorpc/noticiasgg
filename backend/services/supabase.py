@@ -42,6 +42,11 @@ def add_authorized(lid: str, phone: str, name: str | None = None) -> None:
         r.raise_for_status()
 
 
+def delete_authorized_by_phone(phone: str) -> None:
+    with _client() as c:
+        c.delete(f"/authorized_users?phone=eq.{phone}")
+
+
 def upsert_pending(lid: str, push_name: str, last_message: str) -> None:
     with _client() as c:
         r = c.post(

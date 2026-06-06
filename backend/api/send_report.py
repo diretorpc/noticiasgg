@@ -37,7 +37,7 @@ def _personalize(text: str, user_name: str) -> str:
     result, count = _GREETING_RE.subn(
         lambda m: m.group(1) + primeiro_nome + m.group(3), text
     )
-    if count == 0 and not re.match(r'^[📰📊🌎💵🌾🗳️🏛️]', result):
+    if count == 0:
         result = f"{_current_greeting()}, *{primeiro_nome}!*\n\n{result}"
     return result
 
