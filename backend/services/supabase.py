@@ -84,6 +84,57 @@ def get_history(phone: str, limit: int = 10) -> list[dict]:
         return list(reversed(r.json()))
 
 
+def count_history(phone: str) -> int:
+    with _client() as c:
+        r = c.get(
+            f"/conversation_history?phone=eq.{phone}&select=id&limit=1",
+            headers={"Prefer": "count=exact"},
+        )
+        r.raise_for_status()
+        content_range = r.headers.get("content-range", "*/0")
+        try:
+            return int(content_range.split("/")[1])
+        except (IndexError, ValueError):
+            return 0
+
+
+def delete_old_history(phone: str, keep_recent: int = 6) -> None:
+    """Deleta todas as mensagens exceto as `keep_recent` mais recentes."""
+    with _client() as c:
+        r = c.get(
+            f"/conversation_history?phone=eq.{phone}&select=created_at"
+            f"&order=created_at.desc&limit=1&offset={keep_recent}",
+        )
+        r.raise_for_status()
+        rows = r.json()
+        if not rows:
+            return
+        cutoff = rows[0]["created_at"]
+        c.delete(f"/conversation_history?phone=eq.{phone}&created_at=lte.{cutoff}").raise_for_status()
+
+
+def get_summary(phone: str) -> str | None:
+    with _client() as c:
+        r = c.get(f"/conversation_summaries?phone=eq.{phone}&select=summary")
+        r.raise_for_status()
+        rows = r.json()
+        return rows[0]["summary"] if rows else None
+
+
+def save_summary(phone: str, summary: str) -> None:
+    with _client() as c:
+        r = c.post(
+            "/conversation_summaries",
+            json={
+                "phone": phone,
+                "summary": summary,
+                "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+            headers={"Prefer": "resolution=merge-duplicates,return=representation"},
+        )
+        r.raise_for_status()
+
+
 def get_preferences(phone: str) -> dict | None:
     with _client() as c:
         r = c.get(f"/user_preferences?phone=eq.{phone}&select=*")
@@ -152,6 +203,46 @@ def get_polls() -> list[dict]:
         r = c.get("/polls_cache?select=instituto,turno,data_pesquisa,candidatos,fonte_url&order=updated_at.desc")
         r.raise_for_status()
         return r.json()
+
+
+def get_alert_last_triggered(rule_id: str) -> datetime.datetime | None:
+    with _client() as c:
+        r = c.get(f"/system_alert_state?rule_id=eq.{rule_id}&select=last_triggered_at")
+        r.raise_for_status()
+        rows = r.json()
+        if not rows:
+            return None
+        return datetime.datetime.fromisoformat(rows[0]["last_triggered_at"])
+
+
+def set_alert_triggered(rule_id: str) -> None:
+    with _client() as c:
+        r = c.post(
+            "/system_alert_state",
+            json={
+                "rule_id": rule_id,
+                "last_triggered_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            },
+            headers={"Prefer": "resolution=merge-duplicates,return=representation"},
+        )
+        r.raise_for_status()
+
+
+def is_news_sent(news_id: str) -> bool:
+    with _client() as c:
+        r = c.get(f"/sent_news?news_id=eq.{news_id}&select=news_id")
+        r.raise_for_status()
+        return len(r.json()) > 0
+
+
+def mark_news_sent(news_id: str) -> None:
+    with _client() as c:
+        r = c.post(
+            "/sent_news",
+            json={"news_id": news_id, "sent_at": datetime.datetime.now(datetime.timezone.utc).isoformat()},
+            headers={"Prefer": "resolution=merge-duplicates,return=representation"},
+        )
+        r.raise_for_status()
 
 
 def get_users_for_hour(hour_brt: str) -> list[dict]:

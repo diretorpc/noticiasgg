@@ -6,10 +6,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from anthropic import Anthropic
 
-from backend.collectors import market, crypto, indicators_us, indicators_br, news, commodities_br, politics_br, polls_br, agro_br
+from backend.collectors import market, crypto, indicators_us, indicators_br, news, commodities_br, politics_br, polls_br, agro_br, esalq
 from backend.services import reporter, whatsapp, supabase
 from backend.services import media as media_service
-from backend.api import send_report, cron_report
+from backend.api import send_report, cron_report, check_alerts
 
 logger = logging.getLogger("noticiasgg")
 logging.basicConfig(level=logging.INFO)
@@ -34,6 +34,8 @@ app.include_router(polls_br.router)
 app.include_router(agro_br.router)
 app.include_router(send_report.router)
 app.include_router(cron_report.router)
+app.include_router(check_alerts.router)
+app.include_router(esalq.router)
 
 
 PHONE_RE = re.compile(r"^\D*(\d{10,13})\D*$")
@@ -446,6 +448,41 @@ def _build_settings_summary(prefs: dict | None) -> str:
     )
 
 
+_SUMMARY_THRESHOLD = 20
+_KEEP_RECENT = 6
+
+
+def _build_history_with_summary(history: list[dict], summary: str | None) -> list[dict]:
+    raw = [{"role": h["role"], "content": h["content"]} for h in history]
+    if not summary:
+        return raw
+    return [
+        {"role": "user", "content": f"[CONTEXTO DA CONVERSA ANTERIOR]\n{summary}"},
+        {"role": "assistant", "content": "Entendido."},
+        *raw,
+    ]
+
+
+def _maybe_summarize(phone: str) -> None:
+    """Sumariza e comprime histórico quando ultrapassa o limite."""
+    try:
+        total = supabase.count_history(phone)
+        if total <= _SUMMARY_THRESHOLD:
+            return
+        batch_size = min(total, 50)
+        all_msgs = supabase.get_history(phone, limit=batch_size)
+        old_msgs = all_msgs[:-_KEEP_RECENT] if len(all_msgs) > _KEEP_RECENT else []
+        if not old_msgs:
+            return
+        from backend.services import summarizer
+        existing = supabase.get_summary(phone)
+        new_summary = summarizer.summarize(old_msgs, existing)
+        supabase.save_summary(phone, new_summary)
+        supabase.delete_old_history(phone, keep_recent=_KEEP_RECENT)
+    except Exception:
+        logger.warning("summarization failed for %s", phone, exc_info=True)
+
+
 def _detect_preference_intent(text: str, current_sections: dict | None = None, tts_speed: float = 0.85) -> dict:
     context = f"\nvelocidade_atual: {tts_speed:.2f}"
     if current_sections:
@@ -569,9 +606,10 @@ async def whatsapp_webhook(request: Request):
             whatsapp.send_message(target_phone, reply)
             return {"status": "ok", "reason": "preference_updated"}
 
-        # Buscar histórico
-        history = supabase.get_history(target_phone, limit=10)
-        anthropic_history = [{"role": h["role"], "content": h["content"]} for h in history]
+        # Buscar histórico com resumo comprimido
+        history = supabase.get_history(target_phone, limit=_KEEP_RECENT)
+        summary = supabase.get_summary(target_phone)
+        anthropic_history = _build_history_with_summary(history, summary)
         audio_for_text = bool((current_prefs or {}).get("audio_for_text", False))
         audio_for_media = bool((current_prefs or {}).get("audio_for_media", False))
 
@@ -620,6 +658,7 @@ async def whatsapp_webhook(request: Request):
             supabase.save_message(target_phone, "user", f"[áudio transcrito] {text}")
             reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"), sections={})
             supabase.save_message(target_phone, "assistant", reply)
+            _maybe_summarize(target_phone)
 
             if audio_for_media:
                 try:
@@ -657,6 +696,7 @@ async def whatsapp_webhook(request: Request):
                 media_attachment={"type": msg_info["type"], "b64": media["base64"], "mime": mime},
             )
             supabase.save_message(target_phone, "assistant", reply)
+            _maybe_summarize(target_phone)
             if audio_for_media:
                 try:
                     audio_bytes = media_service.text_to_speech(reply, voice=tts_voice, speed=tts_speed)
@@ -671,6 +711,7 @@ async def whatsapp_webhook(request: Request):
         supabase.save_message(target_phone, "user", text)
         reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"), sections={})
         supabase.save_message(target_phone, "assistant", reply)
+        _maybe_summarize(target_phone)
         if audio_for_text:
             try:
                 audio_bytes = media_service.text_to_speech(reply, voice=tts_voice, speed=tts_speed)

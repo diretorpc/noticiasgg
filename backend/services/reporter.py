@@ -59,10 +59,21 @@ Regra especial — seção *Visão Agro BR*:
 - NUNCA escreva "ausência de dados limita a leitura" — se não houver dados estruturados, busque na web e analise com base no contexto macro do dia
 - Tom: analista de mercado agro, não repórter. Entregue uma leitura de como o dia impacta o agro brasileiro no cenário global
 
+Regra especial — identificação de plantas e insetos:
+- Se os dados contiverem `identificacao_planta`, use como fonte primária para responder sobre o que está na foto
+- O campo pode conter: `planta` (espécie vegetal), `saude_planta` (doenças detectadas), `inseto` (praga ou inseto identificado)
+- Se houver `inseto`: apresente nome científico, nomes comuns, ordem/família e % de confiança — complemente com contexto agronômico: é praga? causa que dano? como controlar? qual cultura afeta?
+- Se houver `planta`: apresente nome científico, nomes comuns, família e confiança — contexto agronômico relevante
+- Se houver `saude_planta`: informe se está saudável e liste doenças detectadas com confiança
+- Se houver tanto `planta` quanto `inseto`: integre as duas informações (ex: "praga X encontrada em planta Y — impacto e controle")
+- Use search_agro_web para aprofundar detalhes de manejo, controle químico ou biológico quando necessário
+- Seja direto: "Inseto: *Spodoptera frugiperda* (Lagarta-do-cartucho) — 91% de confiança. Principal praga do milho no BR..."
+
 Regras de ferramentas:
 - OBRIGATÓRIO: se o usuário perguntar sobre cotação ou preço de uma ação específica (ex: RAIZ4, PETR4, VALE3, AAPL) que não esteja nos dados recebidos, chame IMEDIATAMENTE get_stock_data antes de responder. NUNCA diga que não tem o dado sem antes usar a ferramenta.
 - OBRIGATÓRIO: se o usuário perguntar sobre qualquer dado do agronegócio (commodities agrícolas, pecuária, fertilizantes, defensivos, glifosato, ureia, soja, milho, boi gordo, etc.), chame get_agro_data com a categoria mais relevante. Se a informação não estiver nas categorias estruturadas (ex: preço de terra, maquinário, estimativa de safra, fungicida, inseticida), use search_agro_web.
-- OBRIGATÓRIO: se o usuário perguntar sobre qualquer dado que não esteja nos dados coletados (preços CEPEA, dados IBGE, CONAB, notícias específicas, informações de empresas, eventos, etc.), use search_web antes de responder. NUNCA diga que não tem acesso a um dado sem antes tentar buscar na web."""
+- OBRIGATÓRIO: se o usuário perguntar sobre qualquer dado que não esteja nos dados coletados (preços CEPEA, dados IBGE, CONAB, notícias específicas, informações de empresas, eventos, etc.), use search_web antes de responder. NUNCA diga que não tem acesso a um dado sem antes tentar buscar na web.
+- PERMITIDO (uso criterioso): após search_web ou search_agro_web retornarem links, use read_article para ler o conteúdo completo de um artigo quando o assunto for finanças, mercado, macroeconomia, agronegócio, commodities, câmbio, juros, safra, pecuária, insumos ou geopolítica econômica. NUNCA use read_article para temas como moda, celebridades, entretenimento, esportes, fofoca ou qualquer assunto não relacionado a finanças e agro."""
 
 _SYSTEM_CHAT = """Você é um analista financeiro brasileiro com anos de mercado e fundo de quintal no agronegócio. Acompanha bolsa, câmbio, cripto, macro, política e agro — de soja e boi gordo a insumos e safra. Responde pelo WhatsApp como qualquer pessoa responderia: sem cerimônia, sem enrolar.
 
@@ -109,7 +120,9 @@ Capacidades reais — NUNCA diga que não consegue fazer o que está listado aba
 Seja conciso: máximo 3-4 parágrafos curtos.
 Se o usuário perguntar sobre cotação ou preço de uma ação específica, use a ferramenta get_stock_data para buscar os dados em tempo real.
 Se o usuário perguntar sobre qualquer dado do agronegócio (commodities, pecuária, fertilizantes, defensivos, terras, maquinários, safra, etc.), use get_agro_data com a categoria mais relevante ou search_agro_web para dados não cobertos estruturalmente.
-Se o usuário perguntar sobre qualquer informação que você não tem certeza ou que pode estar desatualizada (preços, notícias, dados de empresas, eventos, leis, sites específicos como CEPEA, IBGE, CONAB), use search_web para buscar em tempo real antes de responder."""
+Se o usuário perguntar sobre qualquer informação que você não tem certeza ou que pode estar desatualizada (preços, notícias, dados de empresas, eventos, leis, sites específicos como CEPEA, IBGE, CONAB), use search_web para buscar em tempo real antes de responder.
+Se os dados contiverem `identificacao_planta`, use como fonte primária. Campos possíveis: `planta` (espécie vegetal), `saude_planta` (doenças), `inseto` (praga/inseto). Apresente nome científico, nomes comuns, confiança e contexto agronômico para cada um. Se houver inseto, foque em: é praga? causa que dano? como controlar? Use search_agro_web para detalhes de manejo quando necessário.
+Após buscar com search_web ou search_agro_web, use read_article para ler o conteúdo completo de um link relevante quando o assunto for finanças, mercado, agronegócio, commodities, câmbio, juros, safra, pecuária, insumos ou geopolítica econômica. NUNCA use read_article para temas como moda, celebridades, entretenimento, esportes ou fofoca."""
 
 
 def _safe_collect(fn):
@@ -216,6 +229,30 @@ _AGRO_SEARCH_TOOL = {
             }
         },
         "required": ["query"],
+    },
+}
+
+_READ_ARTICLE_TOOL = {
+    "name": "read_article",
+    "description": (
+        "Lê o conteúdo completo de uma URL (artigo, relatório, nota técnica). "
+        "Use SOMENTE quando o assunto for finanças, mercado, macroeconomia, agronegócio, "
+        "commodities, política econômica, câmbio, juros, crédito rural, safra, pecuária, "
+        "insumos agrícolas, geopolítica com impacto econômico, ou temas diretamente "
+        "ligados ao mercado financeiro e ao agro brasileiro. "
+        "NUNCA use para assuntos como moda, entretenimento, celebridades, esportes, "
+        "fofoca, culinária, viagem ou qualquer tema não relacionado a finanças e agronegócio. "
+        "Normalmente chamada após search_web ou search_agro_web retornarem um link relevante."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "url": {
+                "type": "string",
+                "description": "URL completa do artigo a ser lido.",
+            }
+        },
+        "required": ["url"],
     },
 }
 
@@ -346,10 +383,19 @@ def generate_report(
 
     ticker_data = _extract_ticker_data(user_message)
 
-    if data or ticker_data:
+    plant_data = None
+    if media_attachment and "image" in media_attachment.get("mime", ""):
+        from backend.services import plant_id as _plant_id
+        result = _plant_id.identify(media_attachment["b64"], media_attachment["mime"])
+        if result.get("identificado"):
+            plant_data = result
+
+    if data or ticker_data or plant_data:
         context = {**data}
         if ticker_data:
             context["acoes_consultadas"] = ticker_data
+        if plant_data:
+            context["identificacao_planta"] = plant_data
         text_block = (
             f"Mensagem do usuário: {user_message}\n\n"
             f"Dados de mercado coletados agora:\n{json.dumps(context, ensure_ascii=False, default=str)}"
@@ -376,7 +422,7 @@ def generate_report(
             max_tokens=2000,
             system=system,
             messages=messages,
-            tools=[_STOCK_TOOL, _AGRO_DATA_TOOL, _AGRO_SEARCH_TOOL, _WEB_SEARCH_TOOL],
+            tools=[_STOCK_TOOL, _AGRO_DATA_TOOL, _AGRO_SEARCH_TOOL, _WEB_SEARCH_TOOL, _READ_ARTICLE_TOOL],
         )
 
         if response.stop_reason == "tool_use":
@@ -408,6 +454,14 @@ def generate_report(
                 elif block.type == "tool_use" and block.name == "search_web":
                     from backend.services import web_search
                     result = web_search.search(block.input["query"])
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": json.dumps(result, ensure_ascii=False, default=str),
+                    })
+                elif block.type == "tool_use" and block.name == "read_article":
+                    from backend.services import web_search
+                    result = web_search.read_article(block.input["url"])
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
