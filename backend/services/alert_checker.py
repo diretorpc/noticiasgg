@@ -137,10 +137,23 @@ def _broadcast(message: str, recipients: list[dict]) -> int:
     return sent
 
 
+def _is_market_hours() -> bool:
+    """True entre 07:00 e 22:00 BRT. Fora desse intervalo, dados de bolsa/câmbio/commodities
+    são estáticos (fechamento) e variacao_pct não representa movimento real."""
+    brt = timezone(timedelta(hours=-3))
+    now = datetime.now(brt)
+    return 7 <= now.hour < 22
+
+
 def _check_price_rules(data: dict, recipients: list[dict]) -> int:
     total = 0
+    market_open = _is_market_hours()
     for rule in RULES:
         try:
+            # change_pct de ativos tradicionais são dados diários estáticos fora do horário
+            # de mercado — só crypto (24/7) é checada a qualquer hora
+            if rule.value_type == "change_pct" and rule.collector != "crypto" and not market_open:
+                continue
             value = _extract_value(data, rule)
             if value is None:
                 continue
