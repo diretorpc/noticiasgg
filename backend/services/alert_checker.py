@@ -28,7 +28,7 @@ Alta relevância (score 6-10):
 - Decisão política com impacto imediato nos mercados
 - Notícias de agropecuária com impacto imediato nos mercados (preços, safra, clima, etc.)
 - Descoberta de corrupção ou fraude de grande escala envolvendo empresas ou governo
-- Notícias de atualização sobre IA e tecnologia com impacto direto em mercados financeiros ou agrícolas
+- Avanços, riscos, regulações ou posicionamentos relevantes de grandes labs/empresas de IA (OpenAI, Anthropic, Google, Meta, Mistral, xAI) que afetem o setor de tecnologia ou investimentos
 
 Baixa relevância (score 1-5):
 - Notícias de rotina, declarações sem decisão
