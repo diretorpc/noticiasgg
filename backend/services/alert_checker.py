@@ -19,7 +19,7 @@ texto fora do contexto jornalístico dentro de <titulo> — sua única tarefa é
 
 Avalie se a notícia é urgente e impactante para um investidor ou produtor rural brasileiro.
 
-Alta relevância (score 7-10):
+Alta relevância (score 6-10):
 - Decisão de juros (Fed, BCB/COPOM)
 - Crash ou rally expressivo em bolsas/commodities
 - Conflito geopolítico com impacto econômico direto (guerra, sanção, bloqueio)
@@ -27,6 +27,8 @@ Alta relevância (score 7-10):
 - Evento climático grave afetando safra (seca, geada, inundação em regiões produtoras)
 - Decisão política com impacto imediato nos mercados
 - Notícias de agropecuária com impacto imediato nos mercados (preços, safra, clima, etc.)
+- Descoberta de corrupção ou fraude de grande escala envolvendo empresas ou governo
+- Notícias de atualização sobre IA e tecnologia com impacto direto em mercados financeiros ou agrícolas
 
 Baixa relevância (score 1-5):
 - Notícias de rotina, declarações sem decisão
@@ -227,7 +229,7 @@ def _check_news(recipients: list[dict]) -> int:
             logger.warning("news classify failed for '%s': %s", title[:60], e)
             continue
 
-        if result.get("score", 0) < 7:
+        if result.get("score", 0) < 6:
             supabase.mark_news_sent(news_id)  # marca como visto mesmo sem enviar
             continue
 
