@@ -177,8 +177,16 @@ def _check_copom(recipients: list[dict]) -> int:
     return sent
 
 
+_NEWS_GLOBAL_COOLDOWN_HOURS = 0.5  # 30 min between any news alerts
+
+
 def _check_news(recipients: list[dict], test_mode: bool = False) -> int:
     from backend.collectors import news as news_collector
+
+    if not test_mode and not _cooldown_ok("news_alert_global", _NEWS_GLOBAL_COOLDOWN_HOURS):
+        logger.info("news check: global cooldown active, skipping")
+        return 0
+
     try:
         articles = news_collector.collect()
     except Exception as e:
@@ -251,6 +259,8 @@ def _check_news(recipients: list[dict], test_mode: bool = False) -> int:
             supabase.mark_news_sent(news_id)
         if sent > 0:
             total += sent
+            if not test_mode:
+                supabase.set_alert_triggered("news_alert_global")
             logger.info("news alert sent: '%s' (score=%d)", title[:60], score)
 
     return total
