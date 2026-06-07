@@ -16,23 +16,6 @@ class AlertRule:
 
 
 RULES: list[AlertRule] = [
-    # ── Câmbio ──────────────────────────────────────────────────────────────────
-    AlertRule("usd_brl_spike_up",   "Dólar disparou",              "🚨", "market", ["cambio", "USD/BRL"], "change_pct", "above",  1.5,  "%"),
-    AlertRule("usd_brl_spike_down", "Dólar recuou forte",          "💚", "market", ["cambio", "USD/BRL"], "change_pct", "below", -1.5,  "%"),
-    AlertRule("usd_brl_above_600",  "Dólar ultrapassou R$6,00",    "🔴", "market", ["cambio", "USD/BRL"], "price",      "above",  6.00, "R$"),
-    AlertRule("usd_brl_above_580",  "Dólar acima de R$5,80",       "⚠️", "market", ["cambio", "USD/BRL"], "price",      "above",  5.80, "R$"),
-    AlertRule("usd_brl_below_520",  "Dólar caiu abaixo de R$5,20", "💪", "market", ["cambio", "USD/BRL"], "price",      "below",  5.20, "R$"),
-
-    # ── Bolsas ──────────────────────────────────────────────────────────────────
-    AlertRule("ibov_drop",   "Ibovespa em queda forte", "📉", "market", ["bolsas", "IBOVESPA"], "change_pct", "below", -1.5, "%"),
-    AlertRule("ibov_rally",  "Ibovespa em alta forte",  "📈", "market", ["bolsas", "IBOVESPA"], "change_pct", "above",  1.5, "%"),
-    AlertRule("sp500_drop",  "S&P 500 em queda forte",  "📉", "market", ["bolsas", "S&P 500"],  "change_pct", "below", -1.5, "%"),
-    AlertRule("sp500_rally", "S&P 500 em alta forte",   "📈", "market", ["bolsas", "S&P 500"],  "change_pct", "above",  1.5, "%"),
-
-    # ── Cripto ──────────────────────────────────────────────────────────────────
-    AlertRule("btc_drop",   "Bitcoin despencou", "₿", "crypto", ["BTC"], "change_pct", "below", -3.0, "%"),
-    AlertRule("btc_rally",  "Bitcoin disparou",  "₿", "crypto", ["BTC"], "change_pct", "above",  3.0, "%"),
-
     # ── Commodities ─────────────────────────────────────────────────────────────
     AlertRule("oil_drop",   "Petróleo em queda",   "🛢️", "commodities_br", ["Petroleo Brent"], "change_pct", "below", -2.0, "%"),
     AlertRule("oil_rally",  "Petróleo em alta",    "🛢️", "commodities_br", ["Petroleo Brent"], "change_pct", "above",  2.0, "%"),

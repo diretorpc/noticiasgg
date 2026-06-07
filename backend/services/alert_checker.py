@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from anthropic import Anthropic
 
-from backend.collectors import market, crypto, commodities_br, esalq
+from backend.collectors import commodities_br, esalq
 from backend.services import supabase, whatsapp
 from backend.services.alert_rules import RULES, COPOM_DATES_2026, AlertRule
 
@@ -35,25 +35,15 @@ Baixa relevância (score 1-5):
 - Eventos culturais, esportivos, entretenimento
 - Especulações sem base factual
 
-Responda APENAS com JSON: {"score": <1-10>, "resumo": "<2 frases diretas sobre o impacto>"}"""
+Responda APENAS com JSON: {"score": <1-10>, "titulo_pt": "<título traduzido para português>", "resumo": "<2 frases diretas sobre o impacto>"}"""
 
 
 def _collect_all() -> dict:
     data: dict = {}
-    for name, fn in [
-        ("market", market.collect),
-        ("commodities_br", commodities_br.collect),
-    ]:
-        try:
-            data[name] = fn()
-        except Exception as e:
-            data[name] = {"erro": str(e)}
-
     try:
-        coins = crypto.collect()
-        data["crypto"] = {c["simbolo"]: c for c in coins if "simbolo" in c}
+        data["commodities_br"] = commodities_br.collect()
     except Exception as e:
-        data["crypto"] = {"erro": str(e)}
+        data["commodities_br"] = {"erro": str(e)}
 
     try:
         esalq_data = esalq.collect()
@@ -75,8 +65,7 @@ def _extract_value(data: dict, rule: AlertRule) -> float | None:
             return None
         if rule.value_type == "price":
             return node.get("preco")
-        # change_pct: crypto usa variacao_24h_pct, demais usam variacao_pct
-        return node.get("variacao_24h_pct") or node.get("variacao_pct")
+        return node.get("variacao_pct")
     except Exception:
         return None
 
@@ -147,9 +136,7 @@ def _check_price_rules(data: dict, recipients: list[dict]) -> int:
     market_open = _is_market_hours()
     for rule in RULES:
         try:
-            # change_pct de ativos tradicionais são dados diários estáticos fora do horário
-            # de mercado — só crypto (24/7) é checada a qualquer hora
-            if rule.value_type == "change_pct" and rule.collector != "crypto" and not market_open:
+            if rule.value_type == "change_pct" and not market_open:
                 continue
             value = _extract_value(data, rule)
             if value is None:
@@ -190,7 +177,7 @@ def _check_copom(recipients: list[dict]) -> int:
     return sent
 
 
-def _check_news(recipients: list[dict]) -> int:
+def _check_news(recipients: list[dict], test_mode: bool = False) -> int:
     from backend.collectors import news as news_collector
     try:
         articles = news_collector.collect()
@@ -202,61 +189,88 @@ def _check_news(recipients: list[dict]) -> int:
 
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     total = 0
+    min_score = 1 if test_mode else 6
+    limit = 1 if test_mode else 5
 
-    for article in articles[:5]:
+    logger.info("news check: %d articles fetched, limit=%d, min_score=%d", len(articles), limit, min_score)
+
+    for article in articles[:limit]:
         title = article.get("titulo") or article.get("title", "")
         if not title:
+            logger.warning("news check: article has no title, skipping")
             continue
         news_id = hashlib.md5(title.encode()).hexdigest()
-        if supabase.is_news_sent(news_id):
+        if not test_mode and supabase.is_news_sent(news_id):
             continue
+        logger.info("news check: classifying '%s'", title[:80])
         try:
             resp = client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=150,
+                max_tokens=500,
                 system=_NEWS_CLASSIFIER_SYSTEM,
                 messages=[{"role": "user", "content": f"<titulo>{title[:300]}</titulo>"}],
             )
-            result = json.loads(resp.content[0].text)
+            raw = resp.content[0].text.strip()
+            # strip markdown code fences if present
+            if raw.startswith("```"):
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+                raw = raw.strip()
+            result = json.loads(raw)
+        except json.JSONDecodeError as e:
+            logger.warning("news classify json error for '%s': %s | raw=%s", title[:60], e, raw[:200])
+            continue
         except Exception as e:
             logger.warning("news classify failed for '%s': %s", title[:60], e)
             continue
 
-        if result.get("score", 0) < 6:
-            supabase.mark_news_sent(news_id)  # marca como visto mesmo sem enviar
+        score = result.get("score", 0)
+        logger.info("news scored: '%s' score=%d (min=%d)", title[:60], score, min_score)
+
+        if score < min_score:
+            if not test_mode:
+                supabase.mark_news_sent(news_id)
             continue
 
         source = article.get("fonte") or article.get("source", "")
+        titulo_pt = result.get("titulo_pt") or title
         resumo = result.get("resumo", "")
-        msg = f"📰 *Notícia Relevante*\n\n*{title}*"
+        msg = f"📰 *Notícia Relevante*\n\n*{titulo_pt}*"
         if source:
             msg += f"\n_{source}_"
         if resumo:
             msg += f"\n\n{resumo}"
+        if test_mode:
+            msg += f"\n\n_[TESTE — score: {score}/10]_"
 
+        logger.info("news check: broadcasting to %d recipients", len(recipients))
         sent = _broadcast(msg, recipients)
-        supabase.mark_news_sent(news_id)
+        logger.info("news check: broadcast done, sent=%d", sent)
+        if not test_mode:
+            supabase.mark_news_sent(news_id)
         if sent > 0:
             total += sent
-            logger.info("news alert sent: '%s' (score=%d)", title[:60], result["score"])
+            logger.info("news alert sent: '%s' (score=%d)", title[:60], score)
 
     return total
 
 
-def run_checks() -> dict:
+def run_checks(test_mode: bool = False) -> dict:
     """Executa todos os checks de alertas. Chamado pelo endpoint /api/check-alerts."""
-    logger.info("starting alert checks")
-    data = _collect_all()
+    logger.info("starting alert checks (test_mode=%s)", test_mode)
     recipients = _get_recipients()
 
     if not recipients:
-        logger.info("no recipients with report_time configured")
+        logger.info("no recipients with alerts_enabled configured")
         return {"status": "ok", "recipients": 0, "alerts_sent": 0}
 
     total = 0
-    total += _check_price_rules(data, recipients)
-    total += _check_copom(recipients)
-    total += _check_news(recipients)
+    if not test_mode:
+        data = _collect_all()
+        total += _check_price_rules(data, recipients)
+        total += _check_copom(recipients)
+    total += _check_news(recipients, test_mode=test_mode)
 
     logger.info("alert checks done: %d alerts sent to %d recipients", total, len(recipients))
-    return {"status": "ok", "recipients": len(recipients), "alerts_sent": total}
+    return {"status": "ok", "recipients": len(recipients), "alerts_sent": total, "test_mode": test_mode}
