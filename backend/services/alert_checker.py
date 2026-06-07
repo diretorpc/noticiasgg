@@ -199,6 +199,7 @@ def _check_news(recipients: list[dict], test_mode: bool = False) -> int:
     total = 0
     min_score = 1 if test_mode else 6
     limit = 1 if test_mode else 5
+    sent_sources: set[str] = set()
 
     logger.info("news check: %d articles fetched, limit=%d, min_score=%d", len(articles), limit, min_score)
 
@@ -206,6 +207,10 @@ def _check_news(recipients: list[dict], test_mode: bool = False) -> int:
         title = article.get("titulo") or article.get("title", "")
         if not title:
             logger.warning("news check: article has no title, skipping")
+            continue
+        source = article.get("fonte") or article.get("source", "")
+        if not test_mode and source and source in sent_sources:
+            logger.info("news check: source '%s' already sent this run, skipping", source)
             continue
         news_id = hashlib.md5(title.encode()).hexdigest()
         if not test_mode and supabase.is_news_sent(news_id):
@@ -241,7 +246,6 @@ def _check_news(recipients: list[dict], test_mode: bool = False) -> int:
                 supabase.mark_news_sent(news_id)
             continue
 
-        source = article.get("fonte") or article.get("source", "")
         titulo_pt = result.get("titulo_pt") or title
         resumo = result.get("resumo", "")
         msg = f"📰 *Notícia Relevante*\n\n*{titulo_pt}*"
@@ -261,6 +265,8 @@ def _check_news(recipients: list[dict], test_mode: bool = False) -> int:
             total += sent
             if not test_mode:
                 supabase.set_alert_triggered("news_alert_global")
+                if source:
+                    sent_sources.add(source)
             logger.info("news alert sent: '%s' (score=%d)", title[:60], score)
 
     return total
