@@ -18,6 +18,7 @@ SYMBOLS = {
     "^N225":    ("bolsas", "JPX (Nikkei 225)"),
     "USDBRL=X": ("cambio", "USD/BRL"),
     "EURBRL=X": ("cambio", "EUR/BRL"),
+    "DX-Y.NYB": ("cambio", "DXY (Índice Dólar)"),
 }
 
 HEADERS = {

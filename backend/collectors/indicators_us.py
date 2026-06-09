@@ -15,6 +15,7 @@ SERIES = {
     "CPIAUCSL": "CPI (inflação EUA)",
     "PPIACO": "PPI (preços ao produtor)",
     "UNRATE": "Taxa de desemprego EUA",
+    "DFF": "Fed Funds Rate (juros EUA)",
 }
 
 

@@ -69,6 +69,7 @@ c:\noticiasgg\
 |----------|-----------|
 | `ANTHROPIC_API_KEY` | Chave da API Claude |
 | `FRED_API_KEY` | Chave da API FRED |
+| `EIA_API_KEY` | Chave da API EIA (estoques semanais petróleo/gasolina/gás EUA) |
 | `NEWS_API_KEY` | Chave da NewsAPI |
 | `SCRAPER_API_KEY` | Chave do ScraperAPI |
 | `EVOLUTION_API_URL` | `http://46.202.179.33:8080` |

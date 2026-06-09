@@ -38,7 +38,9 @@ SOURCES_TECH = ",".join([
 
 _FINANCE_QUERY = (
     "economy OR market OR inflation OR stocks OR bonds OR commodities "
-    "OR GDP OR Fed OR interest rate OR trade OR dollar OR oil"
+    "OR GDP OR Fed OR interest rate OR trade OR dollar OR oil "
+    "OR OPEC OR USDA OR crop OR harvest OR drought OR \"La Nina\" OR \"El Nino\" "
+    "OR PMI OR China OR sanctions OR tariff OR freight OR fertilizer"
 )
 
 _AI_QUERY = (

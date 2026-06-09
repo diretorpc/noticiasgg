@@ -15,18 +15,13 @@ class AlertRule:
     cooldown_hours: int = 4
 
 
+# Foco: variáveis que influenciam precificação de commodities.
+# Câmbio (DXY) só alerta em oscilação forte (>=2%). As demais categorias
+# (demanda global, oferta/clima, geopolítica, BR) são cobertas via notícias
+# no alert_checker — quanto antes a informação chegar, melhor.
 RULES: list[AlertRule] = [
-    # ── Commodities ─────────────────────────────────────────────────────────────
-    AlertRule("oil_drop",   "Petróleo em queda",   "🛢️", "commodities_br", ["Petroleo Brent"], "change_pct", "below", -2.0, "%"),
-    AlertRule("oil_rally",  "Petróleo em alta",    "🛢️", "commodities_br", ["Petroleo Brent"], "change_pct", "above",  2.0, "%"),
-    AlertRule("soja_drop",  "Soja em queda",       "🌾", "commodities_br", ["Soja PR"],        "change_pct", "below", -1.5, "%"),
-    AlertRule("soja_rally", "Soja em alta",        "🌾", "commodities_br", ["Soja PR"],        "change_pct", "above",  1.5, "%"),
-    AlertRule("milho_drop", "Milho em queda",      "🌽", "commodities_br", ["Milho SP"],       "change_pct", "below", -1.5, "%"),
-    AlertRule("milho_rally","Milho em alta",       "🌽", "commodities_br", ["Milho SP"],       "change_pct", "above",  1.5, "%"),
-    AlertRule("cana_drop",  "Cana ATR em queda",   "🎋", "esalq",         ["cana_atr"],        "change_pct", "below", -1.5, "%"),
-    AlertRule("cana_rally", "Cana ATR em alta",    "🎋", "esalq",         ["cana_atr"],        "change_pct", "above",  1.5, "%"),
-    AlertRule("boi_drop",   "Boi Gordo em queda",  "🐂", "commodities_br", ["Boi Gordo SP"],   "change_pct", "below", -1.5, "%"),
-    AlertRule("boi_rally",  "Boi Gordo em alta",   "🐂", "commodities_br", ["Boi Gordo SP"],   "change_pct", "above",  1.5, "%"),
+    AlertRule("dxy_drop",  "Dólar (DXY) em queda forte", "💵", "market", ["cambio", "DXY (Índice Dólar)"], "change_pct", "below", -2.0, "%"),
+    AlertRule("dxy_rally", "Dólar (DXY) em alta forte",  "💵", "market", ["cambio", "DXY (Índice Dólar)"], "change_pct", "above",  2.0, "%"),
 ]
 
 # Datas das reuniões do COPOM 2026 (dia da decisão).
