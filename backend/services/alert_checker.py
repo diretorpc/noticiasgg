@@ -101,7 +101,7 @@ def _get_recipients() -> list[dict]:
         return []
 
 
-def _broadcast(message: str, recipients: list[dict]) -> int:
+def _broadcast(message: str, recipients: list[dict], errors: list[str] | None = None) -> int:
     sent = 0
     for user in recipients:
         try:
@@ -109,6 +109,8 @@ def _broadcast(message: str, recipients: list[dict]) -> int:
             sent += 1
         except Exception as e:
             logger.warning("send failed to %s: %s", user["phone"], e)
+    if errors is not None and recipients and sent == 0:
+        errors.append(f"whatsapp: broadcast entregou 0/{len(recipients)}")
     return sent
 
 
@@ -120,7 +122,7 @@ def _is_market_hours() -> bool:
     return 7 <= now.hour < 22
 
 
-def _check_price_rules(data: dict, recipients: list[dict]) -> int:
+def _check_price_rules(data: dict, recipients: list[dict], errors: list[str] | None = None) -> int:
     total = 0
     market_open = _is_market_hours()
     for rule in RULES:
@@ -137,7 +139,7 @@ def _check_price_rules(data: dict, recipients: list[dict]) -> int:
             if not triggered or not _cooldown_ok(rule.rule_id, rule.cooldown_hours):
                 continue
             msg = _format_price_alert(rule, value)
-            sent = _broadcast(msg, recipients)
+            sent = _broadcast(msg, recipients, errors)
             if sent > 0:
                 supabase.set_alert_triggered(rule.rule_id)
                 total += sent
@@ -147,7 +149,7 @@ def _check_price_rules(data: dict, recipients: list[dict]) -> int:
     return total
 
 
-def _check_copom(recipients: list[dict]) -> int:
+def _check_copom(recipients: list[dict], errors: list[str] | None = None) -> int:
     brt = timezone(timedelta(hours=-3))
     today = datetime.now(brt).strftime("%Y-%m-%d")
     if today not in COPOM_DATES_2026:
@@ -160,13 +162,13 @@ def _check_copom(recipients: list[dict]) -> int:
         "O Comitê de Política Monetária decide hoje a taxa SELIC. "
         "Decisão sai após o fechamento do mercado."
     )
-    sent = _broadcast(msg, recipients)
+    sent = _broadcast(msg, recipients, errors)
     if sent > 0:
         supabase.set_alert_triggered(rule_id)
     return sent
 
 
-def _check_eia(recipients: list[dict]) -> int:
+def _check_eia(recipients: list[dict], errors: list[str] | None = None) -> int:
     """Envia resumo quando a EIA publica novos dados semanais de estoques.
     Dedupe por (série, período) via rule_id — cada divulgação é enviada uma única vez."""
     try:
@@ -175,6 +177,8 @@ def _check_eia(recipients: list[dict]) -> int:
         raise  # EIA_API_KEY não configurada — erro de config, não suprimir
     except Exception as e:
         logger.warning("eia collection failed: %s", e)
+        if errors is not None:
+            errors.append(f"eia: {e}")
         return 0
 
     lines = []
@@ -200,7 +204,7 @@ def _check_eia(recipients: list[dict]) -> int:
         "🛢️ *Estoques EUA (EIA) — novos dados semanais*\n"
         "━━━━━━━━━━━━━━\n" + "\n".join(lines)
     )
-    sent = _broadcast(msg, recipients)
+    sent = _broadcast(msg, recipients, errors)
     for rule_id in new_rule_ids:
         supabase.set_alert_triggered(rule_id)
     logger.info("eia alert: %d series, %d sent", len(lines), sent)
@@ -210,7 +214,7 @@ def _check_eia(recipients: list[dict]) -> int:
 _NEWS_GLOBAL_COOLDOWN_HOURS = 0.5  # 30 min between any news alerts
 
 
-def _check_news(recipients: list[dict], test_mode: bool = False) -> int:
+def _check_news(recipients: list[dict], test_mode: bool = False, errors: list[str] | None = None) -> int:
     from backend.collectors import news as news_collector
 
     if not test_mode and not _cooldown_ok("news_alert_global", _NEWS_GLOBAL_COOLDOWN_HOURS):
@@ -221,6 +225,8 @@ def _check_news(recipients: list[dict], test_mode: bool = False) -> int:
         articles = news_collector.collect()
     except Exception as e:
         logger.warning("news collection failed: %s", e)
+        if errors is not None:
+            errors.append(f"news: {e}")
         return 0
     if not isinstance(articles, list) or not articles:
         return 0
@@ -289,7 +295,7 @@ def _check_news(recipients: list[dict], test_mode: bool = False) -> int:
             msg += f"\n\n_[TESTE — score: {score}/10]_"
 
         logger.info("news check: broadcasting to %d recipients", len(recipients))
-        sent = _broadcast(msg, recipients)
+        sent = _broadcast(msg, recipients, errors)
         logger.info("news check: broadcast done, sent=%d", sent)
         if not test_mode:
             supabase.mark_news_sent(news_id)
@@ -304,25 +310,63 @@ def _check_news(recipients: list[dict], test_mode: bool = False) -> int:
     return total
 
 
+_ERROR_NOTIFY_COOLDOWN_HOURS = 2  # entre avisos de falha ao admin
+
+
+def notify_admin(errors: list[str]) -> None:
+    """Avisa o admin via WhatsApp quando o sistema falha — o sistema reporta a própria doença.
+    Cooldown de 2h para não virar spam de erro a cada execução do cron."""
+    admin = os.environ.get("REPLY_TO_NUMBER") or os.environ.get("AUTHORIZED_NUMBER", "")
+    if not admin or not errors:
+        return
+    if not _cooldown_ok("system_error_alert", _ERROR_NOTIFY_COOLDOWN_HOURS):
+        logger.info("admin notify: cooldown active, skipping (%d errors)", len(errors))
+        return
+    msg = (
+        "🚨 *check-alerts com falhas*\n"
+        "━━━━━━━━━━━━━━\n"
+        + "\n".join(f"• {e[:200]}" for e in errors[:5])
+    )
+    if len(errors) > 5:
+        msg += f"\n… e mais {len(errors) - 5} erro(s)"
+    try:
+        whatsapp.send_message(admin, msg)
+        supabase.set_alert_triggered("system_error_alert")
+        logger.info("admin notified of %d error(s)", len(errors))
+    except Exception as e:
+        logger.error("admin notify failed: %s", e)
+
+
 def run_checks(test_mode: bool = False) -> dict:
     """Executa todos os checks de alertas. Chamado pelo endpoint /api/check-alerts."""
     logger.info("starting alert checks (test_mode=%s)", test_mode)
+    errors: list[str] = []
     recipients = _get_recipients()
 
     if not recipients:
-        logger.info("no recipients with alerts_enabled configured")
+        logger.error("no recipients: Supabase fora do ar ou nenhum alerts_enabled")
+        notify_admin(["recipients: 0 destinatários (Supabase inacessível ou alerts_enabled vazio)"])
         return {"status": "ok", "recipients": 0, "alerts_sent": 0}
 
     total = 0
     if not test_mode:
         data = _collect_all()
-        total += _check_price_rules(data, recipients)
-        total += _check_copom(recipients)
+        if "erro" in data.get("market", {}):
+            errors.append(f"market: {data['market']['erro']}")
+        total += _check_price_rules(data, recipients, errors)
+        total += _check_copom(recipients, errors)
         try:
-            total += _check_eia(recipients)
+            total += _check_eia(recipients, errors)
         except ValueError as e:
             logger.error("eia check skipped (config error): %s", e)
-    total += _check_news(recipients, test_mode=test_mode)
+            errors.append(f"eia: {e}")
+    total += _check_news(recipients, test_mode=test_mode, errors=errors)
+
+    if errors:
+        notify_admin(errors)
 
     logger.info("alert checks done: %d alerts sent to %d recipients", total, len(recipients))
-    return {"status": "ok", "recipients": len(recipients), "alerts_sent": total, "test_mode": test_mode}
+    result = {"status": "ok", "recipients": len(recipients), "alerts_sent": total, "test_mode": test_mode}
+    if errors:
+        result["errors"] = errors
+    return result

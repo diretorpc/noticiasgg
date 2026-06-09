@@ -23,4 +23,8 @@ async def check_alerts(request: Request, test: bool = False):
         return result
     except Exception as e:
         logger.exception("check_alerts failed")
+        try:
+            alert_checker.notify_admin([f"fatal: {e}"])
+        except Exception:
+            logger.exception("admin notify failed")
         return {"status": "error", "detail": str(e)}
