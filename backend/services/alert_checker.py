@@ -293,12 +293,12 @@ def _check_news(recipients: list[dict], test_mode: bool = False) -> int:
         logger.info("news check: broadcast done, sent=%d", sent)
         if not test_mode:
             supabase.mark_news_sent(news_id)
-        if not test_mode:
-            supabase.set_alert_triggered("news_alert_global")
         if sent > 0:
             total += sent
-            if not test_mode and source:
-                sent_sources.add(source)
+            if not test_mode:
+                supabase.set_alert_triggered("news_alert_global")
+                if source:
+                    sent_sources.add(source)
             logger.info("news alert sent: '%s' (score=%d)", title[:60], score)
 
     return total
@@ -318,7 +318,10 @@ def run_checks(test_mode: bool = False) -> dict:
         data = _collect_all()
         total += _check_price_rules(data, recipients)
         total += _check_copom(recipients)
-        total += _check_eia(recipients)
+        try:
+            total += _check_eia(recipients)
+        except ValueError as e:
+            logger.error("eia check skipped (config error): %s", e)
     total += _check_news(recipients, test_mode=test_mode)
 
     logger.info("alert checks done: %d alerts sent to %d recipients", total, len(recipients))
