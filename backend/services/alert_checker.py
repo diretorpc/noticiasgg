@@ -28,7 +28,7 @@ Monitoramos 5 categorias que influenciam a precificação de commodities:
 Scores:
 - 6-10: urgente — decisão de juros anunciada, corte/aumento OPEC+ confirmado, escalada militar, quebra de safra confirmada, dado oficial divulgado (CPI, PPI, WASDE, estoques EIA/USDA)
 - 3-5: relevante — notícia de qualquer uma das 5 categorias com potencial de influenciar preços futuramente: projeções, previsões climáticas, negociações comerciais, sinais de demanda, declarações de autoridades monetárias
-- 1-2: fora do escopo — esportes, cultura, entretenimento, política sem impacto econômico, especulação sem fonte, tecnologia/IA sem ligação com commodities, notícias APENAS sobre a cotação diária do dólar (já coberta por alerta automático de câmbio)
+- 1-2: fora do escopo — esportes, cultura, entretenimento, política sem impacto econômico, especulação sem fonte, tecnologia/IA sem ligação com commodities, notícias APENAS sobre a cotação diária do dólar (já coberta por alerta automático de câmbio), cobertura contínua/ao vivo ("AO VIVO", "EN DIRECT", "LIVE") de evento já em andamento sem fato novo concreto — escalada já noticiada continuar acontecendo NÃO é novidade; só desenvolvimento novo e específico (ex: fechamento de rota, sanção anunciada, produção interrompida) pontua alto
 
 Responda APENAS com JSON: {"score": <1-10>, "categoria": "<MACRO|DEMANDA GLOBAL|OFERTA/CLIMA|GEOPOLÍTICA|BRASIL|OUTRO>", "titulo_pt": "<título traduzido para português>", "resumo": "<2 frases diretas sobre o impacto em commodities>"}"""
 
@@ -213,6 +213,17 @@ def _check_eia(recipients: list[dict], errors: list[str] | None = None) -> int:
 
 _NEWS_GLOBAL_COOLDOWN_HOURS = 0.5  # 30 min between any news alerts
 _NEWSAPI_FETCH_COOLDOWN_HOURS = 0.75  # 45 min entre fetches NewsAPI (free tier: 100 req/dia)
+_SOURCE_COOLDOWN_HOURS = 3  # 1 alerta por veículo a cada 3h (anti live blog)
+
+
+def _source_rule_id(source: str) -> str:
+    return f"news_source_{source.lower().replace(' ', '_')}"
+
+
+def _mark_sent(news_id: str, url_id: str | None) -> None:
+    supabase.mark_news_sent(news_id)
+    if url_id:
+        supabase.mark_news_sent(url_id)
 
 
 def _check_news(recipients: list[dict], test_mode: bool = False, errors: list[str] | None = None) -> int:
@@ -254,8 +265,15 @@ def _check_news(recipients: list[dict], test_mode: bool = False, errors: list[st
         if not test_mode and source and source in sent_sources:
             logger.info("news check: source '%s' already sent this run, skipping", source)
             continue
+        if not test_mode and source and not _cooldown_ok(_source_rule_id(source), _SOURCE_COOLDOWN_HOURS):
+            logger.info("news check: source '%s' em cooldown de 3h, skipping", source)
+            continue
+        # dedup por título E por URL — live blogs mudam o título a cada update,
+        # mas a URL da cobertura é estável
         news_id = hashlib.md5(title.encode()).hexdigest()
-        if not test_mode and supabase.is_news_sent(news_id):
+        article_url = article.get("url") or ""
+        url_id = hashlib.md5(article_url.encode()).hexdigest() if article_url else None
+        if not test_mode and (supabase.is_news_sent(news_id) or (url_id and supabase.is_news_sent(url_id))):
             continue
         logger.info("news check: classifying '%s'", title[:80])
         try:
@@ -285,7 +303,7 @@ def _check_news(recipients: list[dict], test_mode: bool = False, errors: list[st
 
         if score < min_score:
             if not test_mode:
-                supabase.mark_news_sent(news_id)
+                _mark_sent(news_id, url_id)
             continue
 
         titulo_pt = result.get("titulo_pt") or title
@@ -304,13 +322,14 @@ def _check_news(recipients: list[dict], test_mode: bool = False, errors: list[st
         sent = _broadcast(msg, recipients, errors)
         logger.info("news check: broadcast done, sent=%d", sent)
         if not test_mode:
-            supabase.mark_news_sent(news_id)
+            _mark_sent(news_id, url_id)
         if sent > 0:
             total += sent
             if not test_mode:
                 supabase.set_alert_triggered("news_alert_global")
                 if source:
                     sent_sources.add(source)
+                    supabase.set_alert_triggered(_source_rule_id(source))
             logger.info("news alert sent: '%s' (score=%d)", title[:60], score)
 
     return total

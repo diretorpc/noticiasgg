@@ -83,6 +83,64 @@ def test_check_news_marca_fetch_do_newsapi():
     mock_set.assert_called_once_with("newsapi_fetch")
 
 
+_LIVE_BLOG_V1 = {"titulo": "AO VIVO guerra: EUA atacam", "fonte": "Le Monde", "url": "https://lemonde.fr/live/guerra"}
+_LIVE_BLOG_V2 = {"titulo": "AO VIVO guerra: Irã responde", "fonte": "Le Monde", "url": "https://lemonde.fr/live/guerra"}
+
+
+def test_check_news_dedup_por_url_bloqueia_live_blog():
+    """Título novo + mesma URL (live blog) = já enviada, não classifica de novo."""
+    import hashlib
+    url_id = hashlib.md5(_LIVE_BLOG_V2["url"].encode()).hexdigest()
+
+    def is_sent(news_id):
+        return news_id == url_id  # URL marcada na primeira atualização
+
+    with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
+         patch("backend.collectors.news.collect", return_value=[_LIVE_BLOG_V2]), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", side_effect=is_sent), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.services.alert_checker.Anthropic") as mock_anthropic:
+        total = alert_checker._check_news(_RECIPIENTS, test_mode=False)
+    assert total == 0
+    mock_anthropic.return_value.messages.create.assert_not_called()
+
+
+def test_check_news_cooldown_por_fonte():
+    """Fonte em cooldown de 3h → artigo pulado antes de classificar."""
+    def cooldown(rule_id, hours):
+        if rule_id == "news_source_le_monde":
+            return False  # Le Monde em cooldown
+        return True
+
+    with patch("backend.services.alert_checker._cooldown_ok", side_effect=cooldown), \
+         patch("backend.collectors.news.collect", return_value=[_LIVE_BLOG_V1]), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.services.alert_checker.Anthropic") as mock_anthropic:
+        total = alert_checker._check_news(_RECIPIENTS, test_mode=False)
+    assert total == 0
+    mock_anthropic.return_value.messages.create.assert_not_called()
+
+
+def test_check_news_envio_marca_cooldown_da_fonte():
+    """Alerta enviado → set_alert_triggered da fonte é chamado."""
+    fake_resp = type("R", (), {"content": [type("C", (), {"text": '{"score": 9, "categoria": "GEOPOLÍTICA", "titulo_pt": "t", "resumo": "r"}'})()]})()
+
+    with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
+         patch("backend.collectors.news.collect", return_value=[_LIVE_BLOG_V1]), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.mark_news_sent"), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered") as mock_set, \
+         patch("backend.services.alert_checker.whatsapp.send_message"), \
+         patch("backend.services.alert_checker.Anthropic") as mock_anthropic:
+        mock_anthropic.return_value.messages.create.return_value = fake_resp
+        total = alert_checker._check_news(_RECIPIENTS, test_mode=False)
+    assert total == 1
+    rule_ids = [c.args[0] for c in mock_set.call_args_list]
+    assert "news_source_le_monde" in rule_ids
+    assert "news_alert_global" in rule_ids
+
+
 def test_broadcast_zero_entregas_reporta_erro():
     errors: list[str] = []
     with patch("backend.services.alert_checker.whatsapp.send_message", side_effect=RuntimeError("down")):
