@@ -217,6 +217,46 @@ def test_notify_admin_envia_mesmo_com_cooldown_indisponivel():
     mock_send.assert_called_once()
 
 
+_MARKET = {
+    "cambio": {
+        "USD/BRL": {"preco": 5.42, "variacao_pct": 1.85},
+        "DXY (Índice Dólar)": {"preco": 104.2, "variacao_pct": -0.3},
+    },
+    "bolsas": {
+        "IBOVESPA": {"preco": 132000.0, "variacao_pct": None},  # sem variação → fora
+    },
+}
+
+
+def test_market_snapshot_formata_variacoes():
+    snap = alert_checker._market_snapshot(_MARKET)
+    assert "USD/BRL: +1.85% hoje" in snap
+    assert "DXY (Índice Dólar): -0.30% hoje" in snap
+    assert "IBOVESPA" not in snap  # variacao_pct None não entra
+
+
+def test_market_snapshot_vazio_para_none():
+    assert alert_checker._market_snapshot(None) == ""
+    assert alert_checker._market_snapshot({}) == ""
+
+
+def test_build_classifier_input_completo():
+    article = {"titulo": "OPEC+ cuts output", "resumo": "Production cut of 1M bpd announced"}
+    out = alert_checker._build_classifier_input(
+        article, "USD/BRL: +1.85% hoje", ["Fed mantém juros"]
+    )
+    assert "<titulo>OPEC+ cuts output</titulo>" in out
+    assert "<resumo>Production cut of 1M bpd announced</resumo>" in out
+    assert "<contexto_mercado>" in out and "USD/BRL: +1.85% hoje" in out
+    assert "<ja_enviadas>" in out and "- Fed mantém juros" in out
+
+
+def test_build_classifier_input_minimo():
+    article = {"titulo": "OPEC+ cuts output", "resumo": None}
+    out = alert_checker._build_classifier_input(article, "", [])
+    assert out == "<titulo>OPEC+ cuts output</titulo>"
+
+
 def test_broadcast_zero_entregas_reporta_erro():
     errors: list[str] = []
     with patch("backend.services.alert_checker.whatsapp.send_message", side_effect=RuntimeError("down")):

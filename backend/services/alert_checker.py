@@ -226,6 +226,34 @@ def _mark_sent(news_id: str, url_id: str | None) -> None:
         supabase.mark_news_sent(url_id)
 
 
+def _market_snapshot(market: dict | None) -> str:
+    """Até 6 linhas de variação do dia para dar sensibilidade de momento ao classificador."""
+    if not market:
+        return ""
+    lines = []
+    for cat in ("cambio", "bolsas"):
+        for nome, info in (market.get(cat) or {}).items():
+            if not isinstance(info, dict) or info.get("variacao_pct") is None:
+                continue
+            sign = "+" if info["variacao_pct"] > 0 else ""
+            lines.append(f"{nome}: {sign}{info['variacao_pct']:.2f}% hoje")
+    return "\n".join(lines[:6])
+
+
+def _build_classifier_input(article: dict, market_snapshot: str, recent_titles: list[str]) -> str:
+    title = article.get("titulo") or article.get("title", "")
+    parts = [f"<titulo>{title[:300]}</titulo>"]
+    resumo = article.get("resumo")
+    if resumo:
+        parts.append(f"<resumo>{str(resumo)[:300]}</resumo>")
+    if market_snapshot:
+        parts.append(f"<contexto_mercado>\n{market_snapshot}\n</contexto_mercado>")
+    if recent_titles:
+        titles = "\n".join(f"- {t}" for t in recent_titles[:20])
+        parts.append(f"<ja_enviadas>\n{titles}\n</ja_enviadas>")
+    return "\n".join(parts)
+
+
 def _check_news(recipients: list[dict], test_mode: bool = False, errors: list[str] | None = None) -> int:
     from backend.collectors import news as news_collector
 
