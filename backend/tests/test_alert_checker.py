@@ -355,6 +355,19 @@ def test_check_news_falha_em_recent_titles_nao_quebra():
     mock_send.assert_called_once()
 
 
+def test_run_checks_passa_market_para_news():
+    market = {"cambio": {"USD/BRL": {"preco": 5.4, "variacao_pct": 1.2}}}
+    with patch("backend.services.alert_checker._get_recipients", return_value=_RECIPIENTS), \
+         patch("backend.services.alert_checker._collect_all", return_value={"market": market}), \
+         patch("backend.services.alert_checker._check_price_rules", return_value=0), \
+         patch("backend.services.alert_checker._check_copom", return_value=0), \
+         patch("backend.services.alert_checker._check_eia", return_value=0), \
+         patch("backend.services.alert_checker._check_news", return_value=0) as mock_news, \
+         patch("backend.services.alert_checker.notify_admin"):
+        alert_checker.run_checks(test_mode=False)
+    assert mock_news.call_args.kwargs["market_data"] == market
+
+
 def test_broadcast_zero_entregas_reporta_erro():
     errors: list[str] = []
     with patch("backend.services.alert_checker.whatsapp.send_message", side_effect=RuntimeError("down")):

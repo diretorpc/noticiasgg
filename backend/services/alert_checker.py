@@ -452,10 +452,13 @@ def run_checks(test_mode: bool = False) -> dict:
         return {"status": "ok", "recipients": 0, "alerts_sent": 0}
 
     total = 0
+    market_data: dict | None = None
     if not test_mode:
         data = _collect_all()
         if "erro" in data.get("market", {}):
             errors.append(f"market: {data['market']['erro']}")
+        else:
+            market_data = data.get("market")
         total += _check_price_rules(data, recipients, errors)
         try:
             total += _check_copom(recipients, errors)
@@ -471,7 +474,7 @@ def run_checks(test_mode: bool = False) -> dict:
             logger.exception("eia check failed")
             errors.append(f"eia: {e}")
     try:
-        total += _check_news(recipients, test_mode=test_mode, errors=errors)
+        total += _check_news(recipients, test_mode=test_mode, errors=errors, market_data=market_data)
     except Exception as e:
         logger.exception("news check failed")
         errors.append(f"news: {e}")
