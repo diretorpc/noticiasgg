@@ -344,9 +344,13 @@ def notify_admin(errors: list[str]) -> None:
     admin = os.environ.get("REPLY_TO_NUMBER") or os.environ.get("AUTHORIZED_NUMBER", "")
     if not admin or not errors:
         return
-    if not _cooldown_ok("system_error_alert", _ERROR_NOTIFY_COOLDOWN_HOURS):
-        logger.info("admin notify: cooldown active, skipping (%d errors)", len(errors))
-        return
+    try:
+        if not _cooldown_ok("system_error_alert", _ERROR_NOTIFY_COOLDOWN_HOURS):
+            logger.info("admin notify: cooldown active, skipping (%d errors)", len(errors))
+            return
+    except Exception as e:
+        # canal de último recurso falha aberto: sem cooldown disponível, envia mesmo assim
+        logger.warning("admin notify: cooldown check failed (%s), sending anyway", e)
     msg = (
         "🚨 *check-alerts com falhas*\n"
         "━━━━━━━━━━━━━━\n"
@@ -379,13 +383,24 @@ def run_checks(test_mode: bool = False) -> dict:
         if "erro" in data.get("market", {}):
             errors.append(f"market: {data['market']['erro']}")
         total += _check_price_rules(data, recipients, errors)
-        total += _check_copom(recipients, errors)
+        try:
+            total += _check_copom(recipients, errors)
+        except Exception as e:
+            logger.exception("copom check failed")
+            errors.append(f"copom: {e}")
         try:
             total += _check_eia(recipients, errors)
         except ValueError as e:
             logger.error("eia check skipped (config error): %s", e)
             errors.append(f"eia: {e}")
-    total += _check_news(recipients, test_mode=test_mode, errors=errors)
+        except Exception as e:
+            logger.exception("eia check failed")
+            errors.append(f"eia: {e}")
+    try:
+        total += _check_news(recipients, test_mode=test_mode, errors=errors)
+    except Exception as e:
+        logger.exception("news check failed")
+        errors.append(f"news: {e}")
 
     if errors:
         notify_admin(errors)

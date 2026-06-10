@@ -1,6 +1,8 @@
 import os
 from unittest.mock import patch
 
+import httpx
+
 from backend.services import alert_checker
 
 _ADMIN = "5534999945010"
@@ -139,6 +141,80 @@ def test_check_news_envio_marca_cooldown_da_fonte():
     rule_ids = [c.args[0] for c in mock_set.call_args_list]
     assert "news_source_le_monde" in rule_ids
     assert "news_alert_global" in rule_ids
+
+
+def test_run_checks_timeout_em_news_nao_aborta_execucao():
+    """Timeout não tratado dentro de _check_news vira erro reportado, não fatal."""
+    with patch("backend.services.alert_checker._get_recipients", return_value=_RECIPIENTS), \
+         patch("backend.services.alert_checker._collect_all", return_value={"market": {}}), \
+         patch("backend.services.alert_checker._check_price_rules", return_value=0), \
+         patch("backend.services.alert_checker._check_copom", return_value=0), \
+         patch("backend.services.alert_checker._check_eia", return_value=0), \
+         patch("backend.services.alert_checker._check_news",
+               side_effect=httpx.ReadTimeout("The read operation timed out")), \
+         patch("backend.services.alert_checker.notify_admin") as mock_notify:
+        result = alert_checker.run_checks(test_mode=False)
+    assert result["status"] == "ok"
+    assert any("news" in e and "timed out" in e for e in result["errors"])
+    mock_notify.assert_called_once()
+
+
+def test_run_checks_timeout_em_eia_nao_impede_news():
+    """Timeout do Supabase dentro de _check_eia não derruba os checks seguintes."""
+    with patch("backend.services.alert_checker._get_recipients", return_value=_RECIPIENTS), \
+         patch("backend.services.alert_checker._collect_all", return_value={"market": {}}), \
+         patch("backend.services.alert_checker._check_price_rules", return_value=0), \
+         patch("backend.services.alert_checker._check_copom", return_value=0), \
+         patch("backend.services.alert_checker._check_eia",
+               side_effect=httpx.ReadTimeout("The read operation timed out")), \
+         patch("backend.services.alert_checker._check_news", return_value=2) as mock_news, \
+         patch("backend.services.alert_checker.notify_admin"):
+        result = alert_checker.run_checks(test_mode=False)
+    assert result["status"] == "ok"
+    assert result["alerts_sent"] == 2
+    mock_news.assert_called_once()
+    assert any("eia" in e for e in result["errors"])
+
+
+def test_run_checks_timeout_em_copom_nao_impede_demais():
+    with patch("backend.services.alert_checker._get_recipients", return_value=_RECIPIENTS), \
+         patch("backend.services.alert_checker._collect_all", return_value={"market": {}}), \
+         patch("backend.services.alert_checker._check_price_rules", return_value=0), \
+         patch("backend.services.alert_checker._check_copom",
+               side_effect=httpx.ReadTimeout("The read operation timed out")), \
+         patch("backend.services.alert_checker._check_eia", return_value=0) as mock_eia, \
+         patch("backend.services.alert_checker._check_news", return_value=0), \
+         patch("backend.services.alert_checker.notify_admin"):
+        result = alert_checker.run_checks(test_mode=False)
+    assert result["status"] == "ok"
+    mock_eia.assert_called_once()
+    assert any("copom" in e for e in result["errors"])
+
+
+def test_run_checks_eia_config_error_continua_reportado():
+    """ValueError (EIA_API_KEY ausente) segue sendo reportado como erro de config."""
+    with patch("backend.services.alert_checker._get_recipients", return_value=_RECIPIENTS), \
+         patch("backend.services.alert_checker._collect_all", return_value={"market": {}}), \
+         patch("backend.services.alert_checker._check_price_rules", return_value=0), \
+         patch("backend.services.alert_checker._check_copom", return_value=0), \
+         patch("backend.services.alert_checker._check_eia",
+               side_effect=ValueError("EIA_API_KEY não configurada")), \
+         patch("backend.services.alert_checker._check_news", return_value=0), \
+         patch("backend.services.alert_checker.notify_admin"):
+        result = alert_checker.run_checks(test_mode=False)
+    assert result["status"] == "ok"
+    assert any("eia" in e and "EIA_API_KEY" in e for e in result["errors"])
+
+
+def test_notify_admin_envia_mesmo_com_cooldown_indisponivel():
+    """Se o Supabase cair, o canal de último recurso falha aberto: envia mesmo assim."""
+    with patch.dict(os.environ, {"REPLY_TO_NUMBER": _ADMIN}), \
+         patch("backend.services.alert_checker._cooldown_ok",
+               side_effect=httpx.ReadTimeout("The read operation timed out")), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.services.alert_checker.whatsapp.send_message") as mock_send:
+        alert_checker.notify_admin(["supabase: fora do ar"])
+    mock_send.assert_called_once()
 
 
 def test_broadcast_zero_entregas_reporta_erro():

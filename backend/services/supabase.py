@@ -1,8 +1,21 @@
 import datetime
 import os
 import re
+import time
 
 import httpx
+
+
+class _RetryTransport(httpx.HTTPTransport):
+    """Um retry em falha de transporte (timeout/conexão). Seguro aqui porque os
+    POSTs do Supabase são upserts idempotentes ou inserts de baixo impacto."""
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        try:
+            return super().handle_request(request)
+        except (httpx.TimeoutException, httpx.ConnectError):
+            time.sleep(0.5)
+            return super().handle_request(request)
 
 
 def _client() -> httpx.Client:
@@ -17,6 +30,7 @@ def _client() -> httpx.Client:
             "Prefer": "return=representation",
         },
         timeout=15,
+        transport=_RetryTransport(),
     )
 
 
