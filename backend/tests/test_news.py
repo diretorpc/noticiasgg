@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from backend.api.main import app
 from backend.collectors.news import (
-    _parse_rss_date, _collect_rss, _is_fresh,
+    _parse_rss_date, _collect_rss, _is_fresh, _fetch_newsapi,
     SOURCES_FINANCE, SOURCES_TECH, _AI_QUERY, _RSS_FEEDS_AI,
 )
 
@@ -161,6 +161,41 @@ def test_rss_feeds_ai_contem_mit_e_venturebeat():
     nomes = [nome for nome, _ in _RSS_FEEDS_AI]
     assert "MIT Technology Review" in nomes
     assert "VentureBeat AI" in nomes
+
+
+def test_fetch_newsapi_429_reporta_erro():
+    errors: list[str] = []
+    mock_client = MagicMock()
+    mock_client.get.return_value = MagicMock(status_code=429)
+    artigos = _fetch_newsapi(mock_client, "https://newsapi.org/v2/everything", {}, set(), errors, "finance")
+    assert artigos == []
+    assert errors == ["newsapi finance: HTTP 429"]
+
+
+def test_fetch_newsapi_429_sem_lista_de_erros_nao_quebra():
+    mock_client = MagicMock()
+    mock_client.get.return_value = MagicMock(status_code=429)
+    artigos = _fetch_newsapi(mock_client, "https://newsapi.org/v2/everything", {}, set(), None, "br")
+    assert artigos == []
+
+
+def test_collect_sem_newsapi_busca_apenas_rss():
+    with patch.dict(os.environ, {"NEWS_API_KEY": "fake-key"}), \
+         patch("backend.collectors.news._fetch_newsapi") as mock_newsapi, \
+         patch("backend.collectors.news._collect_rss", return_value=[]) as mock_rss:
+        from backend.collectors import news
+        news.collect(include_newsapi=False)
+    mock_newsapi.assert_not_called()
+    mock_rss.assert_called_once()
+
+
+def test_collect_sem_ai_faz_apenas_duas_chamadas_newsapi():
+    with patch.dict(os.environ, {"NEWS_API_KEY": "fake-key"}), \
+         patch("backend.collectors.news._fetch_newsapi", return_value=[]) as mock_newsapi, \
+         patch("backend.collectors.news._collect_rss", return_value=[]):
+        from backend.collectors import news
+        news.collect(include_ai=False)
+    assert mock_newsapi.call_count == 2
 
 
 def test_collect_rss_multiplos_feeds_deduplicados():

@@ -125,7 +125,33 @@ def _collect_rss(client: httpx.Client, feeds: list[tuple[str, str]], vistos: set
     return artigos
 
 
-def collect() -> list[dict]:
+def _fetch_newsapi(client: httpx.Client, url: str, params: dict, vistos: set,
+                   errors: list[str] | None, label: str) -> list[dict]:
+    resp = client.get(url, params=params)
+    if resp.status_code != 200:
+        # 429 = limite diário do free tier estourado — reportar para o auto-alerta
+        if errors is not None:
+            errors.append(f"newsapi {label}: HTTP {resp.status_code}")
+        return []
+    artigos = []
+    for a in resp.json().get("articles", []):
+        article_url = a.get("url", "")
+        published_at = a.get("publishedAt")
+        if article_url in vistos or not _is_fresh(published_at):
+            continue
+        vistos.add(article_url)
+        artigos.append({
+            "titulo": a.get("title"),
+            "fonte": (a.get("source") or {}).get("name"),
+            "url": article_url,
+            "publicado_em": published_at,
+            "resumo": a.get("description"),
+        })
+    return artigos
+
+
+def collect(include_ai: bool = True, include_newsapi: bool = True,
+            errors: list[str] | None = None) -> list[dict]:
     api_key = os.getenv("NEWS_API_KEY", "")
     if not api_key:
         raise ValueError("NEWS_API_KEY não configurada")
@@ -134,77 +160,37 @@ def collect() -> list[dict]:
     vistos: set = set()
 
     with httpx.Client(timeout=15) as client:
-        # Finanças: /everything filtrado por fontes financeiras + keywords
-        resp_finance = client.get(NEWSAPI_EVERYTHING, params={
-            "apiKey": api_key,
-            "sources": SOURCES_FINANCE,
-            "q": _FINANCE_QUERY,
-            "language": "en",
-            "sortBy": "publishedAt",
-            "pageSize": 15,
-        })
-        if resp_finance.status_code == 200:
-            for a in resp_finance.json().get("articles", []):
-                url = a.get("url", "")
-                published_at = a.get("publishedAt")
-                if url in vistos or not _is_fresh(published_at):
-                    continue
-                vistos.add(url)
-                artigos.append({
-                    "titulo": a.get("title"),
-                    "fonte": (a.get("source") or {}).get("name"),
-                    "url": url,
-                    "publicado_em": published_at,
-                    "resumo": a.get("description"),
-                })
+        if include_newsapi:
+            # Finanças: /everything filtrado por fontes financeiras + keywords
+            artigos.extend(_fetch_newsapi(client, NEWSAPI_EVERYTHING, {
+                "apiKey": api_key,
+                "sources": SOURCES_FINANCE,
+                "q": _FINANCE_QUERY,
+                "language": "en",
+                "sortBy": "publishedAt",
+                "pageSize": 15,
+            }, vistos, errors, "finance"))
 
-        # BR: top-headlines categoria business
-        resp_br = client.get(NEWSAPI_HEADLINES, params={
-            "apiKey": api_key,
-            "country": "br",
-            "category": "business",
-            "pageSize": 10,
-        })
-        if resp_br.status_code == 200:
-            for a in resp_br.json().get("articles", []):
-                url = a.get("url", "")
-                published_at = a.get("publishedAt")
-                if url in vistos or not _is_fresh(published_at):
-                    continue
-                vistos.add(url)
-                artigos.append({
-                    "titulo": a.get("title"),
-                    "fonte": (a.get("source") or {}).get("name"),
-                    "url": url,
-                    "publicado_em": published_at,
-                    "resumo": a.get("description"),
-                })
+            # BR: top-headlines categoria business
+            artigos.extend(_fetch_newsapi(client, NEWSAPI_HEADLINES, {
+                "apiKey": api_key,
+                "country": "br",
+                "category": "business",
+                "pageSize": 10,
+            }, vistos, errors, "br"))
 
-        # IA/Tech: /everything com fontes tech + query de IA
-        resp_ai = client.get(NEWSAPI_EVERYTHING, params={
-            "apiKey": api_key,
-            "sources": SOURCES_TECH,
-            "q": _AI_QUERY,
-            "language": "en",
-            "sortBy": "publishedAt",
-            "pageSize": 10,
-        })
-        if resp_ai.status_code == 200:
-            for a in resp_ai.json().get("articles", []):
-                url = a.get("url", "")
-                published_at = a.get("publishedAt")
-                if url in vistos or not _is_fresh(published_at):
-                    continue
-                vistos.add(url)
-                artigos.append({
-                    "titulo": a.get("title"),
-                    "fonte": (a.get("source") or {}).get("name"),
-                    "url": url,
-                    "publicado_em": published_at,
-                    "resumo": a.get("description"),
-                })
+            # IA/Tech: /everything com fontes tech + query de IA
+            if include_ai:
+                artigos.extend(_fetch_newsapi(client, NEWSAPI_EVERYTHING, {
+                    "apiKey": api_key,
+                    "sources": SOURCES_TECH,
+                    "q": _AI_QUERY,
+                    "language": "en",
+                    "sortBy": "publishedAt",
+                    "pageSize": 10,
+                }, vistos, errors, "ai"))
 
-        # RSS feeds internacionais + IA
+        # RSS feeds internacionais + IA (grátis, sempre coletados)
         artigos.extend(_collect_rss(client, _RSS_FEEDS + _RSS_FEEDS_AI, vistos))
 
     return artigos[:40]

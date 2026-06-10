@@ -61,6 +61,28 @@ def test_run_checks_sem_recipients_notifica_admin():
     assert "recipients" in mock_notify.call_args[0][0][0]
 
 
+def test_check_news_respeita_cooldown_do_newsapi():
+    def cooldown(rule_id, hours):
+        return rule_id == "news_alert_global"  # global liberado, fetch NewsAPI em cooldown
+
+    with patch("backend.services.alert_checker._cooldown_ok", side_effect=cooldown), \
+         patch("backend.collectors.news.collect", return_value=[]) as mock_collect, \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered") as mock_set:
+        alert_checker._check_news(_RECIPIENTS, test_mode=False)
+    assert mock_collect.call_args.kwargs["include_newsapi"] is False
+    assert mock_collect.call_args.kwargs["include_ai"] is False
+    mock_set.assert_not_called()
+
+
+def test_check_news_marca_fetch_do_newsapi():
+    with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
+         patch("backend.collectors.news.collect", return_value=[]) as mock_collect, \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered") as mock_set:
+        alert_checker._check_news(_RECIPIENTS, test_mode=False)
+    assert mock_collect.call_args.kwargs["include_newsapi"] is True
+    mock_set.assert_called_once_with("newsapi_fetch")
+
+
 def test_broadcast_zero_entregas_reporta_erro():
     errors: list[str] = []
     with patch("backend.services.alert_checker.whatsapp.send_message", side_effect=RuntimeError("down")):

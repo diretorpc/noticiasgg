@@ -212,6 +212,7 @@ def _check_eia(recipients: list[dict], errors: list[str] | None = None) -> int:
 
 
 _NEWS_GLOBAL_COOLDOWN_HOURS = 0.5  # 30 min between any news alerts
+_NEWSAPI_FETCH_COOLDOWN_HOURS = 0.75  # 45 min entre fetches NewsAPI (free tier: 100 req/dia)
 
 
 def _check_news(recipients: list[dict], test_mode: bool = False, errors: list[str] | None = None) -> int:
@@ -221,13 +222,18 @@ def _check_news(recipients: list[dict], test_mode: bool = False, errors: list[st
         logger.info("news check: global cooldown active, skipping")
         return 0
 
+    # NewsAPI no máximo a cada 45 min (independente de alerta enviado); RSS é grátis,
+    # roda sempre. IA/tech fica fora — o classificador descarta (score 1-2) de qualquer forma.
+    use_newsapi = test_mode or _cooldown_ok("newsapi_fetch", _NEWSAPI_FETCH_COOLDOWN_HOURS)
     try:
-        articles = news_collector.collect()
+        articles = news_collector.collect(include_ai=False, include_newsapi=use_newsapi, errors=errors)
     except Exception as e:
         logger.warning("news collection failed: %s", e)
         if errors is not None:
             errors.append(f"news: {e}")
         return 0
+    if use_newsapi and not test_mode:
+        supabase.set_alert_triggered("newsapi_fetch")
     if not isinstance(articles, list) or not articles:
         return 0
 
