@@ -58,6 +58,46 @@ def test_client_desiste_apos_segunda_falha():
     assert calls["n"] == 2
 
 
+def _capture_transport(response_json):
+    """Transport fake que grava a request e devolve uma resposta fixa."""
+    captured = {}
+
+    def fake_handle(self, request):
+        captured["url"] = str(request.url)
+        captured["body"] = request.content.decode() if request.content else ""
+        return httpx.Response(200, json=response_json)
+
+    return captured, fake_handle
+
+
+def test_mark_news_sent_persiste_titulo():
+    captured, fake_handle = _capture_transport([])
+    with patch.dict(os.environ, _ENV), \
+         patch.object(httpx.HTTPTransport, "handle_request", fake_handle):
+        supabase.mark_news_sent("abc123", title="OPEC+ corta produção")
+    assert '"title": "OPEC+ corta produção"' in captured["body"] or \
+           '"title":"OPEC+ corta produção"' in captured["body"]
+
+
+def test_mark_news_sent_sem_titulo_nao_envia_campo():
+    captured, fake_handle = _capture_transport([])
+    with patch.dict(os.environ, _ENV), \
+         patch.object(httpx.HTTPTransport, "handle_request", fake_handle):
+        supabase.mark_news_sent("abc123")
+    assert "title" not in captured["body"]
+
+
+def test_get_recent_sent_titles_retorna_lista():
+    rows = [{"title": "OPEC+ corta produção"}, {"title": "Fed mantém juros"}]
+    captured, fake_handle = _capture_transport(rows)
+    with patch.dict(os.environ, _ENV), \
+         patch.object(httpx.HTTPTransport, "handle_request", fake_handle):
+        titles = supabase.get_recent_sent_titles()
+    assert titles == ["OPEC+ corta produção", "Fed mantém juros"]
+    assert "title=not.is.null" in captured["url"]
+    assert "sent_at=gte." in captured["url"]
+
+
 def test_client_nao_retenta_erro_http():
     """4xx/5xx não é falha de transporte — raise_for_status cuida disso nos call sites."""
     calls = {"n": 0}

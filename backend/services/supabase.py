@@ -254,14 +254,34 @@ def is_news_sent(news_id: str) -> bool:
         return len(r.json()) > 0
 
 
-def mark_news_sent(news_id: str) -> None:
+def mark_news_sent(news_id: str, title: str | None = None) -> None:
+    payload: dict = {
+        "news_id": news_id,
+        "sent_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    if title:
+        payload["title"] = title
     with _client() as c:
         r = c.post(
             "/sent_news",
-            json={"news_id": news_id, "sent_at": datetime.datetime.now(datetime.timezone.utc).isoformat()},
+            json=payload,
             headers={"Prefer": "resolution=merge-duplicates,return=representation"},
         )
         r.raise_for_status()
+
+
+def get_recent_sent_titles(hours: int = 24, limit: int = 20) -> list[str]:
+    """Títulos de notícias efetivamente entregues (title preenchido só em broadcast)."""
+    cutoff = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
+    ).isoformat()
+    with _client() as c:
+        r = c.get(
+            f"/sent_news?select=title&title=not.is.null"
+            f"&sent_at=gte.{cutoff}&order=sent_at.desc&limit={limit}"
+        )
+        r.raise_for_status()
+        return [row["title"] for row in r.json()]
 
 
 def get_users_for_hour(hour_brt: str) -> list[dict]:
