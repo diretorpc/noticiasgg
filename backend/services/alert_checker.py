@@ -245,8 +245,8 @@ def _source_rule_id(source: str) -> str:
     return f"news_source_{source.lower().replace(' ', '_')}"
 
 
-def _mark_sent(news_id: str, url_id: str | None) -> None:
-    supabase.mark_news_sent(news_id)
+def _mark_sent(news_id: str, url_id: str | None, title: str | None = None) -> None:
+    supabase.mark_news_sent(news_id, title=title)
     if url_id:
         supabase.mark_news_sent(url_id)
 
@@ -279,7 +279,8 @@ def _build_classifier_input(article: dict, market_snapshot: str, recent_titles: 
     return "\n".join(parts)
 
 
-def _check_news(recipients: list[dict], test_mode: bool = False, errors: list[str] | None = None) -> int:
+def _check_news(recipients: list[dict], test_mode: bool = False,
+                errors: list[str] | None = None, market_data: dict | None = None) -> int:
     from backend.collectors import news as news_collector
 
     if not test_mode and not _cooldown_ok("news_alert_global", _NEWS_GLOBAL_COOLDOWN_HOURS):
@@ -300,6 +301,13 @@ def _check_news(recipients: list[dict], test_mode: bool = False, errors: list[st
         supabase.set_alert_triggered("newsapi_fetch")
     if not isinstance(articles, list) or not articles:
         return 0
+
+    try:
+        recent_titles = supabase.get_recent_sent_titles()
+    except Exception as e:
+        logger.warning("recent titles fetch failed (dedup degrada): %s", e)
+        recent_titles = []
+    snapshot = _market_snapshot(market_data)
 
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     total = 0
@@ -334,7 +342,7 @@ def _check_news(recipients: list[dict], test_mode: bool = False, errors: list[st
                 model="claude-haiku-4-5-20251001",
                 max_tokens=500,
                 system=_NEWS_CLASSIFIER_SYSTEM,
-                messages=[{"role": "user", "content": f"<titulo>{title[:300]}</titulo>"}],
+                messages=[{"role": "user", "content": _build_classifier_input(article, snapshot, recent_titles)}],
             )
             raw = resp.content[0].text.strip()
             # strip markdown code fences if present
@@ -349,6 +357,12 @@ def _check_news(recipients: list[dict], test_mode: bool = False, errors: list[st
             continue
         except Exception as e:
             logger.warning("news classify failed for '%s': %s", title[:60], e)
+            continue
+
+        if result.get("duplicada"):
+            logger.info("news check: duplicada de história já enviada, skipping '%s'", title[:60])
+            if not test_mode:
+                _mark_sent(news_id, url_id)
             continue
 
         score = result.get("score", 0)
@@ -368,6 +382,13 @@ def _check_news(recipients: list[dict], test_mode: bool = False, errors: list[st
             msg += f"\n_{source}_"
         if resumo:
             msg += f"\n\n{resumo}"
+        ativos = [a for a in (result.get("ativos") or []) if isinstance(a, str)][:4]
+        if ativos:
+            rotulo = {
+                "alta": "📈 Impacto provável: alta",
+                "baixa": "📉 Impacto provável: baixa",
+            }.get(result.get("direcao"), "⚖️ Impacto incerto")
+            msg += f"\n\n{rotulo} — {', '.join(ativos)}"
         if test_mode:
             msg += f"\n\n_[TESTE — score: {score}/10]_"
 
@@ -375,7 +396,7 @@ def _check_news(recipients: list[dict], test_mode: bool = False, errors: list[st
         sent = _broadcast(msg, recipients, errors)
         logger.info("news check: broadcast done, sent=%d", sent)
         if not test_mode:
-            _mark_sent(news_id, url_id)
+            _mark_sent(news_id, url_id, title=titulo_pt)
         if sent > 0:
             total += sent
             if not test_mode:

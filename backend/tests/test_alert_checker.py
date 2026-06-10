@@ -265,6 +265,96 @@ def test_classifier_prompt_tem_contrato_v2():
     assert '"ativos"' in p and '"direcao"' in p and '"duplicada"' in p
 
 
+def _fake_resp(payload: str):
+    return type("R", (), {"content": [type("C", (), {"text": payload})()]})()
+
+
+_RESP_V2 = '{"score": 9, "categoria": "OFERTA/CLIMA", "titulo_pt": "OPEC+ corta produção", "resumo": "r", "ativos": ["petróleo", "diesel"], "direcao": "alta", "duplicada": false}'
+_RESP_DUP = '{"score": 9, "categoria": "OFERTA/CLIMA", "titulo_pt": "OPEC+ corta produção", "resumo": "r", "ativos": ["petróleo"], "direcao": "alta", "duplicada": true}'
+_ARTIGO = {"titulo": "OPEC+ cuts output", "fonte": "Reuters", "url": "https://r.com/1", "resumo": "Cut of 1M bpd"}
+
+
+def test_check_news_duplicada_marca_e_nao_envia():
+    with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
+         patch("backend.collectors.news.collect", return_value=[_ARTIGO]), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=["OPEC+ corta produção de petróleo"]), \
+         patch("backend.services.alert_checker.supabase.mark_news_sent") as mock_mark, \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.services.alert_checker.whatsapp.send_message") as mock_send, \
+         patch("backend.services.alert_checker.Anthropic") as mock_anthropic:
+        mock_anthropic.return_value.messages.create.return_value = _fake_resp(_RESP_DUP)
+        total = alert_checker._check_news(_RECIPIENTS, test_mode=False)
+    assert total == 0
+    mock_send.assert_not_called()
+    assert mock_mark.called  # marcada para não reclassificar
+
+
+def test_check_news_mensagem_inclui_impacto():
+    with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
+         patch("backend.collectors.news.collect", return_value=[_ARTIGO]), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker.supabase.mark_news_sent"), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.services.alert_checker.whatsapp.send_message") as mock_send, \
+         patch("backend.services.alert_checker.Anthropic") as mock_anthropic:
+        mock_anthropic.return_value.messages.create.return_value = _fake_resp(_RESP_V2)
+        total = alert_checker._check_news(_RECIPIENTS, test_mode=False)
+    assert total == 1
+    msg = mock_send.call_args[0][1]
+    assert "📈 Impacto provável: alta" in msg
+    assert "petróleo" in msg
+
+
+def test_check_news_persiste_titulo_traduzido():
+    with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
+         patch("backend.collectors.news.collect", return_value=[_ARTIGO]), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker.supabase.mark_news_sent") as mock_mark, \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.services.alert_checker.whatsapp.send_message"), \
+         patch("backend.services.alert_checker.Anthropic") as mock_anthropic:
+        mock_anthropic.return_value.messages.create.return_value = _fake_resp(_RESP_V2)
+        alert_checker._check_news(_RECIPIENTS, test_mode=False)
+    titles = [c.kwargs.get("title") for c in mock_mark.call_args_list]
+    assert "OPEC+ corta produção" in titles
+
+
+def test_check_news_user_message_usa_builder():
+    with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
+         patch("backend.collectors.news.collect", return_value=[_ARTIGO]), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=["Fed mantém juros"]), \
+         patch("backend.services.alert_checker.supabase.mark_news_sent"), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.services.alert_checker.whatsapp.send_message"), \
+         patch("backend.services.alert_checker.Anthropic") as mock_anthropic:
+        mock_anthropic.return_value.messages.create.return_value = _fake_resp(_RESP_V2)
+        alert_checker._check_news(_RECIPIENTS, test_mode=False, market_data=_MARKET)
+    user_content = mock_anthropic.return_value.messages.create.call_args.kwargs["messages"][0]["content"]
+    assert "<resumo>Cut of 1M bpd</resumo>" in user_content
+    assert "<contexto_mercado>" in user_content
+    assert "- Fed mantém juros" in user_content
+
+
+def test_check_news_falha_em_recent_titles_nao_quebra():
+    with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
+         patch("backend.collectors.news.collect", return_value=[_ARTIGO]), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles",
+               side_effect=httpx.ReadTimeout("The read operation timed out")), \
+         patch("backend.services.alert_checker.supabase.mark_news_sent"), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.services.alert_checker.whatsapp.send_message") as mock_send, \
+         patch("backend.services.alert_checker.Anthropic") as mock_anthropic:
+        mock_anthropic.return_value.messages.create.return_value = _fake_resp(_RESP_V2)
+        total = alert_checker._check_news(_RECIPIENTS, test_mode=False)
+    assert total == 1  # dedup degrada, alerta não morre
+    mock_send.assert_called_once()
+
+
 def test_broadcast_zero_entregas_reporta_erro():
     errors: list[str] = []
     with patch("backend.services.alert_checker.whatsapp.send_message", side_effect=RuntimeError("down")):
