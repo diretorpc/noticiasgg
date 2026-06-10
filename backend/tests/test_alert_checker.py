@@ -257,6 +257,14 @@ def test_build_classifier_input_minimo():
     assert out == "<titulo>OPEC+ cuts output</titulo>"
 
 
+def test_classifier_prompt_tem_contrato_v2():
+    """Smoke: prompt define cadeias causais, anti-injection nas novas tags e os campos novos."""
+    p = alert_checker._NEWS_CLASSIFIER_SYSTEM
+    assert "CADEIAS DE TRANSMISSÃO" in p
+    assert "<resumo>" in p and "<ja_enviadas>" in p and "<contexto_mercado>" in p
+    assert '"ativos"' in p and '"direcao"' in p and '"duplicada"' in p
+
+
 def test_broadcast_zero_entregas_reporta_erro():
     errors: list[str] = []
     with patch("backend.services.alert_checker.whatsapp.send_message", side_effect=RuntimeError("down")):
