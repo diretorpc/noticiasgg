@@ -501,8 +501,23 @@ def _detect_preference_intent(text: str, current_sections: dict | None = None, t
         return {"intent": "message"}
 
 
+def _webhook_authorized(request: Request) -> bool:
+    """Verifica a origem do webhook. Opt-in: só exige segredo quando
+    WEBHOOK_SECRET está configurado. Aceita via header `x-webhook-secret`
+    ou query param `token` (a URL do webhook na Evolution é fixa)."""
+    import hmac
+    secret = os.environ.get("WEBHOOK_SECRET")
+    if not secret:
+        return True  # não configurado → comportamento legado (sem verificação)
+    provided = request.headers.get("x-webhook-secret") or request.query_params.get("token", "")
+    return bool(provided) and hmac.compare_digest(provided, secret)
+
+
 @app.post("/api/webhook")
 async def whatsapp_webhook(request: Request):
+    if not _webhook_authorized(request):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=401, content={"status": "error", "detail": "unauthorized"})
     payload = await request.json()
     logger.info(f"webhook payload: {payload}")
 

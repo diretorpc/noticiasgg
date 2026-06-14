@@ -2,8 +2,16 @@ import datetime
 import os
 import re
 import time
+from urllib.parse import quote
 
 import httpx
+
+
+def _f(value) -> str:
+    """Encoda um valor que vai num filtro PostgREST (?col=eq.{value}).
+    Impede injeção de operadores via `&`/`(`/etc quando o valor vem de
+    fonte externa (ex: remoteJid do webhook público)."""
+    return quote(str(value), safe="")
 
 
 class _RetryTransport(httpx.HTTPTransport):
@@ -36,7 +44,7 @@ def _client() -> httpx.Client:
 
 def get_authorized(lid: str) -> dict | None:
     with _client() as c:
-        r = c.get(f"/authorized_users?lid=eq.{lid}&select=*")
+        r = c.get(f"/authorized_users?lid=eq.{_f(lid)}&select=*")
         r.raise_for_status()
         rows = r.json()
         return rows[0] if rows else None
@@ -44,7 +52,7 @@ def get_authorized(lid: str) -> dict | None:
 
 def get_authorized_by_phone(phone: str) -> dict | None:
     with _client() as c:
-        r = c.get(f"/authorized_users?phone=eq.{phone}&select=*")
+        r = c.get(f"/authorized_users?phone=eq.{_f(phone)}&select=*")
         r.raise_for_status()
         rows = r.json()
         return rows[0] if rows else None
@@ -58,7 +66,7 @@ def add_authorized(lid: str, phone: str, name: str | None = None) -> None:
 
 def delete_authorized_by_phone(phone: str) -> None:
     with _client() as c:
-        c.delete(f"/authorized_users?phone=eq.{phone}")
+        c.delete(f"/authorized_users?phone=eq.{_f(phone)}")
 
 
 def upsert_pending(lid: str, push_name: str, last_message: str) -> None:
@@ -79,14 +87,14 @@ def pop_oldest_pending() -> dict | None:
         if not rows:
             return None
         pending = rows[0]
-        d = c.delete(f"/pending_auth?lid=eq.{pending['lid']}")
+        d = c.delete(f"/pending_auth?lid=eq.{_f(pending['lid'])}")
         d.raise_for_status()
         return pending
 
 
 def delete_pending(lid: str) -> None:
     with _client() as c:
-        r = c.delete(f"/pending_auth?lid=eq.{lid}")
+        r = c.delete(f"/pending_auth?lid=eq.{_f(lid)}")
         r.raise_for_status()
 
 
@@ -98,7 +106,7 @@ def save_message(phone: str, role: str, content: str) -> None:
 
 def get_history(phone: str, limit: int = 10) -> list[dict]:
     with _client() as c:
-        r = c.get(f"/conversation_history?phone=eq.{phone}&select=role,content&order=created_at.desc&limit={limit}")
+        r = c.get(f"/conversation_history?phone=eq.{_f(phone)}&select=role,content&order=created_at.desc&limit={limit}")
         r.raise_for_status()
         return list(reversed(r.json()))
 
@@ -106,7 +114,7 @@ def get_history(phone: str, limit: int = 10) -> list[dict]:
 def count_history(phone: str) -> int:
     with _client() as c:
         r = c.get(
-            f"/conversation_history?phone=eq.{phone}&select=id&limit=1",
+            f"/conversation_history?phone=eq.{_f(phone)}&select=id&limit=1",
             headers={"Prefer": "count=exact"},
         )
         r.raise_for_status()
@@ -121,7 +129,7 @@ def delete_old_history(phone: str, keep_recent: int = 6) -> None:
     """Deleta todas as mensagens exceto as `keep_recent` mais recentes."""
     with _client() as c:
         r = c.get(
-            f"/conversation_history?phone=eq.{phone}&select=created_at"
+            f"/conversation_history?phone=eq.{_f(phone)}&select=created_at"
             f"&order=created_at.desc&limit=1&offset={keep_recent}",
         )
         r.raise_for_status()
@@ -129,12 +137,12 @@ def delete_old_history(phone: str, keep_recent: int = 6) -> None:
         if not rows:
             return
         cutoff = rows[0]["created_at"]
-        c.delete(f"/conversation_history?phone=eq.{phone}&created_at=lte.{cutoff}").raise_for_status()
+        c.delete(f"/conversation_history?phone=eq.{_f(phone)}&created_at=lte.{cutoff}").raise_for_status()
 
 
 def get_summary(phone: str) -> str | None:
     with _client() as c:
-        r = c.get(f"/conversation_summaries?phone=eq.{phone}&select=summary")
+        r = c.get(f"/conversation_summaries?phone=eq.{_f(phone)}&select=summary")
         r.raise_for_status()
         rows = r.json()
         return rows[0]["summary"] if rows else None
@@ -156,7 +164,7 @@ def save_summary(phone: str, summary: str) -> None:
 
 def get_preferences(phone: str) -> dict | None:
     with _client() as c:
-        r = c.get(f"/user_preferences?phone=eq.{phone}&select=*")
+        r = c.get(f"/user_preferences?phone=eq.{_f(phone)}&select=*")
         r.raise_for_status()
         rows = r.json()
         return rows[0] if rows else None
@@ -196,7 +204,7 @@ def save_preferences(
 
 def delete_preferences(phone: str) -> None:
     with _client() as c:
-        r = c.delete(f"/user_preferences?phone=eq.{phone}")
+        r = c.delete(f"/user_preferences?phone=eq.{_f(phone)}")
         r.raise_for_status()
 
 
