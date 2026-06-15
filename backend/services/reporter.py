@@ -1,12 +1,21 @@
 import os
 import re
 import json
+import logging
 from anthropic import Anthropic
 
 from backend.collectors import (
     market, crypto, indicators_us, indicators_br, news,
     commodities_br, politics_br, polls_br, stocks,
 )
+
+logger = logging.getLogger("noticiasgg")
+
+# Timeout explícito: o default do SDK Anthropic é 600s (+ retries), maior que o
+# maxDuration (300s) da função. Cap de rounds protege contra loop de tool_use
+# infinito/caro que estouraria o orçamento de tempo da request.
+_ANTHROPIC_TIMEOUT = 90.0
+_MAX_TOOL_ROUNDS = 6
 
 ALL_SECTIONS = [
     "market", "crypto", "indicators_us", "indicators_br",
@@ -368,7 +377,7 @@ def generate_report(
     media_attachment: {"type": "image"|"document", "b64": str, "mime": str}
     Quando presente, passa a mídia diretamente para Claude Vision/Documents API.
     """
-    client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], timeout=_ANTHROPIC_TIMEOUT, max_retries=1)
     data = _collect_all(sections=sections)
 
     system = _SYSTEM_MARKET if data else _SYSTEM_CHAT
@@ -416,16 +425,25 @@ def generate_report(
     messages = list(history or [])
     messages.append({"role": "user", "content": user_content})
 
+    rounds = 0
     while True:
-        response = client.messages.create(
+        # Ao atingir o teto de rounds, omite as ferramentas para forçar uma
+        # resposta final em texto e encerrar o loop dentro do orçamento de tempo.
+        use_tools = rounds < _MAX_TOOL_ROUNDS
+        create_kwargs: dict = dict(
             model="claude-sonnet-4-6",
             max_tokens=2000,
             system=system,
             messages=messages,
-            tools=[_STOCK_TOOL, _AGRO_DATA_TOOL, _AGRO_SEARCH_TOOL, _WEB_SEARCH_TOOL, _READ_ARTICLE_TOOL],
         )
+        if use_tools:
+            create_kwargs["tools"] = [_STOCK_TOOL, _AGRO_DATA_TOOL, _AGRO_SEARCH_TOOL, _WEB_SEARCH_TOOL, _READ_ARTICLE_TOOL]
+        response = client.messages.create(**create_kwargs)
 
-        if response.stop_reason == "tool_use":
+        if use_tools and response.stop_reason == "tool_use":
+            rounds += 1
+            tool_names = [b.name for b in response.content if getattr(b, "type", None) == "tool_use"]
+            logger.info("reporter tool round %d/%d: %s", rounds, _MAX_TOOL_ROUNDS, tool_names)
             tool_results = []
             for block in response.content:
                 if block.type == "tool_use" and block.name == "get_stock_data":

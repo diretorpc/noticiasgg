@@ -4,10 +4,14 @@ import os
 
 from openai import OpenAI
 
+# O default do SDK OpenAI é 600s (+ retries), o dobro do maxDuration (300s) da função
+# na Vercel. Sem timeout próprio, uma chamada pendurada estoura a função com 504 silencioso.
+_OPENAI_TIMEOUT = 60.0
+
 
 def transcribe_audio(audio_b64: str, mime_type: str = "audio/ogg") -> str:
     """Transcreve áudio base64 via OpenAI Whisper. Retorna texto em português."""
-    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"], timeout=_OPENAI_TIMEOUT, max_retries=1)
     audio_bytes = base64.b64decode(audio_b64)
 
     # Inferir extensão pelo mime_type para nomear o buffer corretamente
@@ -34,7 +38,7 @@ def transcribe_audio(audio_b64: str, mime_type: str = "audio/ogg") -> str:
 
 def text_to_speech(text: str, voice: str = "nova", speed: float = 0.85) -> bytes:
     """Converte texto em áudio MP3 via OpenAI TTS. Retorna bytes do MP3."""
-    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"], timeout=_OPENAI_TIMEOUT, max_retries=1)
 
     if len(text) > 4096:
         text = text[:4093] + "..."

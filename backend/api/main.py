@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -631,16 +632,22 @@ async def whatsapp_webhook(request: Request):
 
         # ── Áudio ──────────────────────────────────────────────────────────────
         if msg_info["type"] == "audio":
+            _t = time.monotonic()
             try:
                 media = whatsapp.download_media(data)
             except Exception:
+                logger.warning("audio: download falhou após %.1fs", time.monotonic() - _t)
                 whatsapp.send_message(target_phone, "Não consegui baixar o áudio, tente novamente.")
                 return {"status": "ok", "reason": "media_download_failed"}
+            logger.info("audio: download %.1fs", time.monotonic() - _t)
+            _t = time.monotonic()
             try:
                 text = media_service.transcribe_audio(media["base64"], media.get("mimetype", "audio/ogg"))
             except Exception:
+                logger.warning("audio: transcrição falhou após %.1fs", time.monotonic() - _t)
                 whatsapp.send_message(target_phone, "Não consegui transcrever o áudio.")
                 return {"status": "ok", "reason": "transcription_failed"}
+            logger.info("audio: transcribe %.1fs", time.monotonic() - _t)
 
             # Preferência enviada via áudio → detecta e confirma em áudio
             audio_intent = _quick_tts_check(text, tts_speed) or _quick_audio_check(text) or _detect_preference_intent(text, current_sections=current_sections, tts_speed=tts_speed)
@@ -672,7 +679,9 @@ async def whatsapp_webhook(request: Request):
                 return {"status": "ok", "reason": "preference_updated"}
 
             supabase.save_message(target_phone, "user", f"[áudio transcrito] {text}")
+            _t = time.monotonic()
             reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"), sections={})
+            logger.info("audio: report %.1fs", time.monotonic() - _t)
             supabase.save_message(target_phone, "assistant", reply)
             _maybe_summarize(target_phone)
 
