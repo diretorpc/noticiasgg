@@ -1,28 +1,29 @@
-# noticiasgg — Agente Financeiro WhatsApp
+# noticiasgg — WhatsApp Financial Agent
 
-Agente de IA que coleta dados de mercado, indicadores econômicos e notícias diariamente e envia um resumo financeiro pelo WhatsApp. Orquestrado pelo n8n.cloud.
+AI agent that collects market data, economic indicators, and news daily and sends a
+financial summary over WhatsApp. Orchestrated with n8n.cloud.
 
-## Arquitetura
+## Architecture
 
 ```
-WhatsApp (usuário)
-  → Evolution API (VPS Hostinger)
-    → n8n.cloud (orquestração)
-      → Collectors Python (Vercel) — dados em paralelo
-      → Claude API — geração do relatório
-      → Evolution API — envio da resposta
-  → WhatsApp (usuário recebe o resumo)
+WhatsApp (user)
+  → Evolution API (Hostinger VPS)
+    → n8n.cloud (orchestration)
+      → Python collectors (Vercel) — data in parallel
+      → Claude API — report generation
+      → Evolution API — sending the reply
+  → WhatsApp (user receives the summary)
 ```
 
 ## Stack
 
-- **Orquestração:** n8n.cloud
+- **Orchestration:** n8n.cloud
 - **Collectors:** Python 3.12 + FastAPI (Vercel Serverless)
-- **IA:** Claude API (`claude-sonnet-4-6`)
+- **AI:** Claude API (`claude-sonnet-4-6`)
 - **WhatsApp:** Evolution API v1.8.2 (self-hosted)
-- **Dados:** yfinance, CoinGecko, FRED API, BCB, NewsAPI
+- **Data:** yfinance, CoinGecko, FRED API, BCB, NewsAPI
 
-## Setup local
+## Local setup
 
 ```bash
 cd backend
@@ -30,27 +31,27 @@ python -m venv .venv
 .venv\Scripts\activate        # Windows
 pip install -r requirements.txt
 
-cp ../.env.example ../.env    # preencher variáveis
+cp ../.env.example ../.env     # fill in the variables
 uvicorn backend.api.main:app --reload
 ```
 
-Acesse `http://localhost:8000/api/health` para confirmar que subiu.
+Open `http://localhost:8000/api/health` to confirm it's up.
 
-## Variáveis de ambiente
+## Environment variables
 
-Copie `.env.example` para `.env` e preencha:
+Copy `.env.example` to `.env` and fill it in:
 
-| Variável | Descrição |
-|----------|-----------|
+| Variable | Description |
+|----------|-------------|
 | `ANTHROPIC_API_KEY` | Claude API |
-| `FRED_API_KEY` | FRED (indicadores EUA) |
+| `FRED_API_KEY` | FRED (US indicators) |
 | `NEWS_API_KEY` | NewsAPI |
-| `EVOLUTION_API_URL` | URL da Evolution API |
-| `EVOLUTION_API_KEY` | Chave da Evolution API |
-| `EVOLUTION_INSTANCE` | Nome da instância WhatsApp |
-| `AUTHORIZED_NUMBER` | Número autorizado (DDI+DDD+número) |
+| `EVOLUTION_API_URL` | Evolution API URL |
+| `EVOLUTION_API_KEY` | Evolution API key |
+| `EVOLUTION_INSTANCE` | WhatsApp instance name |
+| `AUTHORIZED_NUMBER` | Authorized number (country+area+number) |
 
-## Testes
+## Tests
 
 ```bash
 cd backend
@@ -62,14 +63,21 @@ pytest tests/ -v
 ```bash
 npm i -g vercel
 vercel login
-vercel env add ANTHROPIC_API_KEY   # repetir para todas as variáveis
+vercel env add ANTHROPIC_API_KEY   # repeat for every variable
 vercel --prod
 ```
 
-## Workflows n8n
+## n8n workflows
 
-Os workflows exportados estão em `docs/n8n/`. Importe-os no n8n.cloud e atualize as URLs dos collectors para a URL de produção da Vercel.
+Exported workflows are in `docs/n8n/`. Import them into n8n.cloud and update the
+collector URLs to the production Vercel URL.
 
 ## Milestones
 
-Ver [docs/PLAN.md](docs/PLAN.md).
+See [docs/PLAN.md](docs/PLAN.md).
+
+---
+
+## Credits
+
+Built by [Matheus Dib Mouro](https://www.linkedin.com/in/matheus-dib-26b458160/) — AI Automation Developer (Serafim IA).
