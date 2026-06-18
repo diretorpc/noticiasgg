@@ -1,0 +1,48 @@
+import { createClient } from "@/lib/supabase/server";
+
+export type AgentConfig = {
+  agent: {
+    model: string;
+    validator_model: string;
+    anthropic_timeout_s: number;
+    max_tool_rounds: number;
+    max_tokens: number;
+    tools: { name: string; description: string }[];
+    system_market: string;
+    system_chat: string;
+    system_validator: string;
+  };
+  audio: {
+    tts_voice: string;
+    tts_speed: number;
+    tts_model: string;
+    transcribe_model: string;
+    voices_disponiveis: string[];
+  };
+  news: {
+    sources_finance: string[];
+    sources_tech: string[];
+    finance_query: string;
+    ai_query: string;
+    rss_feeds: { nome: string; url: string }[];
+    rss_feeds_ai: { nome: string; url: string }[];
+  };
+};
+
+export async function fetchAgentConfig(): Promise<AgentConfig> {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/admin/agent-config`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    },
+  );
+  if (!res.ok) {
+    throw new Error(`backend ${res.status}`);
+  }
+  return res.json();
+}
