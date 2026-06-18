@@ -8,6 +8,9 @@ from openai import OpenAI
 # na Vercel. Sem timeout próprio, uma chamada pendurada estoura a função com 504 silencioso.
 _OPENAI_TIMEOUT = 60.0
 
+DEFAULT_TTS_VOICE = "nova"
+DEFAULT_TTS_SPEED = 0.85
+
 
 def transcribe_audio(audio_b64: str, mime_type: str = "audio/ogg") -> str:
     """Transcreve áudio base64 via OpenAI Whisper. Retorna texto em português."""
@@ -36,7 +39,7 @@ def transcribe_audio(audio_b64: str, mime_type: str = "audio/ogg") -> str:
     return transcript.text
 
 
-def text_to_speech(text: str, voice: str = "nova", speed: float = 0.85) -> bytes:
+def text_to_speech(text: str, voice: str = DEFAULT_TTS_VOICE, speed: float = DEFAULT_TTS_SPEED) -> bytes:
     """Converte texto em áudio MP3 via OpenAI TTS. Retorna bytes do MP3."""
     client = OpenAI(api_key=os.environ["OPENAI_API_KEY"], timeout=_OPENAI_TIMEOUT, max_retries=1)
 
@@ -51,3 +54,14 @@ def text_to_speech(text: str, voice: str = "nova", speed: float = 0.85) -> bytes
         speed=speed,
     )
     return response.content
+
+
+def describe_config() -> dict:
+    """Snapshot read-only da config de áudio (TTS/transcrição) para o painel."""
+    return {
+        "tts_voice": DEFAULT_TTS_VOICE,
+        "tts_speed": DEFAULT_TTS_SPEED,
+        "tts_model": "tts-1",
+        "transcribe_model": "whisper-1",
+        "voices_disponiveis": ["alloy", "echo", "fable", "onyx", "nova", "shimmer"],
+    }
