@@ -196,6 +196,18 @@ def collect(include_ai: bool = True, include_newsapi: bool = True,
     return artigos[:40]
 
 
+def describe_config() -> dict:
+    """Snapshot read-only das fontes/queries de notícia para o painel."""
+    return {
+        "sources_finance": SOURCES_FINANCE.split(","),
+        "sources_tech": SOURCES_TECH.split(","),
+        "finance_query": _FINANCE_QUERY,
+        "ai_query": _AI_QUERY,
+        "rss_feeds": [{"nome": n, "url": u} for n, u in _RSS_FEEDS],
+        "rss_feeds_ai": [{"nome": n, "url": u} for n, u in _RSS_FEEDS_AI],
+    }
+
+
 @router.get("/api/collectors/news")
 async def get_news():
     try:
