@@ -16,6 +16,7 @@ logger = logging.getLogger("noticiasgg")
 # infinito/caro que estouraria o orçamento de tempo da request.
 _ANTHROPIC_TIMEOUT = 90.0
 _MAX_TOOL_ROUNDS = 6
+_MAX_TOKENS = 2000
 
 ALL_SECTIONS = [
     "market", "crypto", "indicators_us", "indicators_br",
@@ -432,7 +433,7 @@ def generate_report(
         use_tools = rounds < _MAX_TOOL_ROUNDS
         create_kwargs: dict = dict(
             model="claude-sonnet-4-6",
-            max_tokens=2000,
+            max_tokens=_MAX_TOKENS,
             system=system,
             messages=messages,
         )
@@ -499,3 +500,23 @@ def generate_report(
                 if hasattr(block, "text"):
                     return _validate_and_fix(block.text, data, client)
             return ""
+
+
+def describe_config() -> dict:
+    """Snapshot read-only da config do agente para exibição no painel.
+    Não inclui secrets."""
+    return {
+        "model": "claude-sonnet-4-6",
+        "validator_model": "claude-haiku-4-5-20251001",
+        "anthropic_timeout_s": _ANTHROPIC_TIMEOUT,
+        "max_tool_rounds": _MAX_TOOL_ROUNDS,
+        "max_tokens": _MAX_TOKENS,
+        "tools": [
+            {"name": t["name"], "description": t["description"]}
+            for t in (_STOCK_TOOL, _AGRO_DATA_TOOL, _AGRO_SEARCH_TOOL,
+                      _WEB_SEARCH_TOOL, _READ_ARTICLE_TOOL)
+        ],
+        "system_market": _SYSTEM_MARKET,
+        "system_chat": _SYSTEM_CHAT,
+        "system_validator": _SYSTEM_VALIDATOR,
+    }
