@@ -1,14 +1,35 @@
 import os
 
 import jwt
+from jwt import PyJWKClient
 from fastapi import Header, HTTPException
+
+# Supabase migrou pra chaves assimétricas (ES256/RS256). Validamos via JWKS
+# (chaves públicas), sem segredo compartilhado no backend.
+_ALGORITHMS = ["ES256", "RS256"]
+_jwks_client: PyJWKClient | None = None
+
+
+def _jwks_url() -> str:
+    return f"{os.environ['SUPABASE_URL']}/auth/v1/.well-known/jwks.json"
+
+
+def _get_jwks_client() -> PyJWKClient:
+    """Singleton do PyJWKClient — cacheia as chaves públicas entre requests
+    (evita refetch a cada chamada no serverless)."""
+    global _jwks_client
+    if _jwks_client is None:
+        _jwks_client = PyJWKClient(_jwks_url(), cache_keys=True)
+    return _jwks_client
 
 
 def decode_token(token: str) -> dict:
-    """Valida um JWT Supabase (HS256) e retorna o payload.
-    Lança jwt.PyJWTError se inválido/expirado."""
-    secret = os.environ["SUPABASE_JWT_SECRET"]
-    return jwt.decode(token, secret, algorithms=["HS256"], audience="authenticated")
+    """Valida um JWT Supabase (assimétrico, ES256/RS256) via JWKS e retorna
+    o payload. Lança jwt.PyJWTError se inválido/expirado."""
+    signing_key = _get_jwks_client().get_signing_key_from_jwt(token)
+    return jwt.decode(
+        token, signing_key.key, algorithms=_ALGORITHMS, audience="authenticated"
+    )
 
 
 def verify_supabase_jwt(authorization: str | None = Header(default=None)) -> dict:

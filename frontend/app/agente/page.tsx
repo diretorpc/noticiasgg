@@ -60,7 +60,7 @@ export default async function AgentePage() {
             <p className="mt-1 readout text-xs text-slate">backend: {err}</p>
             <p className="mt-3 text-sm text-slate">
               Confira <span className="readout text-bone">NEXT_PUBLIC_BACKEND_URL</span> e o{" "}
-              <span className="readout text-bone">SUPABASE_JWT_SECRET</span> no backend.
+              <span className="readout text-bone">SUPABASE_URL</span> no backend.
             </p>
           </div>
         ) : (
