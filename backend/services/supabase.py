@@ -322,3 +322,11 @@ def get_all_config() -> list[dict]:
         r = c.get("/agent_config?select=key,value")
         r.raise_for_status()
         return r.json()
+
+
+def list_authorized() -> list[dict]:
+    """Lista todos os usuários autorizados (phone + name)."""
+    with _client() as c:
+        r = c.get("/authorized_users?select=phone,name&order=phone.asc")
+        r.raise_for_status()
+        return r.json()
