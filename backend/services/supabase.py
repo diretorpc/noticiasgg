@@ -314,3 +314,11 @@ def get_users_for_hour(hour_brt: str) -> list[dict]:
         for p in prefs
         if p["phone"] in users_by_phone
     ]
+
+
+def get_all_config() -> list[dict]:
+    """Lê todas as linhas da tabela agent_config (key/value)."""
+    with _client() as c:
+        r = c.get("/agent_config?select=key,value")
+        r.raise_for_status()
+        return r.json()
