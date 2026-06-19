@@ -2,6 +2,7 @@ import time
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import httpx
 import jwt
 from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi.testclient import TestClient
@@ -54,3 +55,12 @@ def test_newsapi_sources_returns_simplified_list():
     sources = resp.json()["sources"]
     assert sources == [{"id": "reuters", "name": "Reuters", "category": "general",
                         "language": "en", "country": "us"}]
+
+
+def test_newsapi_sources_degrades_to_empty_on_api_error():
+    with patch.object(auth, "_get_jwks_client", return_value=_FakeJWKS()), \
+         patch("backend.api.admin.httpx.get", side_effect=httpx.TimeoutException("boom")):
+        resp = client.get("/api/admin/newsapi-sources",
+                          headers={"Authorization": f"Bearer {_token()}"})
+    assert resp.status_code == 200
+    assert resp.json() == {"sources": []}

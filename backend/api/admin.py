@@ -27,13 +27,18 @@ def get_newsapi_sources(user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
     api_key = os.environ.get("NEWS_API_KEY", "")
     if not api_key:
         return {"sources": []}
-    resp = httpx.get(
-        "https://newsapi.org/v2/top-headlines/sources",
-        params={"apiKey": api_key},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    raw = resp.json().get("sources", [])
+    # Degrada para lista vazia se a NewsAPI falhar (429/timeout) — o painel
+    # continua editável (RSS, queries) mesmo sem o picker de fontes.
+    try:
+        resp = httpx.get(
+            "https://newsapi.org/v2/top-headlines/sources",
+            params={"apiKey": api_key},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        raw = resp.json().get("sources", [])
+    except Exception:
+        return {"sources": []}
     sources = [
         {
             "id": s.get("id"),
