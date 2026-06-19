@@ -92,6 +92,41 @@ def _feeds(key: str, default_tuples: list[tuple]) -> list[tuple]:
     return default_tuples
 
 
+def _parse_feed(content: bytes) -> dict:
+    """Parseia bytes de um feed RSS/Atom. Retorna validade, nº de itens e
+    o título do primeiro item. Puro (sem rede) para facilitar teste."""
+    try:
+        root = ET.fromstring(content)
+    except Exception:
+        return {"valid": False, "item_count": 0, "sample_title": None,
+                "error": "conteúdo não é XML"}
+    items = root.findall(".//item")
+    if not items:
+        items = [e for e in root.iter() if e.tag.endswith("entry")]  # Atom
+    if not items:
+        return {"valid": False, "item_count": 0, "sample_title": None,
+                "error": "feed sem itens (<item>/<entry>)"}
+    sample = None
+    for child in items[0].iter():
+        if child.tag.endswith("title") and child.text and child.text.strip():
+            sample = child.text.strip()
+            break
+    return {"valid": True, "item_count": len(items), "sample_title": sample, "error": None}
+
+
+def validate_feed(url: str) -> dict:
+    """Busca uma URL de RSS/Atom e valida o conteúdo. Nunca levanta exceção."""
+    try:
+        resp = httpx.get(url, follow_redirects=True, timeout=10)
+    except Exception:
+        return {"valid": False, "item_count": 0, "sample_title": None,
+                "error": "falha ao buscar a URL"}
+    if resp.status_code != 200:
+        return {"valid": False, "item_count": 0, "sample_title": None,
+                "error": f"HTTP {resp.status_code}"}
+    return _parse_feed(resp.content)
+
+
 def _is_fresh(published_at: str | None) -> bool:
     if not published_at:
         return True

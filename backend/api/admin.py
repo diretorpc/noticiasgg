@@ -2,6 +2,7 @@ import os
 
 import httpx
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
 from backend.services import reporter, auth
 from backend.services import media as media_service
@@ -50,3 +51,13 @@ def get_newsapi_sources(user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
         for s in raw
     ]
     return {"sources": sources}
+
+
+class RssValidateBody(BaseModel):
+    url: str
+
+
+@router.post("/api/admin/validate-rss")
+def validate_rss(body: RssValidateBody, user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+    """Valida na hora uma URL de RSS/Atom para o painel (parse + nº de itens)."""
+    return news.validate_feed(body.url)
