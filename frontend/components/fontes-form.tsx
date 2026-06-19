@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { upsertConfig, deleteConfig } from "@/lib/config";
+import { upsertConfig, deleteConfig, validateRss, type RssCheck } from "@/lib/config";
 import type { NewsApiSource } from "@/lib/api";
 
 type Feed = { nome: string; url: string };
@@ -73,6 +73,22 @@ function SourcePicker({
   );
 }
 
+type CheckState = RssCheck | "loading" | undefined;
+
+function CheckResult({ state }: { state: CheckState }) {
+  if (state === undefined) return null;
+  if (state === "loading") return <p className="text-xs text-slate">testando…</p>;
+  if (state.valid) {
+    return (
+      <p className="text-xs text-emerald-400">
+        ✓ válido · {state.item_count} itens
+        {state.sample_title ? ` · "${state.sample_title}"` : ""}
+      </p>
+    );
+  }
+  return <p className="text-xs text-red-400">✗ {state.error ?? "feed inválido"}</p>;
+}
+
 function FeedEditor({
   label,
   feeds,
@@ -82,31 +98,56 @@ function FeedEditor({
   feeds: Feed[];
   setFeeds: (f: Feed[]) => void;
 }) {
+  const [checks, setChecks] = useState<Record<number, CheckState>>({});
+
+  async function test(i: number) {
+    const url = feeds[i].url.trim();
+    if (!url) return;
+    setChecks((c) => ({ ...c, [i]: "loading" }));
+    const result = await validateRss(url);
+    setChecks((c) => ({ ...c, [i]: result }));
+  }
+
+  function update(i: number, patch: Partial<Feed>) {
+    setFeeds(feeds.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+    setChecks((c) => ({ ...c, [i]: undefined })); // edição invalida o último teste
+  }
+
   return (
     <div>
       <span className="eyebrow">{label}</span>
-      <div className="mt-2 space-y-2">
+      <div className="mt-2 space-y-3">
         {feeds.map((f, i) => (
-          <div key={i} className="flex gap-2">
-            <input
-              value={f.nome}
-              onChange={(e) => setFeeds(feeds.map((x, j) => (j === i ? { ...x, nome: e.target.value } : x)))}
-              placeholder="nome"
-              className="w-1/3 rounded-md border border-line bg-ink px-2 py-1.5 text-sm text-bone"
-            />
-            <input
-              value={f.url}
-              onChange={(e) => setFeeds(feeds.map((x, j) => (j === i ? { ...x, url: e.target.value } : x)))}
-              placeholder="https://…/rss"
-              className="flex-1 rounded-md border border-line bg-ink px-2 py-1.5 text-sm text-bone"
-            />
-            <button
-              type="button"
-              onClick={() => setFeeds(feeds.filter((_, j) => j !== i))}
-              className="rounded-md border border-line px-2 text-slate hover:text-bone"
-            >
-              ✕
-            </button>
+          <div key={i} className="space-y-1">
+            <div className="flex gap-2">
+              <input
+                value={f.nome}
+                onChange={(e) => update(i, { nome: e.target.value })}
+                placeholder="nome"
+                className="w-1/3 rounded-md border border-line bg-ink px-2 py-1.5 text-sm text-bone"
+              />
+              <input
+                value={f.url}
+                onChange={(e) => update(i, { url: e.target.value })}
+                placeholder="https://…/rss"
+                className="flex-1 rounded-md border border-line bg-ink px-2 py-1.5 text-sm text-bone"
+              />
+              <button
+                type="button"
+                onClick={() => test(i)}
+                className="rounded-md border border-line px-2 text-xs text-gold hover:bg-raised/40"
+              >
+                testar
+              </button>
+              <button
+                type="button"
+                onClick={() => setFeeds(feeds.filter((_, j) => j !== i))}
+                className="rounded-md border border-line px-2 text-slate hover:text-bone"
+              >
+                ✕
+              </button>
+            </div>
+            <CheckResult state={checks[i]} />
           </div>
         ))}
         <button
