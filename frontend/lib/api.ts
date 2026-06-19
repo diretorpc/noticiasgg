@@ -70,3 +70,29 @@ export async function fetchNewsApiSources(): Promise<NewsApiSource[]> {
   const body = await res.json();
   return body.sources as NewsApiSource[];
 }
+
+export type UserPrefs = {
+  sections: Record<string, boolean> | null;
+  report_time: string | null;
+  audio_for_text: boolean | null;
+  audio_for_media: boolean | null;
+  tts_voice: string | null;
+  tts_speed: number | null;
+};
+
+export type AdminUser = {
+  phone: string;
+  name: string | null;
+  preferences: UserPrefs | null;
+};
+
+export async function fetchUsers(): Promise<AdminUser[]> {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/admin/users`,
+    { headers: { Authorization: `Bearer ${session?.access_token}` }, cache: "no-store" },
+  );
+  if (!res.ok) throw new Error(`backend ${res.status}`);
+  return (await res.json()).users as AdminUser[];
+}
