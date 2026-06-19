@@ -46,3 +46,27 @@ export async function fetchAgentConfig(): Promise<AgentConfig> {
   }
   return res.json();
 }
+
+export type NewsApiSource = {
+  id: string;
+  name: string;
+  category: string;
+  language: string;
+  country: string;
+};
+
+export async function fetchNewsApiSources(): Promise<NewsApiSource[]> {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/admin/newsapi-sources`,
+    { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" },
+  );
+  if (!res.ok) {
+    throw new Error(`backend ${res.status}`);
+  }
+  const body = await res.json();
+  return body.sources as NewsApiSource[];
+}

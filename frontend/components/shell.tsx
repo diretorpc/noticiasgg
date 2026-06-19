@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 const NAV = [
   { href: "/", label: "Visão geral" },
   { href: "/agente", label: "Agente" },
+  { href: "/noticias/fontes", label: "Notícias" },
 ];
 
 export default async function Shell({

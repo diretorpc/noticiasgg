@@ -6,6 +6,8 @@ from fastapi import APIRouter, HTTPException
 import httpx
 from dotenv import load_dotenv
 
+from backend.services import config
+
 load_dotenv()
 
 router = APIRouter()
@@ -66,6 +68,63 @@ _RSS_FEEDS_AI = [
     ("MIT Technology Review", "https://www.technologyreview.com/feed/"),
     ("VentureBeat AI", "https://venturebeat.com/category/ai/feed/"),
 ]
+
+
+def _sources_param(key: str, default_csv: str) -> str:
+    """Lista de fontes do config (list[str]) → CSV; senão o default CSV."""
+    val = config.get("news." + key, None)
+    if isinstance(val, list) and val:
+        return ",".join(str(s) for s in val)
+    return default_csv
+
+
+def _feeds(key: str, default_tuples: list[tuple]) -> list[tuple]:
+    """Feeds do config (list[{nome,url}]) → list[(nome,url)]; senão o default."""
+    val = config.get("news." + key, None)
+    if isinstance(val, list) and val:
+        out = [
+            (str(f.get("nome", "")), f["url"])
+            for f in val
+            if isinstance(f, dict) and isinstance(f.get("url"), str) and f.get("url")
+        ]
+        if out:
+            return out
+    return default_tuples
+
+
+def _parse_feed(content: bytes) -> dict:
+    """Parseia bytes de um feed RSS/Atom. Retorna validade, nº de itens e
+    o título do primeiro item. Puro (sem rede) para facilitar teste."""
+    try:
+        root = ET.fromstring(content)
+    except Exception:
+        return {"valid": False, "item_count": 0, "sample_title": None,
+                "error": "conteúdo não é XML"}
+    items = root.findall(".//item")
+    if not items:
+        items = [e for e in root.iter() if e.tag.endswith("entry")]  # Atom
+    if not items:
+        return {"valid": False, "item_count": 0, "sample_title": None,
+                "error": "feed sem itens (<item>/<entry>)"}
+    sample = None
+    for child in items[0].iter():
+        if child.tag.endswith("title") and child.text and child.text.strip():
+            sample = child.text.strip()
+            break
+    return {"valid": True, "item_count": len(items), "sample_title": sample, "error": None}
+
+
+def validate_feed(url: str) -> dict:
+    """Busca uma URL de RSS/Atom e valida o conteúdo. Nunca levanta exceção."""
+    try:
+        resp = httpx.get(url, follow_redirects=True, timeout=10)
+    except Exception:
+        return {"valid": False, "item_count": 0, "sample_title": None,
+                "error": "falha ao buscar a URL"}
+    if resp.status_code != 200:
+        return {"valid": False, "item_count": 0, "sample_title": None,
+                "error": f"HTTP {resp.status_code}"}
+    return _parse_feed(resp.content)
 
 
 def _is_fresh(published_at: str | None) -> bool:
@@ -164,8 +223,8 @@ def collect(include_ai: bool = True, include_newsapi: bool = True,
             # Finanças: /everything filtrado por fontes financeiras + keywords
             artigos.extend(_fetch_newsapi(client, NEWSAPI_EVERYTHING, {
                 "apiKey": api_key,
-                "sources": SOURCES_FINANCE,
-                "q": _FINANCE_QUERY,
+                "sources": _sources_param("sources_finance", SOURCES_FINANCE),
+                "q": config.get_str("news.finance_query", _FINANCE_QUERY),
                 "language": "en",
                 "sortBy": "publishedAt",
                 "pageSize": 15,
@@ -183,28 +242,29 @@ def collect(include_ai: bool = True, include_newsapi: bool = True,
             if include_ai:
                 artigos.extend(_fetch_newsapi(client, NEWSAPI_EVERYTHING, {
                     "apiKey": api_key,
-                    "sources": SOURCES_TECH,
-                    "q": _AI_QUERY,
+                    "sources": _sources_param("sources_tech", SOURCES_TECH),
+                    "q": config.get_str("news.ai_query", _AI_QUERY),
                     "language": "en",
                     "sortBy": "publishedAt",
                     "pageSize": 10,
                 }, vistos, errors, "ai"))
 
         # RSS feeds internacionais + IA (grátis, sempre coletados)
-        artigos.extend(_collect_rss(client, _RSS_FEEDS + _RSS_FEEDS_AI, vistos))
+        feeds = _feeds("rss_feeds", _RSS_FEEDS) + _feeds("rss_feeds_ai", _RSS_FEEDS_AI)
+        artigos.extend(_collect_rss(client, feeds, vistos))
 
     return artigos[:40]
 
 
 def describe_config() -> dict:
-    """Snapshot read-only das fontes/queries de notícia para o painel."""
+    """Snapshot read-only da config efetiva (override do banco ou default)."""
     return {
-        "sources_finance": SOURCES_FINANCE.split(","),
-        "sources_tech": SOURCES_TECH.split(","),
-        "finance_query": _FINANCE_QUERY,
-        "ai_query": _AI_QUERY,
-        "rss_feeds": [{"nome": n, "url": u} for n, u in _RSS_FEEDS],
-        "rss_feeds_ai": [{"nome": n, "url": u} for n, u in _RSS_FEEDS_AI],
+        "sources_finance": _sources_param("sources_finance", SOURCES_FINANCE).split(","),
+        "sources_tech": _sources_param("sources_tech", SOURCES_TECH).split(","),
+        "finance_query": config.get_str("news.finance_query", _FINANCE_QUERY),
+        "ai_query": config.get_str("news.ai_query", _AI_QUERY),
+        "rss_feeds": [{"nome": n, "url": u} for n, u in _feeds("rss_feeds", _RSS_FEEDS)],
+        "rss_feeds_ai": [{"nome": n, "url": u} for n, u in _feeds("rss_feeds_ai", _RSS_FEEDS_AI)],
     }
 
 
