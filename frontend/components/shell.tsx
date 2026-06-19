@@ -6,6 +6,7 @@ const NAV = [
   { href: "/", label: "Visão geral" },
   { href: "/agente", label: "Agente" },
   { href: "/noticias/fontes", label: "Notícias" },
+  { href: "/usuarios", label: "Usuários" },
 ];
 
 export default async function Shell({
