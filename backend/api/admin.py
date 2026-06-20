@@ -4,7 +4,7 @@ import httpx
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from backend.services import reporter, auth, supabase
+from backend.services import reporter, auth, supabase, report_engine
 from backend.services import media as media_service
 from backend.collectors import news
 
@@ -114,3 +114,17 @@ def reset_user_prefs(phone: str, user: dict = Depends(auth.verify_supabase_jwt))
     """Reseta as preferências de um usuário (volta aos defaults)."""
     supabase.delete_preferences(phone)
     return {"ok": True}
+
+
+class PreviewReportBody(BaseModel):
+    phone: str
+    sections: dict | None = None
+
+
+@router.post("/api/admin/preview-report")
+def preview_report(body: PreviewReportBody, user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+    """Gera o relatório do motor novo (lista de mensagens) SEM enviar pro WhatsApp.
+    Usado para comparar o layout lado a lado com o n8n."""
+    target = supabase.get_authorized_by_phone(body.phone) or {"phone": body.phone, "name": ""}
+    messages = report_engine.generate_sections(body.sections, target)
+    return {"messages": messages}
