@@ -1,3 +1,23 @@
+import json
+import logging
+
+from backend.collectors import (
+    market, crypto, indicators_us, indicators_br, news,
+    commodities_br, politics_br, polls_br,
+)
+from backend.services import report_prompts, integrity
+
+logger = logging.getLogger("noticiasgg")
+
+_ANTHROPIC_TIMEOUT = 90.0
+TEXT_SECTIONS = ("noticias", "analise", "politica")
+
+_MAX_TOKENS = {
+    "commodities": 1024, "bolsas": 1024, "cambio_cripto": 1024,
+    "noticias": 1024, "analise": 1500, "politica": 1200,
+}
+
+
 def _safe_dict(val) -> dict:
     return val if isinstance(val, dict) and "erro" not in val else {}
 
@@ -43,3 +63,49 @@ def adapt_politica(politics_out: list, polls_out: list) -> dict:
         "politica": _safe_list(politics_out),
         "pesquisas": _safe_list(polls_out),
     }}
+
+
+def _safe_collect(fn):
+    try:
+        return fn()
+    except Exception as e:
+        return {"erro": str(e)}
+
+
+def _collect(section: str) -> dict:
+    if section == "bolsas":
+        return adapt_bolsas(_safe_collect(market.collect))
+    if section == "commodities":
+        return adapt_commodities(_safe_collect(commodities_br.collect))
+    if section == "cambio_cripto":
+        return adapt_cambio_cripto(_safe_collect(market.collect), _safe_collect(crypto.collect))
+    if section == "noticias":
+        return adapt_noticias(_safe_collect(news.collect))
+    if section == "analise":
+        return adapt_analise(
+            _safe_collect(market.collect), _safe_collect(crypto.collect),
+            _safe_collect(indicators_br.collect), _safe_collect(indicators_us.collect),
+            _safe_collect(news.collect),
+        )
+    if section == "politica":
+        return adapt_politica(_safe_collect(politics_br.collect), _safe_collect(polls_br.collect))
+    raise KeyError(section)
+
+
+def _render(section: str, ctx: dict, client) -> str:
+    prompt = report_prompts.get_prompt(section)
+    resp = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=_MAX_TOKENS[section],
+        system=prompt,
+        messages=[{"role": "user",
+                   "content": json.dumps(ctx, ensure_ascii=False, default=str)}],
+    )
+    text = ""
+    for block in resp.content:
+        if hasattr(block, "text"):
+            text = block.text
+            break
+    if section in TEXT_SECTIONS:
+        text = integrity.validate_and_fix(text, ctx.get("data", {}), client)
+    return text
