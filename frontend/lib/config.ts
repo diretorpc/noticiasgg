@@ -86,3 +86,24 @@ export async function resetUserPrefs(phone: string): Promise<void> {
   );
   if (!res.ok) throw new Error(`backend ${res.status}`);
 }
+
+export async function previewReport(
+  phone: string,
+  sections: Record<string, boolean> | null = null,
+): Promise<string[]> {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/admin/preview-report`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session?.access_token}`,
+      },
+      body: JSON.stringify({ phone, sections }),
+    },
+  );
+  if (!res.ok) throw new Error(`backend ${res.status}`);
+  return (await res.json()).messages as string[];
+}

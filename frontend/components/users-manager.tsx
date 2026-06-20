@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { saveUserPrefs, resetUserPrefs } from "@/lib/config";
+import { saveUserPrefs, resetUserPrefs, previewReport } from "@/lib/config";
 import type { AdminUser } from "@/lib/api";
 
 const SECTIONS: [string, string][] = [
@@ -33,6 +33,23 @@ function UserForm({ user }: { user: AdminUser }) {
   const [speed, setSpeed] = useState(p?.tts_speed ?? 0.85);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<string[] | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+
+  async function runPreview() {
+    setPreviewing(true);
+    setPreview(null);
+    setStatus("Gerando pré-visualização (motor novo, 6 seções)… pode levar ~30s.");
+    try {
+      const messages = await previewReport(user.phone, null);
+      setPreview(messages);
+      setStatus(messages.length ? null : "Motor não retornou nenhuma seção.");
+    } catch (e) {
+      setStatus("Erro no preview: " + (e instanceof Error ? e.message : "desconhecido"));
+    } finally {
+      setPreviewing(false);
+    }
+  }
 
   async function save() {
     setBusy(true);
@@ -117,12 +134,35 @@ function UserForm({ user }: { user: AdminUser }) {
       </section>
 
       {status && <p className="text-sm text-gold">{status}</p>}
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
         <button onClick={save} disabled={busy}
           className="rounded-md bg-gold px-4 py-2 font-medium text-ink hover:bg-bone disabled:opacity-50">Salvar</button>
         <button onClick={reset} disabled={busy}
           className="rounded-md border border-line px-4 py-2 text-sm text-slate hover:text-bone disabled:opacity-50">Resetar padrões</button>
+        <button onClick={runPreview} disabled={previewing}
+          className="rounded-md border border-line px-4 py-2 text-sm text-slate hover:text-bone disabled:opacity-50">
+          {previewing ? "Gerando…" : "Pré-visualizar relatório"}
+        </button>
       </div>
+
+      {preview && (
+        <section className="rounded-lg border border-line bg-surface p-5">
+          <h2 className="mb-3 font-display text-sm font-medium uppercase tracking-wide text-slate">
+            Pré-visualização — motor novo ({preview.length} {preview.length === 1 ? "mensagem" : "mensagens"})
+          </h2>
+          <p className="mb-3 text-xs text-slate">
+            Não enviado a ninguém. Cada bloco é uma mensagem separada no WhatsApp.
+          </p>
+          <div className="space-y-3">
+            {preview.map((msg, i) => (
+              <pre key={i}
+                className="whitespace-pre-wrap rounded-md border border-line bg-ink p-3 text-sm text-bone">
+                {msg}
+              </pre>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
