@@ -134,3 +134,20 @@ def test_greeting_header_without_name():
     h = re._greeting_header({"name": ""})
     assert "*" not in h  # sem nome em negrito
     assert "|" in h      # mantém a data
+
+
+from backend.evals import hallucination_eval as he
+
+
+@pytest.mark.unit
+def test_parse_judge_verdict_extracts_counts():
+    judge = "ancoradas: 7\ninventadas: 1\nveredito: ok"
+    out = he.parse_judge_verdict(judge)
+    assert out["ancoradas"] == 7
+    assert out["inventadas"] == 1
+
+
+@pytest.mark.unit
+def test_parse_judge_verdict_defaults_zero_when_absent():
+    out = he.parse_judge_verdict("texto sem números")
+    assert out == {"ancoradas": 0, "inventadas": 0}

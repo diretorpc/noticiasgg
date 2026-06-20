@@ -1,0 +1,26 @@
+name: Hallucination Eval
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 9 * * 1"  # segundas, 09:00 UTC
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r backend/requirements.txt
+      - name: Run hallucination eval
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python -m backend.evals.hallucination_eval | tee eval-report.txt
+      - name: Publish summary
+        if: always()
+        run: |
+          echo '## Hallucination eval' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat eval-report.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
