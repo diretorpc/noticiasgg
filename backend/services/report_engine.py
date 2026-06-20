@@ -1,5 +1,7 @@
+import datetime as _dt
 import json
 import logging
+import os
 
 from backend.collectors import (
     market, crypto, indicators_us, indicators_br, news,
@@ -109,3 +111,49 @@ def _render(section: str, ctx: dict, client) -> str:
     if section in TEXT_SECTIONS:
         text = integrity.validate_and_fix(text, ctx.get("data", {}), client)
     return text
+
+
+_SECTION_ORDER = ("commodities", "bolsas", "cambio_cripto", "noticias", "analise", "politica")
+DEFAULT_SECTIONS = {s: True for s in _SECTION_ORDER}
+
+_BRT = _dt.timezone(_dt.timedelta(hours=-3))
+
+
+def _current_greeting() -> str:
+    h = _dt.datetime.now(_BRT).hour
+    if 5 <= h < 12:
+        return "Bom dia"
+    if h < 18:
+        return "Boa tarde"
+    return "Boa noite"
+
+
+def _greeting_header(user: dict) -> str:
+    data = _dt.datetime.now(_BRT).strftime("%d/%m/%Y")
+    nome = (user.get("name") or "").strip()
+    saud = _current_greeting()
+    if nome:
+        return f"{saud}, *{nome.split()[0]}*! | {data}"
+    return f"{saud}! | {data}"
+
+
+def generate_sections(sections: dict | None, user: dict, client=None) -> list[str]:
+    if client is None:
+        from anthropic import Anthropic
+        client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"],
+                           timeout=_ANTHROPIC_TIMEOUT, max_retries=1)
+    active = sections if sections is not None else DEFAULT_SECTIONS
+    messages: list[str] = []
+    for section in _SECTION_ORDER:
+        if not active.get(section):
+            continue
+        try:
+            ctx = _collect(section)
+            text = _render(section, ctx, client)
+            if text and text.strip():
+                messages.append(text.strip())
+        except Exception:
+            logger.exception("report_engine: seção falhou: %s", section)
+    if messages:
+        messages[0] = f"{_greeting_header(user)}\n\n{messages[0]}"
+    return messages
