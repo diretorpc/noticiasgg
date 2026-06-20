@@ -49,3 +49,40 @@ export async function validateRss(url: string): Promise<RssCheck> {
   }
   return res.json();
 }
+
+export type UserPrefsInput = {
+  phone: string;
+  sections: Record<string, boolean> | null;
+  report_time: string | null;
+  audio_for_text: boolean | null;
+  audio_for_media: boolean | null;
+  tts_voice: string | null;
+  tts_speed: number | null;
+};
+
+export async function saveUserPrefs(body: UserPrefsInput): Promise<void> {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/admin/user-prefs`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session?.access_token}`,
+      },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) throw new Error(`backend ${res.status}`);
+}
+
+export async function resetUserPrefs(phone: string): Promise<void> {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/admin/user-prefs/${encodeURIComponent(phone)}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${session?.access_token}` } },
+  );
+  if (!res.ok) throw new Error(`backend ${res.status}`);
+}
