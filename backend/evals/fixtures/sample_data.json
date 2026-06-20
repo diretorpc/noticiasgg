@@ -1,0 +1,10 @@
+{
+  "bolsas": {"IBOVESPA": {"preco": 168277.55, "variacao_pct": -0.1},
+             "S&P 500": {"preco": 746.74, "variacao_pct": 1.04}},
+  "cambio": {"USD/BRL": {"preco": 5.17, "variacao_pct": 0.18}},
+  "cripto": [{"simbolo": "BTC", "preco_usd": 64000, "variacao_24h_pct": -1.2}],
+  "indicadores_br": {"selic": 13.75}, "indicadores_us": {"cpi": 3.1},
+  "noticias": [{"titulo": "Ucrânia ataca refinaria em Moscou", "fonte": "AP"}],
+  "politica": [{"titulo": "Lula no G7", "fonte": "BBC"}],
+  "pesquisas": [{"instituto": "Datafolha", "Lula": 38, "Flávio Bolsonaro": 35}]
+}
