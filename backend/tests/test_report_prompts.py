@@ -34,3 +34,29 @@ def test_get_prompt_falls_back_to_default(monkeypatch):
 def test_get_prompt_unknown_section_raises():
     with pytest.raises(KeyError):
         report_prompts.get_prompt("inexistente")
+
+
+@pytest.mark.unit
+def test_describe_prompts_marks_custom_and_default(monkeypatch):
+    overrides = {"report_prompt_bolsas": "MEU PROMPT BOLSAS"}
+    monkeypatch.setattr(report_prompts.config, "get",
+                        lambda key, default=None: overrides.get(key, default))
+
+    out = {p["section"]: p for p in report_prompts.describe_prompts()}
+
+    assert set(out) == set(report_prompts.SECTIONS)
+    assert out["bolsas"]["is_custom"] is True
+    assert out["bolsas"]["value"] == "MEU PROMPT BOLSAS"
+    assert out["bolsas"]["default"] == report_prompts.DEFAULTS["bolsas"]
+
+    assert out["commodities"]["is_custom"] is False
+    assert out["commodities"]["value"] == report_prompts.DEFAULTS["commodities"]
+
+
+@pytest.mark.unit
+def test_describe_prompts_blank_override_is_not_custom(monkeypatch):
+    monkeypatch.setattr(report_prompts.config, "get",
+                        lambda key, default=None: "   " if key == "report_prompt_analise" else default)
+    out = {p["section"]: p for p in report_prompts.describe_prompts()}
+    assert out["analise"]["is_custom"] is False
+    assert out["analise"]["value"] == report_prompts.DEFAULTS["analise"]

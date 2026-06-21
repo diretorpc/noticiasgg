@@ -1,10 +1,10 @@
 import os
 
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend.services import reporter, auth, supabase, report_engine, schedules
+from backend.services import reporter, auth, supabase, report_engine, schedules, config, report_prompts
 from backend.services import media as media_service
 from backend.collectors import news
 
@@ -151,3 +151,47 @@ def put_schedules(phone: str, body: ScheduleBody,
     schedules.replace_for_phone(phone, rows)
     schedules.set_engine_flag(phone, body.use_new_engine)
     return {"ok": True}
+
+
+@router.get("/api/admin/report-prompts")
+def get_report_prompts(user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+    """Os 6 prompts de seção: valor efetivo, se é custom e o default."""
+    return {"prompts": report_prompts.describe_prompts()}
+
+
+class ReportPromptBody(BaseModel):
+    prompt: str
+
+
+@router.put("/api/admin/report-prompts/{section}")
+def put_report_prompt(section: str, body: ReportPromptBody,
+                      user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+    if section not in report_prompts.SECTIONS:
+        raise HTTPException(status_code=400, detail="seção inválida")
+    supabase.upsert_config(report_prompts._CONFIG_KEY[section], body.prompt)
+    config.clear_cache()
+    return {"ok": True, "is_custom": True}
+
+
+@router.delete("/api/admin/report-prompts/{section}")
+def delete_report_prompt(section: str,
+                         user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+    if section not in report_prompts.SECTIONS:
+        raise HTTPException(status_code=400, detail="seção inválida")
+    supabase.delete_config(report_prompts._CONFIG_KEY[section])
+    config.clear_cache()
+    return {"ok": True, "is_custom": False}
+
+
+class PreviewSectionBody(BaseModel):
+    section: str
+    prompt: str
+
+
+@router.post("/api/admin/preview-section")
+def preview_section(body: PreviewSectionBody,
+                    user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+    if body.section not in report_prompts.SECTIONS:
+        raise HTTPException(status_code=400, detail="seção inválida")
+    text = report_engine.preview_section(body.section, body.prompt)
+    return {"text": text}

@@ -145,3 +145,42 @@ export async function saveSchedule(
   );
   if (!res.ok) throw new Error(`backend ${res.status}`);
 }
+
+export async function saveReportPrompt(section: string, prompt: string): Promise<void> {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/admin/report-prompts/${encodeURIComponent(section)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+      body: JSON.stringify({ prompt }),
+    },
+  );
+  if (!res.ok) throw new Error(`backend ${res.status}`);
+}
+
+export async function resetReportPrompt(section: string): Promise<void> {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/admin/report-prompts/${encodeURIComponent(section)}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${session?.access_token}` } },
+  );
+  if (!res.ok) throw new Error(`backend ${res.status}`);
+}
+
+export async function previewSection(section: string, prompt: string): Promise<string> {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/admin/preview-section`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+      body: JSON.stringify({ section, prompt }),
+    },
+  );
+  if (!res.ok) throw new Error(`backend ${res.status}`);
+  return (await res.json()).text as string;
+}

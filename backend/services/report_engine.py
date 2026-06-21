@@ -94,8 +94,8 @@ def _collect(section: str) -> dict:
     raise KeyError(section)
 
 
-def _render(section: str, ctx: dict, client) -> str:
-    prompt = report_prompts.get_prompt(section)
+def _render(section: str, ctx: dict, client, prompt: str | None = None) -> str:
+    prompt = prompt or report_prompts.get_prompt(section)
     resp = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=_MAX_TOKENS[section],
@@ -157,3 +157,14 @@ def generate_sections(sections: dict | None, user: dict, client=None) -> list[st
     if messages:
         messages[0] = f"{_greeting_header(user)}\n\n{messages[0]}"
     return messages
+
+
+def preview_section(section: str, prompt: str | None, client=None) -> str:
+    if section not in _SECTION_ORDER:
+        raise KeyError(section)
+    if client is None:
+        from anthropic import Anthropic
+        client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"],
+                           timeout=_ANTHROPIC_TIMEOUT, max_retries=1)
+    ctx = _collect(section)
+    return _render(section, ctx, client, prompt)

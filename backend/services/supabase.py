@@ -330,3 +330,19 @@ def list_authorized() -> list[dict]:
         r = c.get("/authorized_users?select=phone,name&order=phone.asc")
         r.raise_for_status()
         return r.json()
+
+
+def upsert_config(key: str, value) -> None:
+    with _client() as c:
+        r = c.post(
+            "/agent_config",
+            json={"key": key, "value": value},
+            headers={"Prefer": "resolution=merge-duplicates,return=representation"},
+        )
+        r.raise_for_status()
+
+
+def delete_config(key: str) -> None:
+    with _client() as c:
+        r = c.delete(f"/agent_config?key=eq.{_f(key)}")
+        r.raise_for_status()
