@@ -1,5 +1,6 @@
 import Shell from "@/components/shell";
 import FontesForm from "@/components/fontes-form";
+import { PageHeader, Panel } from "@/components/ui";
 import { fetchAgentConfig, fetchNewsApiSources, type NewsApiSource } from "@/lib/api";
 
 export default async function FontesPage() {
@@ -28,25 +29,19 @@ export default async function FontesPage() {
   return (
     <Shell active="/noticias/fontes">
       <main className="mx-auto max-w-3xl px-8 py-12">
-        <span className="eyebrow">Notícias</span>
-        <h1 className="mt-2 font-display text-3xl font-bold tracking-tight text-bone">
-          Fontes &amp; buscas
-        </h1>
-        <p className="mt-2 max-w-xl text-sm text-slate">
-          Controle de quais fontes e termos o agente usa para coletar notícias.
+        <PageHeader eyebrow="Notícias" title="Fontes & buscas">
+          Controle quais fontes e termos o agente usa para coletar notícias.
           Mudanças valem na próxima coleta (cache de ~1 min).
-        </p>
+        </PageHeader>
 
-        <div className="mt-8">
-          {err || !initial ? (
-            <div className="rounded-lg border border-line bg-surface p-6">
-              <p className="text-sm text-bone">Não foi possível carregar a config.</p>
-              <p className="mt-1 readout text-xs text-slate">backend: {err}</p>
-            </div>
-          ) : (
-            <FontesForm initial={initial} available={available} />
-          )}
-        </div>
+        {err || !initial ? (
+          <Panel>
+            <p className="text-sm text-foreground">Não foi possível carregar a config.</p>
+            <p className="readout mt-1 text-xs text-muted-foreground">backend: {err}</p>
+          </Panel>
+        ) : (
+          <FontesForm initial={initial} available={available} />
+        )}
       </main>
     </Shell>
   );

@@ -1,34 +1,6 @@
 import Shell from "@/components/shell";
+import { PageHeader, Panel, Field, Chip } from "@/components/ui";
 import { fetchAgentConfig, type AgentConfig } from "@/lib/api";
-
-function Field({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-baseline justify-between gap-4 border-b border-line py-2.5 last:border-0">
-      <dt className="eyebrow shrink-0">{label}</dt>
-      <dd className="readout text-right text-sm">{value}</dd>
-    </div>
-  );
-}
-
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-lg border border-line bg-surface p-5">
-      <h2 className="mb-3 font-display text-sm font-medium uppercase tracking-wide text-slate">
-        {title}
-      </h2>
-      {children}
-    </section>
-  );
-}
-
-function Chip({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-line bg-raised px-3 py-2">
-      <span className="eyebrow block">{label}</span>
-      <span className="readout text-sm text-gold">{value}</span>
-    </div>
-  );
-}
 
 export default async function AgentePage() {
   let cfg: AgentConfig | null = null;
@@ -42,30 +14,27 @@ export default async function AgentePage() {
   return (
     <Shell active="/agente">
       <main className="mx-auto max-w-3xl px-8 py-12">
-        <span className="eyebrow">Configuração</span>
-        <h1 className="mt-2 font-display text-3xl font-bold tracking-tight text-bone">
-          Agente
-        </h1>
+        <PageHeader eyebrow="Configuração" title="Agente" />
 
-        <div className="mt-4 flex items-center gap-2 rounded-md border border-gold-dim/40 bg-gold-dim/10 px-3 py-2">
+        <div className="mb-8 flex items-center gap-2 rounded-md border border-primary/30 bg-primary/10 px-3 py-2">
           <span aria-hidden>🔒</span>
-          <p className="text-sm text-gold">
-            Somente leitura. Edição de áudio e texto chega na próxima fase.
+          <p className="text-sm text-primary">
+            Somente leitura. Os prompts ficam protegidos para preservar a integridade factual.
           </p>
         </div>
 
         {err ? (
-          <div className="mt-8 rounded-lg border border-line bg-surface p-6">
-            <p className="text-sm text-bone">Não foi possível carregar a config.</p>
-            <p className="mt-1 readout text-xs text-slate">backend: {err}</p>
-            <p className="mt-3 text-sm text-slate">
-              Confira <span className="readout text-bone">NEXT_PUBLIC_BACKEND_URL</span> e o{" "}
-              <span className="readout text-bone">SUPABASE_URL</span> no backend.
+          <Panel>
+            <p className="text-sm text-foreground">Não foi possível carregar a config.</p>
+            <p className="readout mt-1 text-xs text-muted-foreground">backend: {err}</p>
+            <p className="mt-3 text-sm text-muted-foreground">
+              Confira <span className="readout text-foreground">NEXT_PUBLIC_BACKEND_URL</span> e o{" "}
+              <span className="readout text-foreground">SUPABASE_URL</span> no backend.
             </p>
-          </div>
+          </Panel>
         ) : (
           cfg && (
-            <div className="mt-8 space-y-5">
+            <div className="space-y-5">
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <Chip label="Modelo" value={cfg.agent.model} />
                 <Chip label="Timeout" value={`${cfg.agent.anthropic_timeout_s}s`} />
@@ -89,19 +58,16 @@ export default async function AgentePage() {
                   <Field label="Velocidade" value={cfg.audio.tts_speed} />
                   <Field label="Modelo TTS" value={cfg.audio.tts_model} />
                   <Field label="Transcrição" value={cfg.audio.transcribe_model} />
-                  <Field
-                    label="Vozes"
-                    value={cfg.audio.voices_disponiveis.join(", ")}
-                  />
+                  <Field label="Vozes" value={cfg.audio.voices_disponiveis.join(", ")} />
                 </dl>
               </Panel>
 
               <Panel title={`Ferramentas (${cfg.agent.tools.length})`}>
                 <ul className="space-y-2">
                   {cfg.agent.tools.map((t) => (
-                    <li key={t.name} className="border-b border-line pb-2 last:border-0">
-                      <span className="readout text-sm text-gold">{t.name}</span>
-                      <p className="mt-0.5 text-xs text-slate">{t.description}</p>
+                    <li key={t.name} className="border-b border-border pb-2 last:border-0">
+                      <span className="readout text-sm text-primary">{t.name}</span>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{t.description}</p>
                     </li>
                   ))}
                 </ul>
@@ -111,14 +77,8 @@ export default async function AgentePage() {
                 <dl>
                   <Field label="Finance" value={cfg.news.sources_finance.join(", ")} />
                   <Field label="Tech" value={cfg.news.sources_tech.join(", ")} />
-                  <Field
-                    label="RSS"
-                    value={cfg.news.rss_feeds.map((f) => f.nome).join(", ")}
-                  />
-                  <Field
-                    label="RSS IA"
-                    value={cfg.news.rss_feeds_ai.map((f) => f.nome).join(", ")}
-                  />
+                  <Field label="RSS" value={cfg.news.rss_feeds.map((f) => f.nome).join(", ")} />
+                  <Field label="RSS IA" value={cfg.news.rss_feeds_ai.map((f) => f.nome).join(", ")} />
                 </dl>
               </Panel>
 
@@ -128,11 +88,9 @@ export default async function AgentePage() {
                   ["system_chat", cfg.agent.system_chat],
                   ["system_validator", cfg.agent.system_validator],
                 ] as const).map(([name, body]) => (
-                  <details key={name} className="border-b border-line py-2 last:border-0">
-                    <summary className="eyebrow cursor-pointer select-none">
-                      {name}
-                    </summary>
-                    <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap rounded-md bg-ink p-3 text-xs leading-relaxed text-bone">
+                  <details key={name} className="border-b border-border py-2 last:border-0">
+                    <summary className="eyebrow cursor-pointer select-none">{name}</summary>
+                    <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap rounded-md bg-background p-3 text-xs leading-relaxed text-foreground">
                       {body}
                     </pre>
                   </details>
