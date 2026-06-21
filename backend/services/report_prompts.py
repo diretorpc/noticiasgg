@@ -92,3 +92,17 @@ DEFAULTS = {
 def get_prompt(section: str) -> str:
     key = _CONFIG_KEY[section]  # KeyError em seção desconhecida (intencional)
     return config.get_str(key, DEFAULTS[section])
+
+
+def describe_prompts() -> list[dict]:
+    out = []
+    for section in SECTIONS:
+        override = config.get(_CONFIG_KEY[section], None)
+        is_custom = isinstance(override, str) and override.strip() != ""
+        out.append({
+            "section": section,
+            "value": override if is_custom else DEFAULTS[section],
+            "is_custom": is_custom,
+            "default": DEFAULTS[section],
+        })
+    return out
