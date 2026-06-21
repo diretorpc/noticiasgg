@@ -1,44 +1,43 @@
-import hmac
 import logging
-import os
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request
 
-from backend.services import reporter, whatsapp, supabase
+from backend.api.cron_auth import check_cron_secret
+from backend.services import report_engine, whatsapp, supabase, schedules
 
 logger = logging.getLogger("noticiasgg")
 router = APIRouter()
 
-
-def _current_hour_brt() -> str:
-    brt = timezone(timedelta(hours=-3))
-    return f"{datetime.now(brt).hour:02d}:00"
+_BRT = timezone(timedelta(hours=-3))
 
 
 @router.get("/api/cron/report")
 async def cron_report(request: Request):
-    secret = os.environ.get("CRON_SECRET")
-    if not secret:
-        raise HTTPException(status_code=503, detail="CRON_SECRET not configured")
-    provided = request.headers.get("x-cron-secret", "")
-    if not provided or not hmac.compare_digest(provided, secret):
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    check_cron_secret(request)
 
-    hour = _current_hour_brt()
-    users = supabase.get_users_for_hour(hour)
-    sent = 0
+    now = datetime.now(_BRT)
+    weekday, hour = now.weekday(), now.hour
 
-    for user in users:
+    rows = schedules.due_now(weekday, hour)
+    enabled = schedules.phones_with_engine_enabled()
+
+    by_phone: dict[str, list[str]] = {}
+    for r in rows:
+        if r["phone"] in enabled:
+            by_phone.setdefault(r["phone"], []).append(r["section"])
+
+    sent = failed = 0
+    for phone, sections in by_phone.items():
         try:
-            text = reporter.generate_report(
-                "Gere o relatório diário.",
-                sections=user.get("sections"),
-                user_name=user.get("name"),
-            )
-            whatsapp.send_message(user["phone"], text)
+            user = supabase.get_authorized_by_phone(phone) or {"phone": phone, "name": ""}
+            messages = report_engine.generate_sections({s: True for s in sections}, user)
+            for msg in messages:
+                whatsapp.send_message(phone, msg)
             sent += 1
         except Exception:
-            logger.exception("cron_report failed for %s", user["phone"])
+            logger.exception("cron_report falhou para %s", phone)
+            failed += 1
 
-    return {"status": "ok", "hour": hour, "sent": sent}
+    return {"status": "ok", "weekday": weekday, "hour": hour,
+            "users": len(by_phone), "sent": sent, "failed": failed}

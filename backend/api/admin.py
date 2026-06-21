@@ -4,7 +4,7 @@ import httpx
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from backend.services import reporter, auth, supabase, report_engine
+from backend.services import reporter, auth, supabase, report_engine, schedules
 from backend.services import media as media_service
 from backend.collectors import news
 
@@ -128,3 +128,26 @@ def preview_report(body: PreviewReportBody, user: dict = Depends(auth.verify_sup
     target = supabase.get_authorized_by_phone(body.phone) or {"phone": body.phone, "name": ""}
     messages = report_engine.generate_sections(body.sections, target)
     return {"messages": messages}
+
+
+class ScheduleBody(BaseModel):
+    use_new_engine: bool = False
+    schedule: dict = {}
+
+
+@router.get("/api/admin/schedules/{phone}")
+def get_schedules(phone: str, user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+    """Grade de agendamento (motor novo) + flag de opt-in de um usuário."""
+    rows = schedules.get_for_phone(phone)
+    enabled = schedules.phones_with_engine_enabled()
+    return {"use_new_engine": phone in enabled, "schedule": schedules.rows_to_grid(rows)}
+
+
+@router.put("/api/admin/schedules/{phone}")
+def put_schedules(phone: str, body: ScheduleBody,
+                  user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+    """Substitui a grade do usuário e seta a flag do motor novo."""
+    rows = schedules.grid_to_rows(phone, body.schedule)
+    schedules.replace_for_phone(phone, rows)
+    schedules.set_engine_flag(phone, body.use_new_engine)
+    return {"ok": True}
