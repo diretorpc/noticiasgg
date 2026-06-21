@@ -96,3 +96,21 @@ export async function fetchUsers(): Promise<AdminUser[]> {
   if (!res.ok) throw new Error(`backend ${res.status}`);
   return (await res.json()).users as AdminUser[];
 }
+
+export type ReportPrompt = {
+  section: string;
+  value: string;
+  is_custom: boolean;
+  default: string;
+};
+
+export async function fetchReportPrompts(): Promise<ReportPrompt[]> {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/admin/report-prompts`,
+    { headers: { Authorization: `Bearer ${session?.access_token}` }, cache: "no-store" },
+  );
+  if (!res.ok) throw new Error(`backend ${res.status}`);
+  return (await res.json()).prompts as ReportPrompt[];
+}
