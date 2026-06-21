@@ -151,3 +151,27 @@ def test_parse_judge_verdict_extracts_counts():
 def test_parse_judge_verdict_defaults_zero_when_absent():
     out = he.parse_judge_verdict("texto sem números")
     assert out == {"ancoradas": 0, "inventadas": 0}
+
+
+@pytest.mark.unit
+def test_preview_section_uses_given_prompt(monkeypatch):
+    monkeypatch.setattr(re, "_collect", lambda section: {"data": {"x": 1}})
+    client = _FakeClient(text="SAIDA GERADA")
+    text = re.preview_section("bolsas", "PROMPT_OVERRIDE", client=client)
+    assert text == "SAIDA GERADA"
+    assert client.calls[0]["system"] == "PROMPT_OVERRIDE"
+
+
+@pytest.mark.unit
+def test_preview_section_falls_back_to_stored_prompt(monkeypatch):
+    monkeypatch.setattr(re, "_collect", lambda section: {"data": {"x": 1}})
+    monkeypatch.setattr(re.report_prompts, "get_prompt", lambda section: "STORED_PROMPT")
+    client = _FakeClient(text="qualquer")
+    re.preview_section("bolsas", None, client=client)
+    assert client.calls[0]["system"] == "STORED_PROMPT"
+
+
+@pytest.mark.unit
+def test_preview_section_unknown_section_raises():
+    with pytest.raises(KeyError):
+        re.preview_section("inexistente", "P", client=_FakeClient())
