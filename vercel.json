@@ -12,5 +12,8 @@
       "dest": "backend/api/main.py"
     }
   ],
-  "crons": []
+  "crons": [
+    { "path": "/api/cron/report",  "schedule": "0 * * * *" },
+    { "path": "/api/check-alerts", "schedule": "*/15 * * * *" }
+  ]
 }
