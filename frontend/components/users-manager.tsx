@@ -134,7 +134,6 @@ const SECTIONS: [string, string][] = [
   ["polls_br", "Pesquisas"],
 ];
 const VOICES = ["nova", "shimmer", "alloy", "echo", "fable", "onyx"];
-const HOURS = ["", "06:00", "07:00", "08:00", "09:00", "12:00", "18:00", "19:00", "20:00", "21:00"];
 
 function defaultSections(): Record<string, boolean> {
   return Object.fromEntries(SECTIONS.map(([k]) => [k, true]));
@@ -144,7 +143,6 @@ function UserForm({ user }: { user: AdminUser }) {
   const router = useRouter();
   const p = user.preferences;
   const [sections, setSections] = useState<Record<string, boolean>>(p?.sections ?? defaultSections());
-  const [reportTime, setReportTime] = useState(p?.report_time ?? "");
   const [audioText, setAudioText] = useState(Boolean(p?.audio_for_text));
   const [audioMedia, setAudioMedia] = useState(Boolean(p?.audio_for_media));
   const [voice, setVoice] = useState(p?.tts_voice ?? "nova");
@@ -176,7 +174,7 @@ function UserForm({ user }: { user: AdminUser }) {
       await saveUserPrefs({
         phone: user.phone,
         sections,
-        report_time: reportTime || null,
+        report_time: p?.report_time ?? null,
         audio_for_text: audioText,
         audio_for_media: audioMedia,
         tts_voice: voice,
@@ -208,15 +206,9 @@ function UserForm({ user }: { user: AdminUser }) {
   return (
     <div className="space-y-6">
       <section className="rounded-lg border border-border bg-card p-5">
-        <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">Relatório diário</h2>
-        <label className="block">
-          <span className="eyebrow">Horário de envio</span>
-          <select value={reportTime} onChange={(e) => setReportTime(e.target.value)}
-            className="mt-1 block rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground">
-            {HOURS.map((h) => <option key={h} value={h}>{h || "não enviar"}</option>)}
-          </select>
-        </label>
-        <div className="mt-3 grid grid-cols-2 gap-2">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Seções do chat</h2>
+        <p className="mb-3 mt-1 text-xs text-muted-foreground">Quais seções entram quando o usuário pede um relatório pelo WhatsApp. O relatório agendado é configurado na grade abaixo.</p>
+        <div className="grid grid-cols-2 gap-2">
           {SECTIONS.map(([k, label]) => (
             <label key={k} className="flex items-center gap-2 text-sm text-foreground">
               <input type="checkbox" checked={sections[k] ?? false}
