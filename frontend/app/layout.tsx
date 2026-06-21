@@ -1,17 +1,10 @@
 import type { Metadata } from "next";
-import { Space_Grotesk, IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import { Inter, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 
-const display = Space_Grotesk({
+const sans = Inter({
   subsets: ["latin"],
-  variable: "--font-space-grotesk",
-  weight: ["500", "700"],
-});
-
-const sans = IBM_Plex_Sans({
-  subsets: ["latin"],
-  variable: "--font-plex-sans",
-  weight: ["400", "500", "600"],
+  variable: "--font-inter",
 });
 
 const mono = IBM_Plex_Mono({
@@ -21,7 +14,7 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Mesa · noticiasgg",
+  title: "Painel · noticiasgg",
   description: "Painel de configuração do agente noticiasgg",
 };
 
@@ -33,7 +26,7 @@ export default function RootLayout({
   return (
     <html
       lang="pt-BR"
-      className={`${display.variable} ${sans.variable} ${mono.variable} h-full`}
+      className={`dark ${sans.variable} ${mono.variable} h-full`}
     >
       <body className="min-h-full">{children}</body>
     </html>

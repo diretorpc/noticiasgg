@@ -1,35 +1,60 @@
-import Link from "next/link";
 import Shell from "@/components/shell";
+import { PageHeader, NavCard, Chip } from "@/components/ui";
+import { fetchAgentConfig, fetchUsers } from "@/lib/api";
 
-export default function HomePage() {
+export default async function HomePage() {
+  let model = "—";
+  let tools = "—";
+  let sources = "—";
+  let users = "—";
+  try {
+    const cfg = await fetchAgentConfig();
+    model = cfg.agent.model;
+    tools = String(cfg.agent.tools.length);
+    sources = String(cfg.news.sources_finance.length + cfg.news.sources_tech.length);
+  } catch {
+    /* status degrada para — */
+  }
+  try {
+    users = String((await fetchUsers()).length);
+  } catch {
+    /* idem */
+  }
+
   return (
     <Shell active="/">
-      <main className="mx-auto max-w-3xl px-8 py-12">
-        <span className="eyebrow">Visão geral</span>
-        <h1 className="mt-2 font-display text-3xl font-bold tracking-tight text-bone">
-          Painel do agente
-        </h1>
-        <p className="mt-2 max-w-xl text-sm text-slate">
-          Inspecione como o agente está configurado. Nesta fase o painel é
-          somente leitura — controle de edição chega nas próximas etapas.
-        </p>
+      <main className="mx-auto max-w-4xl px-8 py-12">
+        <PageHeader eyebrow="Visão geral" title="Painel do agente">
+          Inspecione e ajuste como o agente coleta dados, conversa e envia
+          relatórios pelo WhatsApp.
+        </PageHeader>
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Chip label="Modelo" value={model} />
+          <Chip label="Usuários" value={users} />
+          <Chip label="Fontes" value={sources} />
+          <Chip label="Ferramentas" value={tools} />
+        </div>
 
         <div className="mt-10 grid gap-3 sm:grid-cols-2">
-          <Link
+          <NavCard
             href="/agente"
-            className="group rounded-lg border border-line bg-surface p-5 transition-colors hover:border-gold-dim"
-          >
-            <span className="eyebrow">Inspecionar</span>
-            <p className="mt-2 font-display text-lg font-medium text-bone">
-              Agente
-              <span className="ml-2 text-gold transition-transform group-hover:translate-x-0.5 inline-block">
-                →
-              </span>
-            </p>
-            <p className="mt-1 text-sm text-slate">
-              Modelo, áudio, ferramentas, prompts e fontes de notícia.
-            </p>
-          </Link>
+            eyebrow="Inspecionar"
+            title="Agente"
+            desc="Modelo, áudio, ferramentas, prompts e fontes de notícia."
+          />
+          <NavCard
+            href="/noticias/fontes"
+            eyebrow="Editar"
+            title="Notícias"
+            desc="Fontes NewsAPI, feeds RSS e queries de busca."
+          />
+          <NavCard
+            href="/usuarios"
+            eyebrow="Editar"
+            title="Usuários"
+            desc="Preferências, áudio e agendamento do relatório por usuário."
+          />
         </div>
       </main>
     </Shell>

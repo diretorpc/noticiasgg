@@ -8,24 +8,24 @@ export default async function LoginPage({
   const { error } = await searchParams;
 
   return (
-    <main className="flex min-h-screen items-center justify-center px-6">
+    <main className="flex min-h-screen items-center justify-center bg-background px-6">
       <div className="w-full max-w-sm">
         <div className="mb-8">
-          <span className="eyebrow">Mesa de operações</span>
-          <h1 className="mt-2 font-display text-2xl font-bold tracking-tight text-bone">
+          <span className="eyebrow">Painel</span>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
             noticiasgg
           </h1>
-          <p className="mt-1 text-sm text-slate">
-            Acesso restrito. Entre para inspecionar o agente.
+          <p className="mt-1 text-sm text-muted-foreground">
+            Acesso restrito. Entre para gerenciar o agente.
           </p>
         </div>
 
         <form
           action={login}
-          className="space-y-4 rounded-lg border border-line bg-surface p-6"
+          className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-sm"
         >
           {error && (
-            <p className="rounded-md border border-gold-dim/40 bg-gold-dim/10 px-3 py-2 text-sm text-gold">
+            <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {error}
             </p>
           )}
@@ -37,7 +37,7 @@ export default async function LoginPage({
               type="email"
               required
               autoComplete="email"
-              className="mt-1 w-full rounded-md border border-line bg-ink px-3 py-2 text-bone placeholder:text-slate/50 focus:border-gold focus:outline-none"
+              className="mt-1 w-full rounded-md border border-border bg-input px-3 py-2 text-foreground placeholder:text-muted-foreground/50 focus:border-ring focus:outline-none"
               placeholder="voce@exemplo.com"
             />
           </label>
@@ -49,14 +49,14 @@ export default async function LoginPage({
               type="password"
               required
               autoComplete="current-password"
-              className="mt-1 w-full rounded-md border border-line bg-ink px-3 py-2 text-bone placeholder:text-slate/50 focus:border-gold focus:outline-none"
+              className="mt-1 w-full rounded-md border border-border bg-input px-3 py-2 text-foreground placeholder:text-muted-foreground/50 focus:border-ring focus:outline-none"
               placeholder="••••••••"
             />
           </label>
 
           <button
             type="submit"
-            className="w-full rounded-md bg-gold px-3 py-2 font-medium text-ink transition-colors hover:bg-bone"
+            className="w-full rounded-md bg-primary px-3 py-2 font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
             Entrar
           </button>

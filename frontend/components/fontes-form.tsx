@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+// tokens: identidade LogisticOne (dark)
 import { useRouter } from "next/navigation";
 import { upsertConfig, deleteConfig, validateRss, type RssCheck } from "@/lib/config";
 import type { NewsApiSource } from "@/lib/api";
@@ -36,9 +37,9 @@ function SourcePicker({
     return (
       <div>
         <span className="eyebrow">{label}</span>
-        <p className="mt-1 text-sm text-slate">
+        <p className="mt-1 text-sm text-muted-foreground">
           Lista da NewsAPI indisponível agora. Fontes atuais:{" "}
-          <span className="readout text-bone">{selected.join(", ") || "nenhuma"}</span>
+          <span className="readout text-foreground">{selected.join(", ") || "nenhuma"}</span>
         </p>
       </div>
     );
@@ -54,18 +55,18 @@ function SourcePicker({
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
         placeholder="filtrar fontes"
-        className="mt-1 w-full rounded-md border border-line bg-ink px-3 py-2 text-sm text-bone placeholder:text-slate/50 focus:border-gold focus:outline-none"
+        className="mt-1 w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:border-ring focus:outline-none"
       />
-      <div className="mt-2 max-h-48 overflow-auto rounded-md border border-line">
+      <div className="mt-2 max-h-48 overflow-auto rounded-md border border-border">
         {shown.map((o) => (
-          <label key={o.id} className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-raised/40">
+          <label key={o.id} className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/40">
             <input
               type="checkbox"
               checked={selected.includes(o.id)}
               onChange={() => onToggle(o.id)}
             />
-            <span className="readout text-bone">{o.id}</span>
-            <span className="text-slate">· {o.name}</span>
+            <span className="readout text-foreground">{o.id}</span>
+            <span className="text-muted-foreground">· {o.name}</span>
           </label>
         ))}
       </div>
@@ -77,7 +78,7 @@ type CheckState = RssCheck | "loading" | undefined;
 
 function CheckResult({ state }: { state: CheckState }) {
   if (state === undefined) return null;
-  if (state === "loading") return <p className="text-xs text-slate">testando…</p>;
+  if (state === "loading") return <p className="text-xs text-muted-foreground">testando…</p>;
   if (state.valid) {
     return (
       <p className="text-xs text-emerald-400">
@@ -124,25 +125,25 @@ function FeedEditor({
                 value={f.nome}
                 onChange={(e) => update(i, { nome: e.target.value })}
                 placeholder="nome"
-                className="w-1/3 rounded-md border border-line bg-ink px-2 py-1.5 text-sm text-bone"
+                className="w-1/3 rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground"
               />
               <input
                 value={f.url}
                 onChange={(e) => update(i, { url: e.target.value })}
                 placeholder="https://…/rss"
-                className="flex-1 rounded-md border border-line bg-ink px-2 py-1.5 text-sm text-bone"
+                className="flex-1 rounded-md border border-border bg-input px-2 py-1.5 text-sm text-foreground"
               />
               <button
                 type="button"
                 onClick={() => test(i)}
-                className="rounded-md border border-line px-2 text-xs text-gold hover:bg-raised/40"
+                className="rounded-md border border-border px-2 text-xs text-primary hover:bg-muted/40"
               >
                 testar
               </button>
               <button
                 type="button"
                 onClick={() => setFeeds(feeds.filter((_, j) => j !== i))}
-                className="rounded-md border border-line px-2 text-slate hover:text-bone"
+                className="rounded-md border border-border px-2 text-muted-foreground hover:text-foreground"
               >
                 ✕
               </button>
@@ -153,7 +154,7 @@ function FeedEditor({
         <button
           type="button"
           onClick={() => setFeeds([...feeds, { nome: "", url: "" }])}
-          className="text-sm text-gold hover:text-bone"
+          className="text-sm text-primary hover:text-foreground"
         >
           + adicionar feed
         </button>
@@ -217,43 +218,43 @@ export default function FontesForm({ initial, available }: Props) {
 
   return (
     <div className="space-y-8">
-      <section className="rounded-lg border border-line bg-surface p-5 space-y-4">
-        <h2 className="font-display text-sm font-medium uppercase tracking-wide text-slate">Fontes NewsAPI</h2>
+      <section className="rounded-lg border border-border bg-card p-5 space-y-4">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Fontes NewsAPI</h2>
         <SourcePicker label="Finanças" selected={sourcesFinance} options={available}
           onToggle={(id) => toggle(sourcesFinance, setSourcesFinance, id)} />
         <SourcePicker label="Tech / IA" selected={sourcesTech} options={available}
           onToggle={(id) => toggle(sourcesTech, setSourcesTech, id)} />
       </section>
 
-      <section className="rounded-lg border border-line bg-surface p-5 space-y-4">
-        <h2 className="font-display text-sm font-medium uppercase tracking-wide text-slate">Feeds RSS</h2>
+      <section className="rounded-lg border border-border bg-card p-5 space-y-4">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Feeds RSS</h2>
         <FeedEditor label="Geral" feeds={rssFeeds} setFeeds={setRssFeeds} />
         <FeedEditor label="IA" feeds={rssFeedsAi} setFeeds={setRssFeedsAi} />
       </section>
 
-      <section className="rounded-lg border border-line bg-surface p-5 space-y-4">
-        <h2 className="font-display text-sm font-medium uppercase tracking-wide text-slate">Queries de busca</h2>
+      <section className="rounded-lg border border-border bg-card p-5 space-y-4">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Queries de busca</h2>
         <label className="block">
           <span className="eyebrow">Finanças</span>
           <textarea value={financeQuery} onChange={(e) => setFinanceQuery(e.target.value)} rows={3}
-            className="mt-1 w-full rounded-md border border-line bg-ink px-3 py-2 text-sm text-bone" />
+            className="mt-1 w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground" />
         </label>
         <label className="block">
           <span className="eyebrow">IA</span>
           <textarea value={aiQuery} onChange={(e) => setAiQuery(e.target.value)} rows={3}
-            className="mt-1 w-full rounded-md border border-line bg-ink px-3 py-2 text-sm text-bone" />
+            className="mt-1 w-full rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground" />
         </label>
       </section>
 
-      {status && <p className="text-sm text-gold">{status}</p>}
+      {status && <p className="text-sm text-primary">{status}</p>}
 
       <div className="flex gap-3">
         <button onClick={save} disabled={busy}
-          className="rounded-md bg-gold px-4 py-2 font-medium text-ink hover:bg-bone disabled:opacity-50">
+          className="rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
           Salvar
         </button>
         <button onClick={restoreDefaults} disabled={busy}
-          className="rounded-md border border-line px-4 py-2 text-sm text-slate hover:text-bone disabled:opacity-50">
+          className="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50">
           Restaurar padrões
         </button>
       </div>

@@ -76,11 +76,11 @@ function ScheduleGridEditor({ phone }: { phone: string }) {
   }
 
   return (
-    <section className="rounded-lg border border-line bg-surface p-5">
-      <h2 className="mb-3 font-display text-sm font-medium uppercase tracking-wide text-slate">
+    <section className="rounded-lg border border-border bg-card p-5">
+      <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
         Agendamento (motor novo)
       </h2>
-      <label className="mb-4 flex items-center gap-2 text-sm text-bone">
+      <label className="mb-4 flex items-center gap-2 text-sm text-foreground">
         <input type="checkbox" checked={useNew} onChange={() => setUseNew((v) => !v)} />
         Usar motor novo para este usuário
       </label>
@@ -88,23 +88,23 @@ function ScheduleGridEditor({ phone }: { phone: string }) {
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr>
-              <th className="p-1 text-left text-xs text-slate"></th>
+              <th className="p-1 text-left text-xs text-muted-foreground"></th>
               {WEEKDAYS.map((d) => (
-                <th key={d} className="p-1 text-xs font-normal text-slate">{d}</th>
+                <th key={d} className="p-1 text-xs font-normal text-muted-foreground">{d}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {ENGINE_SECTIONS.map(([sec, label]) => (
               <tr key={sec}>
-                <td className="p-1 pr-3 text-xs text-bone">{label}</td>
+                <td className="p-1 pr-3 text-xs text-foreground">{label}</td>
                 {WEEKDAYS.map((_, wd) => (
                   <td key={wd} className="p-1">
                     <input
                       value={cells[sec]?.[wd] ?? ""}
                       onChange={(e) => setCell(sec, wd, e.target.value)}
                       placeholder="—"
-                      className="w-14 rounded border border-line bg-ink px-1 py-1 text-center text-xs text-bone"
+                      className="w-14 rounded border border-border bg-input px-1 py-1 text-center text-xs text-foreground"
                     />
                   </td>
                 ))}
@@ -113,10 +113,10 @@ function ScheduleGridEditor({ phone }: { phone: string }) {
           </tbody>
         </table>
       </div>
-      <p className="mt-2 text-xs text-slate">Horas BRT separadas por vírgula (ex: 7,12). Vazio = não envia.</p>
-      {status && <p className="mt-2 text-sm text-gold">{status}</p>}
+      <p className="mt-2 text-xs text-muted-foreground">Horas BRT separadas por vírgula (ex: 7,12). Vazio = não envia.</p>
+      {status && <p className="mt-2 text-sm text-primary">{status}</p>}
       <button onClick={save} disabled={busy}
-        className="mt-3 rounded-md bg-gold px-4 py-2 font-medium text-ink hover:bg-bone disabled:opacity-50">
+        className="mt-3 rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
         Salvar agendamento
       </button>
     </section>
@@ -207,18 +207,18 @@ function UserForm({ user }: { user: AdminUser }) {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-lg border border-line bg-surface p-5">
-        <h2 className="mb-3 font-display text-sm font-medium uppercase tracking-wide text-slate">Relatório diário</h2>
+      <section className="rounded-lg border border-border bg-card p-5">
+        <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">Relatório diário</h2>
         <label className="block">
           <span className="eyebrow">Horário de envio</span>
           <select value={reportTime} onChange={(e) => setReportTime(e.target.value)}
-            className="mt-1 block rounded-md border border-line bg-ink px-3 py-2 text-sm text-bone">
+            className="mt-1 block rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground">
             {HOURS.map((h) => <option key={h} value={h}>{h || "não enviar"}</option>)}
           </select>
         </label>
         <div className="mt-3 grid grid-cols-2 gap-2">
           {SECTIONS.map(([k, label]) => (
-            <label key={k} className="flex items-center gap-2 text-sm text-bone">
+            <label key={k} className="flex items-center gap-2 text-sm text-foreground">
               <input type="checkbox" checked={sections[k] ?? false}
                 onChange={() => setSections((s) => ({ ...s, [k]: !s[k] }))} />
               {label}
@@ -227,20 +227,20 @@ function UserForm({ user }: { user: AdminUser }) {
         </div>
       </section>
 
-      <section className="rounded-lg border border-line bg-surface p-5 space-y-3">
-        <h2 className="font-display text-sm font-medium uppercase tracking-wide text-slate">Áudio</h2>
-        <label className="flex items-center gap-2 text-sm text-bone">
+      <section className="rounded-lg border border-border bg-card p-5 space-y-3">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Áudio</h2>
+        <label className="flex items-center gap-2 text-sm text-foreground">
           <input type="checkbox" checked={audioText} onChange={() => setAudioText((v) => !v)} />
           Responder textos em áudio
         </label>
-        <label className="flex items-center gap-2 text-sm text-bone">
+        <label className="flex items-center gap-2 text-sm text-foreground">
           <input type="checkbox" checked={audioMedia} onChange={() => setAudioMedia((v) => !v)} />
           Responder mídias em áudio
         </label>
         <label className="block">
           <span className="eyebrow">Voz</span>
           <select value={voice} onChange={(e) => setVoice(e.target.value)}
-            className="mt-1 block rounded-md border border-line bg-ink px-3 py-2 text-sm text-bone">
+            className="mt-1 block rounded-md border border-border bg-input px-3 py-2 text-sm text-foreground">
             {VOICES.map((v) => <option key={v} value={v}>{v}</option>)}
           </select>
         </label>
@@ -253,30 +253,30 @@ function UserForm({ user }: { user: AdminUser }) {
 
       <ScheduleGridEditor phone={user.phone} />
 
-      {status && <p className="text-sm text-gold">{status}</p>}
+      {status && <p className="text-sm text-primary">{status}</p>}
       <div className="flex flex-wrap gap-3">
         <button onClick={save} disabled={busy}
-          className="rounded-md bg-gold px-4 py-2 font-medium text-ink hover:bg-bone disabled:opacity-50">Salvar</button>
+          className="rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">Salvar</button>
         <button onClick={reset} disabled={busy}
-          className="rounded-md border border-line px-4 py-2 text-sm text-slate hover:text-bone disabled:opacity-50">Resetar padrões</button>
+          className="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50">Resetar padrões</button>
         <button onClick={runPreview} disabled={previewing}
-          className="rounded-md border border-line px-4 py-2 text-sm text-slate hover:text-bone disabled:opacity-50">
+          className="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50">
           {previewing ? "Gerando…" : "Pré-visualizar relatório"}
         </button>
       </div>
 
       {preview && (
-        <section className="rounded-lg border border-line bg-surface p-5">
-          <h2 className="mb-3 font-display text-sm font-medium uppercase tracking-wide text-slate">
+        <section className="rounded-lg border border-border bg-card p-5">
+          <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
             Pré-visualização — motor novo ({preview.length} {preview.length === 1 ? "mensagem" : "mensagens"})
           </h2>
-          <p className="mb-3 text-xs text-slate">
+          <p className="mb-3 text-xs text-muted-foreground">
             Não enviado a ninguém. Cada bloco é uma mensagem separada no WhatsApp.
           </p>
           <div className="space-y-3">
             {preview.map((msg, i) => (
               <pre key={i}
-                className="whitespace-pre-wrap rounded-md border border-line bg-ink p-3 text-sm text-bone">
+                className="whitespace-pre-wrap rounded-md border border-border bg-input p-3 text-sm text-foreground">
                 {msg}
               </pre>
             ))}
@@ -290,7 +290,7 @@ function UserForm({ user }: { user: AdminUser }) {
 export default function UsersManager({ users }: { users: AdminUser[] }) {
   const [selected, setSelected] = useState(users[0]?.phone ?? null);
   if (users.length === 0) {
-    return <p className="text-sm text-slate">Nenhum usuário autorizado ainda.</p>;
+    return <p className="text-sm text-muted-foreground">Nenhum usuário autorizado ainda.</p>;
   }
   const current = users.find((u) => u.phone === selected) ?? users[0];
   return (
@@ -299,10 +299,10 @@ export default function UsersManager({ users }: { users: AdminUser[] }) {
         {users.map((u) => (
           <button key={u.phone} onClick={() => setSelected(u.phone)}
             className={`block w-full rounded-md px-3 py-2 text-left text-sm ${
-              u.phone === current.phone ? "bg-raised text-bone" : "text-slate hover:bg-raised/50 hover:text-bone"
+              u.phone === current.phone ? "bg-primary/15 text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
             }`}>
             <span className="block">{u.name || "sem nome"}</span>
-            <span className="readout text-xs text-slate">{u.phone}</span>
+            <span className="readout text-xs text-muted-foreground">{u.phone}</span>
           </button>
         ))}
       </aside>
