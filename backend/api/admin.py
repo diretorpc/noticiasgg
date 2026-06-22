@@ -202,7 +202,7 @@ def generate_selflink(phone: str, user: dict = Depends(auth.verify_supabase_jwt)
     if not supabase.get_authorized_by_phone(phone):
         raise HTTPException(status_code=404, detail="usuário não encontrado")
     token = supabase.set_selflink_token(phone)
-    base = os.environ.get("PANEL_BASE_URL", "https://noticiasgg.vercel.app").rstrip("/")
+    base = os.environ.get("PANEL_BASE_URL", "https://noticiasgg-painel.vercel.app").rstrip("/")
     return {"url": f"{base}/me?token={token}", "token": token}
 
 

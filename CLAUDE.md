@@ -154,11 +154,18 @@ uvicorn backend.api.main:app --reload
 pytest backend/tests/ -v
 ```
 
-## Deploy (Vercel)
+## Deploy (Vercel) — DOIS projetos do MESMO repo
 
-```bash
-vercel --prod
-```
+> **IMPORTANTE:** há **dois** projetos Vercel ligados a `diretorpc/noticiasgg`, com domínios separados. Não confundir — foi origem de bug (link `/me` apontando pro backend → 404).
+
+| Projeto Vercel | Domínio | Root Directory | O que serve |
+|----------------|---------|----------------|-------------|
+| `noticiasgg` | `https://noticiasgg.vercel.app` | raiz (`vercel.json` → `@vercel/python`) | **Backend** FastAPI (`/api/*`, crons, webhook) |
+| `noticiasgg-painel` | `https://noticiasgg-painel.vercel.app` | `frontend/` (Next.js) | **Painel** admin + página pública `/me` |
+
+- **Deploy = `git push origin master`** (NÃO `vercel --prod`). Um push dispara o build dos **dois** projetos. Confirmar via MCP Vercel (projeto `noticiasgg` = python; painel = Next.js). Se o webhook não disparar, refazer com `git commit --allow-empty`.
+- Páginas do painel (`/usuarios`, `/relatorio`, `/me`) vivem em **noticiasgg-painel**. URLs de painel geradas pelo backend usam `PANEL_BASE_URL` (default já corrigido p/ `https://noticiasgg-painel.vercel.app`).
+- O painel chama o backend via `NEXT_PUBLIC_BACKEND_URL` (em prod aponta p/ `https://noticiasgg.vercel.app`).
 
 ## Configurar Webhook Evolution API
 
