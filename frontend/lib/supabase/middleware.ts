@@ -25,9 +25,17 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
+  // Rotas públicas (sem login): /login e /me (self-service por token).
+  const pathname = request.nextUrl.pathname;
+  const isPublic = pathname.startsWith("/login") || pathname.startsWith("/me");
+
+  if (isPublic) {
+    return response;
+  }
+
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user && !request.nextUrl.pathname.startsWith("/login")) {
+  if (!user) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
