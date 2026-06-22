@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { saveUserPrefs, resetUserPrefs, previewReport, fetchSchedule, saveSchedule } from "@/lib/config";
+import { saveUserPrefs, resetUserPrefs, previewReport, fetchSchedule, saveSchedule, generateSelflink, revokeSelflink } from "@/lib/config";
 import { ScheduleGridEditor } from "@/components/schedule-grid";
 import type { AdminUser } from "@/lib/api";
 
@@ -34,6 +34,31 @@ function UserForm({ user }: { user: AdminUser }) {
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<string[] | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const [linkUrl, setLinkUrl] = useState<string | null>(null);
+  const [linkStatus, setLinkStatus] = useState<string | null>(null);
+
+  async function genLink() {
+    setLinkStatus("Gerando…");
+    try {
+      const { url } = await generateSelflink(user.phone);
+      setLinkUrl(url);
+      setLinkStatus("Link gerado. Copie e envie ao usuário.");
+    } catch (e) {
+      setLinkStatus("Erro: " + (e instanceof Error ? e.message : "desconhecido"));
+    }
+  }
+
+  async function revLink() {
+    if (!window.confirm("Revogar o link atual? Quem tiver o link perde o acesso.")) return;
+    setLinkStatus("Revogando…");
+    try {
+      await revokeSelflink(user.phone);
+      setLinkUrl(null);
+      setLinkStatus("Link revogado.");
+    } catch (e) {
+      setLinkStatus("Erro: " + (e instanceof Error ? e.message : "desconhecido"));
+    }
+  }
 
   async function runPreview() {
     setPreviewing(true);
@@ -132,6 +157,22 @@ function UserForm({ user }: { user: AdminUser }) {
         load={() => fetchSchedule(user.phone)}
         save={(args) => saveSchedule(user.phone, args)}
       />
+
+      <section className="rounded-lg border border-border bg-card p-5 space-y-3">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Link self-service</h2>
+        <p className="text-xs text-muted-foreground">Gere um link para o usuário editar a própria config (grade, seções, áudio) sem login.</p>
+        <div className="flex flex-wrap gap-3">
+          <button onClick={genLink} type="button"
+            className="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground hover:text-foreground">Gerar link</button>
+          <button onClick={revLink} type="button"
+            className="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground hover:text-foreground">Revogar</button>
+        </div>
+        {linkUrl && (
+          <input readOnly value={linkUrl} onFocus={(e) => e.currentTarget.select()}
+            className="block w-full rounded-md border border-border bg-input px-3 py-2 text-xs text-foreground" />
+        )}
+        {linkStatus && <p className="text-sm text-primary">{linkStatus}</p>}
+      </section>
 
       {status && <p className="text-sm text-primary">{status}</p>}
       <div className="flex flex-wrap gap-3">
