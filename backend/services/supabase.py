@@ -1,6 +1,7 @@
 import datetime
 import os
 import re
+import secrets
 import time
 from urllib.parse import quote
 
@@ -330,6 +331,32 @@ def list_authorized() -> list[dict]:
         r = c.get("/authorized_users?select=phone,name&order=phone.asc")
         r.raise_for_status()
         return r.json()
+
+
+def set_selflink_token(phone: str) -> str:
+    token = secrets.token_urlsafe(32)
+    with _client() as c:
+        r = c.patch(f"/authorized_users?phone=eq.{_f(phone)}",
+                    json={"selflink_token": token})
+        r.raise_for_status()
+    return token
+
+
+def clear_selflink_token(phone: str) -> None:
+    with _client() as c:
+        r = c.patch(f"/authorized_users?phone=eq.{_f(phone)}",
+                    json={"selflink_token": None})
+        r.raise_for_status()
+
+
+def get_by_selflink_token(token: str) -> dict | None:
+    if not token or not str(token).strip():
+        return None
+    with _client() as c:
+        r = c.get(f"/authorized_users?selflink_token=eq.{_f(token)}&select=*")
+        r.raise_for_status()
+        rows = r.json()
+        return rows[0] if rows else None
 
 
 def upsert_config(key: str, value) -> None:
