@@ -184,3 +184,24 @@ export async function previewSection(section: string, prompt: string): Promise<s
   if (!res.ok) throw new Error(`backend ${res.status}`);
   return (await res.json()).text as string;
 }
+
+export async function generateSelflink(phone: string): Promise<{ url: string }> {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/admin/selflink/${encodeURIComponent(phone)}`,
+    { method: "POST", headers: { Authorization: `Bearer ${session?.access_token}` } },
+  );
+  if (!res.ok) throw new Error(`backend ${res.status}`);
+  return res.json();
+}
+
+export async function revokeSelflink(phone: string): Promise<void> {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/admin/selflink/${encodeURIComponent(phone)}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${session?.access_token}` } },
+  );
+  if (!res.ok) throw new Error(`backend ${res.status}`);
+}
