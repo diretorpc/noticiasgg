@@ -195,3 +195,18 @@ def preview_section(body: PreviewSectionBody,
         raise HTTPException(status_code=400, detail="seção inválida")
     text = report_engine.preview_section(body.section, body.prompt)
     return {"text": text}
+
+
+@router.post("/api/admin/selflink/{phone}")
+def generate_selflink(phone: str, user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+    if not supabase.get_authorized_by_phone(phone):
+        raise HTTPException(status_code=404, detail="usuário não encontrado")
+    token = supabase.set_selflink_token(phone)
+    base = os.environ.get("PANEL_BASE_URL", "https://noticiasgg.vercel.app").rstrip("/")
+    return {"url": f"{base}/me?token={token}", "token": token}
+
+
+@router.delete("/api/admin/selflink/{phone}")
+def revoke_selflink(phone: str, user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+    supabase.clear_selflink_token(phone)
+    return {"ok": True}
