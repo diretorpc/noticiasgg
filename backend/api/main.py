@@ -10,7 +10,7 @@ from anthropic import Anthropic
 from backend.collectors import market, crypto, indicators_us, indicators_br, news, commodities_br, politics_br, polls_br, agro_br, esalq, eia
 from backend.services import reporter, whatsapp, supabase
 from backend.services import media as media_service
-from backend.api import send_report, cron_report, check_alerts, admin
+from backend.api import send_report, cron_report, check_alerts, admin, me
 
 logger = logging.getLogger("noticiasgg")
 logging.basicConfig(level=logging.INFO)
@@ -39,6 +39,7 @@ app.include_router(check_alerts.router)
 app.include_router(esalq.router)
 app.include_router(eia.router)
 app.include_router(admin.router)
+app.include_router(me.router)
 
 
 PHONE_RE = re.compile(r"^\D*(\d{10,13})\D*$")
