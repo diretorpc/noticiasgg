@@ -136,3 +136,30 @@ def test_client_nao_retenta_erro_http():
             r = c.get("/authorized_users?select=phone")
     assert r.status_code == 500
     assert calls["n"] == 1
+
+
+def test_count_recent_broadcasts_le_content_range():
+    captured = {}
+
+    def fake_handle(self, request):
+        captured["url"] = str(request.url)
+        captured["prefer"] = request.headers.get("prefer", "")
+        return httpx.Response(200, json=[], headers={"content-range": "0-8/9"})
+
+    with patch.dict(os.environ, _ENV), \
+         patch.object(httpx.HTTPTransport, "handle_request", fake_handle):
+        n = supabase.count_recent_broadcasts()
+    assert n == 9
+    assert "count=exact" in captured["prefer"]
+    assert "title=not.is.null" in captured["url"]
+    assert "+00:00" not in captured["url"]  # cutoff encodado (lição do bug fa2b5d0)
+
+
+def test_count_recent_broadcasts_zero_quando_sem_header():
+    def fake_handle(self, request):
+        return httpx.Response(200, json=[])
+
+    with patch.dict(os.environ, _ENV), \
+         patch.object(httpx.HTTPTransport, "handle_request", fake_handle):
+        n = supabase.count_recent_broadcasts()
+    assert n == 0

@@ -293,6 +293,25 @@ def get_recent_sent_titles(hours: int = 24, limit: int = 20) -> list[str]:
         return [row["title"] for row in r.json()]
 
 
+def count_recent_broadcasts(hours: int = 24) -> int:
+    """Nº de notícias efetivamente enviadas (title não-nulo) na janela — sinal de vida."""
+    cutoff = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
+    ).isoformat()
+    with _client() as c:
+        r = c.get(
+            f"/sent_news?select=news_id&title=not.is.null"
+            f"&sent_at=gte.{_f(cutoff)}&limit=1",
+            headers={"Prefer": "count=exact"},
+        )
+        r.raise_for_status()
+        content_range = r.headers.get("content-range", "*/0")
+        try:
+            return int(content_range.split("/")[1])
+        except (IndexError, ValueError):
+            return 0
+
+
 def get_users_for_hour(hour_brt: str) -> list[dict]:
     if not re.fullmatch(r"\d{2}:00", hour_brt):
         return []
