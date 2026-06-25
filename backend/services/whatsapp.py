@@ -37,6 +37,18 @@ def download_media(full_message_data: dict) -> dict:
         return resp.json()
 
 
+def connection_state() -> str:
+    """Estado da conexão da instância na Evolution API (open/connecting/close).
+    Levanta em falha — o caller (health) decide degradar para warn."""
+    endpoint = f"{_base_url()}/instance/connectionState/{_instance()}"
+    with httpx.Client(timeout=10) as client:
+        resp = client.get(endpoint, headers=_headers())
+        resp.raise_for_status()
+        data = resp.json()
+        inst = data.get("instance", data)
+        return inst.get("state", "unknown")
+
+
 def send_audio(number: str, audio_bytes: bytes) -> dict:
     """Envia áudio como PTT (voice note) via Evolution API.
     audio_bytes deve ser MP3; Evolution converte para OGG/OPUS internamente.
