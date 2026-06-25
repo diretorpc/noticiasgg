@@ -8,9 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from anthropic import Anthropic
 
 from backend.collectors import market, crypto, indicators_us, indicators_br, news, commodities_br, politics_br, polls_br, agro_br, esalq, eia
-from backend.services import reporter, whatsapp, supabase
+from backend.services import reporter, whatsapp, supabase, health
 from backend.services import media as media_service
-from backend.api import send_report, cron_report, check_alerts, admin, me
+from backend.api import send_report, cron_report, check_alerts, admin, me, health_digest
 
 logger = logging.getLogger("noticiasgg")
 logging.basicConfig(level=logging.INFO)
@@ -40,6 +40,7 @@ app.include_router(esalq.router)
 app.include_router(eia.router)
 app.include_router(admin.router)
 app.include_router(me.router)
+app.include_router(health_digest.router)
 
 
 PHONE_RE = re.compile(r"^\D*(\d{10,13})\D*$")
@@ -52,43 +53,8 @@ async def health_head():
 
 
 @app.get("/api/health")
-async def health():
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
-    checks: dict = {}
-
-    # Chaves configuradas (sem chamadas externas)
-    missing_keys = [
-        k for k, v in {
-            "anthropic": os.getenv("ANTHROPIC_API_KEY"),
-            "news_api": os.getenv("NEWS_API_KEY"),
-            "scraper_api": os.getenv("SCRAPER_API_KEY"),
-            "evolution": os.getenv("EVOLUTION_API_URL"),
-            "supabase": os.getenv("SUPABASE_URL"),
-            "fred": os.getenv("FRED_API_KEY"),
-        }.items() if not v
-    ]
-    checks["keys"] = {
-        "status": "error" if missing_keys else "ok",
-        "faltando": missing_keys,
-    }
-
-    # Pesquisas eleitorais — lê do cache Supabase (rápido)
-    try:
-        polls = supabase.get_polls()
-        checks["polls"] = {
-            "status": "ok" if polls else "warn",
-            "institutos": len(polls) if polls else 0,
-            "nomes": [p.get("instituto") for p in polls] if polls else [],
-        }
-    except Exception as e:
-        checks["polls"] = {"status": "error", "message": str(e)}
-
-    has_error = any(v.get("status") == "error" for v in checks.values())
-    has_warn = any(v.get("status") == "warn" for v in checks.values())
-    overall = "error" if has_error else ("warn" if has_warn else "ok")
-
-    return {"status": overall, "checks": checks, "checked_at": now.isoformat()}
+async def health_endpoint():
+    return health.collect_status()
 
 
 @app.post("/api/save-polls")

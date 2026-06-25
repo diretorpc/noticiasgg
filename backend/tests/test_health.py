@@ -2,6 +2,8 @@ import os
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+from fastapi.testclient import TestClient
+
 from backend.services import health
 
 _KEYS_OK = {"status": "ok", "faltando": []}
@@ -140,3 +142,33 @@ def test_send_daily_digest_cooldown_falha_aberta():
         out = health.send_daily_digest()
     assert out["status"] == "sent"
     mock_send.assert_called_once()
+
+
+def test_health_digest_endpoint_exige_cron_secret():
+    from backend.api.main import app
+    client = TestClient(app)
+    with patch.dict(os.environ, {"CRON_SECRET": "s3cr3t"}):
+        r = client.get("/api/health-digest")  # sem header
+    assert r.status_code == 401
+
+
+def test_health_digest_endpoint_dispara_digest():
+    from backend.api.main import app
+    client = TestClient(app)
+    with patch.dict(os.environ, {"CRON_SECRET": "s3cr3t"}), \
+         patch("backend.api.health_digest.health.send_daily_digest",
+               return_value={"status": "sent", "overall": "ok"}) as mock_dig:
+        r = client.get("/api/health-digest", headers={"Authorization": "Bearer s3cr3t"})
+    assert r.status_code == 200
+    assert r.json()["status"] == "sent"
+    mock_dig.assert_called_once()
+
+
+def test_health_endpoint_usa_collect_status():
+    from backend.api.main import app
+    client = TestClient(app)
+    fake = {"status": "ok", "checks": {"dedup": {"status": "ok"}}, "checked_at": "x"}
+    with patch("backend.api.main.health.collect_status", return_value=fake):
+        r = client.get("/api/health")
+    assert r.status_code == 200
+    assert r.json()["checks"]["dedup"]["status"] == "ok"
