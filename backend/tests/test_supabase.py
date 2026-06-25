@@ -98,6 +98,30 @@ def test_get_recent_sent_titles_retorna_lista():
     assert "sent_at=gte." in captured["url"]
 
 
+def test_get_recent_sent_titles_encoda_cutoff_timestamp():
+    """O cutoff ISO termina em '+00:00'. Sem percent-encoding o PostgREST lê o
+    '+' como espaço (timestamp inválido) e devolve 400 — dedup degrada sempre.
+    A URL precisa encodar o '+' (→ %2B)."""
+    captured, fake_handle = _capture_transport([])
+    with patch.dict(os.environ, _ENV), \
+         patch.object(httpx.HTTPTransport, "handle_request", fake_handle):
+        supabase.get_recent_sent_titles()
+    assert "+00:00" not in captured["url"]
+    assert "%2B" in captured["url"]
+
+
+def test_delete_old_history_encoda_cutoff_timestamp():
+    """Mesma raiz: o cutoff vem do created_at do banco (contém '+00:00'). Sem
+    encoding o DELETE vira 400/no-op e o histórico nunca é podado."""
+    rows = [{"created_at": "2026-06-24T13:03:56.726574+00:00"}]
+    captured, fake_handle = _capture_transport(rows)
+    with patch.dict(os.environ, _ENV), \
+         patch.object(httpx.HTTPTransport, "handle_request", fake_handle):
+        supabase.delete_old_history("553496592975")
+    assert "+00:00" not in captured["url"]
+    assert "%2B" in captured["url"]
+
+
 def test_client_nao_retenta_erro_http():
     """4xx/5xx não é falha de transporte — raise_for_status cuida disso nos call sites."""
     calls = {"n": 0}

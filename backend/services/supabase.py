@@ -138,7 +138,7 @@ def delete_old_history(phone: str, keep_recent: int = 6) -> None:
         if not rows:
             return
         cutoff = rows[0]["created_at"]
-        c.delete(f"/conversation_history?phone=eq.{_f(phone)}&created_at=lte.{cutoff}").raise_for_status()
+        c.delete(f"/conversation_history?phone=eq.{_f(phone)}&created_at=lte.{_f(cutoff)}").raise_for_status()
 
 
 def get_summary(phone: str) -> str | None:
@@ -287,7 +287,7 @@ def get_recent_sent_titles(hours: int = 24, limit: int = 20) -> list[str]:
     with _client() as c:
         r = c.get(
             f"/sent_news?select=title&title=not.is.null"
-            f"&sent_at=gte.{cutoff}&order=sent_at.desc&limit={limit}"
+            f"&sent_at=gte.{_f(cutoff)}&order=sent_at.desc&limit={limit}"
         )
         r.raise_for_status()
         return [row["title"] for row in r.json()]
