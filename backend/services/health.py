@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from backend.services import supabase, whatsapp
 
@@ -99,3 +99,33 @@ def format_digest(status: dict) -> str:
              _line_keys(checks.get("keys", {})),
              _line_polls(checks.get("polls", {}))]
     return "\n".join(lines)
+
+
+_DIGEST_COOLDOWN_HOURS = 20
+
+
+def _cooldown_ok(rule_id: str, hours: float) -> bool:
+    """Fail-open: se não der pra ler a trava (Supabase fora), retorna True —
+    o repórter de saúde não pode ser calado justamente pela falha que reporta."""
+    try:
+        last = supabase.get_alert_last_triggered(rule_id)
+    except Exception:
+        return True
+    if last is None:
+        return True
+    return last < datetime.now(timezone.utc) - timedelta(hours=hours)
+
+
+def send_daily_digest() -> dict:
+    if not _cooldown_ok("health_digest_daily", _DIGEST_COOLDOWN_HOURS):
+        return {"status": "skipped", "reason": "cooldown"}
+    admin = os.environ.get("REPLY_TO_NUMBER") or os.environ.get("AUTHORIZED_NUMBER", "")
+    if not admin:
+        return {"status": "error", "reason": "no admin number"}
+    status = collect_status()
+    whatsapp.send_message(admin, format_digest(status))
+    try:
+        supabase.set_alert_triggered("health_digest_daily")
+    except Exception:
+        pass  # envio já saiu; marcar a trava é best-effort
+    return {"status": "sent", "overall": status["status"]}
