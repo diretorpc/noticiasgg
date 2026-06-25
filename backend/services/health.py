@@ -51,3 +51,51 @@ def collect_status() -> dict:
     has_warn = any(v.get("status") == "warn" for v in checks.values())
     overall = "error" if has_error else ("warn" if has_warn else "ok")
     return {"status": overall, "checks": checks, "checked_at": datetime.now(timezone.utc).isoformat()}
+
+
+_ICON = {"ok": "✅", "warn": "⚠️", "error": "❌"}
+_SEP = "━━━━━━━━━━━━━━"
+
+
+def _line_dedup(v: dict) -> str:
+    if v.get("status") == "ok":
+        return f"• Dedup: ativo ({v.get('titulos_24h', 0)} títulos/24h)"
+    return f"• {_ICON['error']} Dedup: {v.get('message', 'erro')}"
+
+
+def _line_broadcasts(v: dict) -> str:
+    if v.get("status") == "ok":
+        return f"• Alertas enviados (24h): {v.get('enviados_24h', 0)}"
+    return f"• {_ICON['warn']} Alertas (24h): {v.get('message', 'indisponível')}"
+
+
+def _line_evolution(v: dict) -> str:
+    if v.get("status") == "ok":
+        return f"• Evolution: conectada ({v.get('estado', '?')})"
+    return f"• {_ICON['warn']} Evolution: {v.get('estado') or v.get('message', 'desconectada')}"
+
+
+def _line_keys(v: dict) -> str:
+    if v.get("status") == "ok":
+        return "• Chaves: OK"
+    return f"• {_ICON['error']} Chaves faltando: {', '.join(v.get('faltando', []))}"
+
+
+def _line_polls(v: dict) -> str:
+    if v.get("status") != "error":
+        return f"• Pesquisas: {v.get('institutos', 0)} institutos"
+    return f"• {_ICON['error']} Pesquisas: {v.get('message', 'erro')}"
+
+
+def format_digest(status: dict) -> str:
+    checks = status.get("checks", {})
+    problems = [k for k, v in checks.items() if v.get("status") in ("warn", "error")]
+    head = "🩺 *noticiasgg — saúde diária*"
+    summary = "✅ Tudo OK" if not problems else f"⚠️ {len(problems)} problema(s)"
+    lines = [head, _SEP, summary,
+             _line_dedup(checks.get("dedup", {})),
+             _line_broadcasts(checks.get("broadcasts", {})),
+             _line_evolution(checks.get("evolution", {})),
+             _line_keys(checks.get("keys", {})),
+             _line_polls(checks.get("polls", {}))]
+    return "\n".join(lines)
