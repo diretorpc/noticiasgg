@@ -36,7 +36,7 @@ Atual = 206K
 | Países | **Todos** |
 | Gatilho | Dispara quando o valor **Atual** é divulgado |
 | Agrupamento | **Uma mensagem agrupada por ciclo** (blocos separados por divisória) |
-| Aquisição | Endpoint interno `getCalendarFilteredData` via ScraperAPI (fallback: página completa) |
+| Aquisição | Página `/economic-calendar` via ScraperAPI; eventos extraídos do JSON `__NEXT_DATA__` (ver Atualização pós-spike) |
 | Destinatários | `authorized_users` com `alerts_enabled=true` (mesmo dos outros alertas) |
 | IA | **Nenhuma** — dado estruturado, formatação determinística |
 
@@ -46,6 +46,35 @@ Atual = 206K
 brasileiro (China ~22h–23h BRT, Austrália ~21h BRT, Japão de madrugada). Janelar o cron para
 o dia BRT perderia esses releases. O custo de rodar 24/7 é controlado na estratégia de fetch
 (modo barato primeiro), não cortando horas.
+
+## Atualização pós-spike (2026-06-26)
+
+O spike de aquisição revelou que o **br.investing.com migrou para Next.js**. A estrutura
+antiga (`getCalendarFilteredData`, tabela `#economicCalendarData`, linhas `js-event-item`)
+**não existe mais**. Decisões revisadas (mudança de mecanismo, não de escopo nem de saída):
+
+- **Fetch:** GET da página `https://br.investing.com/economic-calendar/` via ScraperAPI
+  (modo simples, sem `render`/`premium` — o SSR já entrega o conteúdo; retornou 200 com tudo).
+- **Parse:** extrair o `<script id="__NEXT_DATA__">`, fazer `json.loads`, navegar até
+  `props.pageProps.state.economicCalendarStore.calendarEventsByDate` (dict por data → lista de
+  eventos). Cada evento já vem com campos limpos:
+  `eventId` (int estável), `importance` (string `"1"|"2"|"3"`), `actual`/`forecast`/`previous`
+  (strings cruas em PT), `event` + `period` (período já vem com parênteses, ex. `"(Mai)"`),
+  `country` (nome PT) e `currencyFlag` (ISO-2, ex. `"BR"`, `"ES"`).
+- **Flag emoji:** derivado de `currencyFlag` (ISO-2) por indicadores regionais
+  (`chr(0x1F1E6 + ord(c) - ord('A'))`) — sem mapa de países, cobre todos.
+- **Filtro:** `importance == "3"` **E** `actual` não-vazio.
+- **Dedup id:** `eventId` (não mais hash do nome).
+- **Sinal de saúde:** path do store ausente → falha (bloqueio/layout); store presente com 0
+  eventos filtrados → vazio normal.
+- **Custo confirmado:** GET simples basta (~1 crédito/chamada) → ~720 ScraperAPI/mês. O risco
+  de modo premium não se materializou.
+
+Validação real (2026-06-26): 51 eventos no dia, 3 de alta relevância, 2 já com `actual`.
+
+O dict de evento produzido pelo `parse()` mantém as chaves
+`event_id/country/flag_emoji/name/importance/previous/forecast/actual`, então as camadas de
+formatação, dedup e envio abaixo não mudam.
 
 ## Arquitetura
 
