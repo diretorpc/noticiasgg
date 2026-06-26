@@ -61,3 +61,14 @@ def test_run_reports_error_on_unrecognized_body(monkeypatch):
     result = investing_digest.run()
     assert result["status"] == "error"
     assert notified  # admin avisado da quebra
+    assert notified[0][1] == "cron investing com falha"
+
+
+def test_run_no_recipients_returns_error(monkeypatch):
+    notified = []
+    monkeypatch.setattr(alert_checker, "_get_recipients", lambda: [])
+    monkeypatch.setattr(alert_checker, "notify_admin",
+                        lambda errors, title="x": notified.append((errors, title)))
+    result = investing_digest.run()
+    assert result["status"] == "error"
+    assert notified  # admin avisado de 0 destinatários

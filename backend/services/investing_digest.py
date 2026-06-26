@@ -45,7 +45,8 @@ def run(test_mode: bool = False) -> dict:
         logger.error("investing: nenhum destinatário (Supabase fora ou alerts_enabled vazio)")
         alert_checker.notify_admin(
             ["investing: 0 destinatários"], title=_FAIL_TITLE)
-        return {"status": "ok", "recipients": 0, "events": 0, "sent": 0}
+        return {"status": "error", "detail": "0 destinatários",
+                "recipients": 0, "events": 0, "sent": 0}
 
     try:
         html = investing_calendar.fetch()
@@ -72,6 +73,10 @@ def run(test_mode: bool = False) -> dict:
         admin = os.environ.get("REPLY_TO_NUMBER") or os.environ.get("AUTHORIZED_NUMBER", "")
         if admin:
             targets = [{"phone": admin, "name": "admin"}]
+        else:
+            logger.warning(
+                "investing test_mode: sem REPLY_TO_NUMBER/AUTHORIZED_NUMBER, "
+                "enviando para todos os destinatários")
 
     errors: list[str] = []
     msg = _build_message(new_events, test_mode=test_mode)
