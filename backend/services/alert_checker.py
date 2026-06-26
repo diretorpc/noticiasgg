@@ -412,7 +412,7 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
 _ERROR_NOTIFY_COOLDOWN_HOURS = 2  # entre avisos de falha ao admin
 
 
-def notify_admin(errors: list[str]) -> None:
+def notify_admin(errors: list[str], title: str = "check-alerts com falhas") -> None:
     """Avisa o admin via WhatsApp quando o sistema falha — o sistema reporta a própria doença.
     Cooldown de 2h para não virar spam de erro a cada execução do cron."""
     admin = os.environ.get("REPLY_TO_NUMBER") or os.environ.get("AUTHORIZED_NUMBER", "")
@@ -423,10 +423,9 @@ def notify_admin(errors: list[str]) -> None:
             logger.info("admin notify: cooldown active, skipping (%d errors)", len(errors))
             return
     except Exception as e:
-        # canal de último recurso falha aberto: sem cooldown disponível, envia mesmo assim
         logger.warning("admin notify: cooldown check failed (%s), sending anyway", e)
     msg = (
-        "🚨 *check-alerts com falhas*\n"
+        f"🚨 *{title}*\n"
         "━━━━━━━━━━━━━━\n"
         + "\n".join(f"• {e[:200]}" for e in errors[:5])
     )
