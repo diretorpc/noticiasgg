@@ -135,7 +135,7 @@ Orquestra o ciclo. Responsabilidade única: decidir o que é novo, formatar e en
   2. `html = investing_calendar.fetch()`; `events = investing_calendar.parse(html)`.
      - Falha de fetch/parse → notifica admin com título próprio, retorna `{"status": "error", ...}`.
   3. Para cada evento, monta `rule_id = f"investing_{event_id}_{data_BRT}"`.
-     - Pula se já enviado (cooldown 30 dias via `supabase.get_alert_last_triggered`).
+     - Pula se já enviado (presence-check via `supabase.get_alert_last_triggered`).
   4. Eventos novos → monta **uma mensagem agrupada** (header + blocos separados por `━━━`).
   5. `alert_checker._broadcast(msg, recipients, errors)`.
   6. Marca cada `rule_id` com `supabase.set_alert_triggered` **apenas se o broadcast entregou > 0**.
@@ -172,8 +172,9 @@ async def cron_investing(request: Request, test: bool = False):
 ## Dedup & estado
 
 - Tabela existente `system_alert_state` (chave `rule_id`, `last_triggered_at`).
-- `rule_id = f"investing_{event_id}_{data_BRT}"`, cooldown 30 dias → **cada divulgação é
-  enviada uma única vez**, mesmo o cron rodando de hora em hora.
+- `rule_id = f"investing_{event_id}_{data_BRT}"`. Como o `rule_id` embute a data, basta um
+  **presence-check** (`get_alert_last_triggered(rule_id) is not None`) — sem janela de cooldown:
+  **cada divulgação é enviada uma única vez**, mesmo o cron rodando de hora em hora.
 - `data_BRT` = data de hoje no fuso BRT (UTC-3), consistente com o resto do app.
 
 ## Tratamento de erro (anti-falha-silenciosa)
