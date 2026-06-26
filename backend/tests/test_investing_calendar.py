@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 import pytest
@@ -58,3 +57,18 @@ def test_parse_empty_calendar_is_normal_empty_list():
             '{"props":{"pageProps":{"state":{"economicCalendarStore":{"calendarEventsByDate":{"2026-06-26":[]}}}}}}'
             '</script>')
     assert investing_calendar.parse(body) == []
+
+
+def test_parse_skips_event_without_id():
+    body = ('<script id="__NEXT_DATA__" type="application/json">'
+            '{"props":{"pageProps":{"state":{"economicCalendarStore":{"calendarEventsByDate":{"2026-06-26":'
+            '[{"importance":"3","country":"Brazil","currencyFlag":"BR","event":"Sem ID","period":"(Mai)",'
+            '"previous":"1%","forecast":"2%","actual":"3%"}]}}}}}}'
+            '</script>')
+    assert investing_calendar.parse(body) == []
+
+
+def test_flag_emoji_edge_cases():
+    assert investing_calendar._flag_emoji("") == ""
+    assert investing_calendar._flag_emoji("USA") == ""
+    assert investing_calendar._flag_emoji(None) == ""

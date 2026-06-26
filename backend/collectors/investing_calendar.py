@@ -41,12 +41,15 @@ def parse(html: str) -> list[dict]:
             actual = (e.get("actual") or "").strip()
             if str(e.get("importance")) != "3" or not actual:
                 continue
+            if not e.get("eventId"):
+                logger.warning("investing: evento sem eventId, pulando: %s", e.get("event"))
+                continue
             name = (e.get("event") or "").strip()
             period = (e.get("period") or "").strip()
             if period:
                 name = f"{name} {period}"
             events.append({
-                "event_id": str(e.get("eventId")),
+                "event_id": str(e["eventId"]),
                 "country": (e.get("country") or "").strip(),
                 "flag_emoji": _flag_emoji(e.get("currencyFlag")),
                 "name": name,
