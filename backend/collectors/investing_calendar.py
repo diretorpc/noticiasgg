@@ -1,11 +1,27 @@
 import json
 import logging
+import os
 import re
+
+import httpx
 
 logger = logging.getLogger("noticiasgg.investing")
 
+_SCRAPER_URL = "https://api.scraperapi.com/"
+_PAGE_URL = "https://br.investing.com/economic-calendar/"
+
 _NEXT_DATA_RE = re.compile(
     r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.DOTALL)
+
+
+def fetch() -> str:
+    key = os.environ.get("SCRAPER_API_KEY", "")
+    if not key:
+        raise ValueError("SCRAPER_API_KEY não configurada")
+    with httpx.Client(timeout=60) as client:
+        r = client.get(_SCRAPER_URL, params={"api_key": key, "url": _PAGE_URL})
+        r.raise_for_status()
+        return r.text
 
 
 def _flag_emoji(country_code: str) -> str:
