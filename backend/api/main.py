@@ -14,6 +14,9 @@ from backend.api import send_report, cron_report, check_alerts, admin, me, healt
 
 logger = logging.getLogger("noticiasgg")
 logging.basicConfig(level=logging.INFO)
+# httpx loga a URL completa (com api_key=... em query string) no nível INFO;
+# silenciar evita vazar chaves (ScraperAPI, FRED, EIA, NewsAPI) nos logs da Vercel
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 app = FastAPI(title="noticiasgg", version="1.0.0")
 
