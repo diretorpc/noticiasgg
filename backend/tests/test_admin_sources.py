@@ -17,7 +17,8 @@ _PUB = _PRIV.public_key()
 
 def _token():
     return jwt.encode(
-        {"sub": "u1", "aud": "authenticated", "exp": int(time.time()) + 3600},
+        {"sub": "u1", "aud": "authenticated", "email": "matheusmouro@hotmail.com",
+         "exp": int(time.time()) + 3600},
         _PRIV, algorithm="ES256",
     )
 

@@ -2,7 +2,7 @@ import os
 
 import jwt
 from jwt import PyJWKClient
-from fastapi import Header, HTTPException
+from fastapi import Depends, Header, HTTPException
 
 # Supabase migrou pra chaves assimétricas (ES256/RS256). Validamos via JWKS
 # (chaves públicas), sem segredo compartilhado no backend.
@@ -40,3 +40,20 @@ def verify_supabase_jwt(authorization: str | None = Header(default=None)) -> dic
         return decode_token(authorization.split(" ", 1)[1])
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="invalid token")
+
+
+def _admin_emails() -> set[str]:
+    """Allowlist de admins via env `ADMIN_EMAILS` (separados por vírgula)."""
+    raw = os.environ.get("ADMIN_EMAILS", "")
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
+
+def require_admin(payload: dict = Depends(verify_supabase_jwt)) -> dict:
+    """Dependência FastAPI: exige JWT válido E email na allowlist ADMIN_EMAILS.
+    Autenticação (JWT válido) não é autorização — um usuário Supabase qualquer
+    não pode virar admin só por estar logado. Fail-closed: sem allowlist
+    configurada, nega tudo."""
+    email = (payload.get("email") or "").strip().lower()
+    if not email or email not in _admin_emails():
+        raise HTTPException(status_code=403, detail="forbidden")
+    return payload

@@ -1,3 +1,4 @@
+import os
 import time
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -49,3 +50,31 @@ def test_verify_valid_bearer_returns_payload():
     with patch.object(auth, "_get_jwks_client", return_value=_FakeJWKS()):
         payload = auth.verify_supabase_jwt(authorization=f"Bearer {_token()}")
     assert payload["sub"] == "u1"
+
+
+def test_require_admin_allows_listed_email():
+    with patch.dict(os.environ, {"ADMIN_EMAILS": "matheusmouro@hotmail.com, outro@x.com"}):
+        payload = auth.require_admin({"sub": "u1", "email": "Matheusmouro@Hotmail.com"})
+    assert payload["email"] == "Matheusmouro@Hotmail.com"
+
+
+def test_require_admin_denies_unlisted_email():
+    with patch.dict(os.environ, {"ADMIN_EMAILS": "matheusmouro@hotmail.com"}):
+        with pytest.raises(HTTPException) as exc:
+            auth.require_admin({"sub": "u2", "email": "attacker@evil.com"})
+    assert exc.value.status_code == 403
+
+
+def test_require_admin_denies_when_allowlist_unset():
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("ADMIN_EMAILS", None)
+        with pytest.raises(HTTPException) as exc:
+            auth.require_admin({"sub": "u1", "email": "matheusmouro@hotmail.com"})
+    assert exc.value.status_code == 403
+
+
+def test_require_admin_denies_payload_without_email():
+    with patch.dict(os.environ, {"ADMIN_EMAILS": "matheusmouro@hotmail.com"}):
+        with pytest.raises(HTTPException) as exc:
+            auth.require_admin({"sub": "u1"})
+    assert exc.value.status_code == 403

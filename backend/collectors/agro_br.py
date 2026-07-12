@@ -54,52 +54,68 @@ def _parse_br_float(texto: str) -> float | None:
         return None
 
 
+def _header_columns(tabela) -> tuple[int | None, int | None]:
+    """Localiza os índices das colunas de preço e variação pelo TEXTO do cabeçalho
+    (<th>), em vez de posição fixa. Se o site reordena as colunas, lemos a coluna
+    certa em vez de reportar um número errado em silêncio."""
+    header_row = next((tr for tr in tabela.find_all("tr") if tr.find("th")), None)
+    if header_row is None:
+        return None, None
+    headers = [th.get_text(strip=True).lower() for th in header_row.find_all("th")]
+    col_preco = next((i for i, h in enumerate(headers) if "r$" in h or "preço" in h or "valor" in h), None)
+    col_var = next((i for i, h in enumerate(headers) if "varia" in h), None)
+    return col_preco, col_var
+
+
 def _fetch_noticias_agro(
-    client: httpx.Client, path: str, unidade: str, estado: str,
-    col_preco: int, col_var: int, linha_idx: int
+    client: httpx.Client, path: str, unidade: str, estado: str, linha_idx: int
 ) -> dict:
+    base = {"preco": None, "variacao_pct": None, "moeda": "BRL", "unidade": unidade}
     try:
         resp = client.get(NA_BASE + path, headers=HEADERS_HTML)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.content, "html.parser")
         tabela = soup.find("table")
         if not tabela:
-            return {"preco": None, "variacao_pct": None, "erro": "tabela não encontrada", "moeda": "BRL", "unidade": unidade}
+            return {**base, "erro": "tabela não encontrada"}
+        col_preco, col_var = _header_columns(tabela)
+        if col_preco is None or col_var is None:
+            return {**base, "erro": "cabeçalho não reconhecido"}
         linhas = [row for row in tabela.find_all("tr") if row.find("td")]
         if linha_idx < 1 or linha_idx > len(linhas):
-            return {"preco": None, "variacao_pct": None, "erro": "linha não encontrada", "moeda": "BRL", "unidade": unidade}
+            return {**base, "erro": "linha não encontrada"}
         cols = [c.get_text(strip=True) for c in linhas[linha_idx - 1].find_all("td")]
         preco = _parse_br_float(cols[col_preco]) if col_preco < len(cols) else None
         variacao = _parse_br_float(cols[col_var]) if col_var < len(cols) else None
-        return {"preco": preco, "variacao_pct": variacao, "moeda": "BRL", "unidade": unidade, "estado": estado}
+        return {**base, "preco": preco, "variacao_pct": variacao, "estado": estado}
     except Exception as e:
-        return {"preco": None, "variacao_pct": None, "erro": str(e), "moeda": "BRL", "unidade": unidade}
+        return {**base, "erro": str(e)}
 
 
-# (path, unidade, estado, col_preco, col_var, linha_idx)
-# col_preco/col_var: índice da coluna (0-based); linha_idx: linha de dados (1-based)
+# (path, unidade, estado, linha_idx)
+# Colunas de preço/variação detectadas pelo texto do cabeçalho; linha_idx: linha de dados (1-based)
 # URLs 404 removidas: citros, aveia, cevada, canola, girassol
 NOTICIAS_AGRO_COMMODITIES = {
-    "Soja PR":         ("/cotacoes/soja",           "R$/sc 60kg",  "PR", 1, 2, 1),
-    "Milho SP":        ("/cotacoes/milho",           "R$/sc 60kg",  "SP", 1, 2, 1),
-    "Trigo PR":        ("/cotacoes/trigo",           "R$/ton",      "PR", 2, 3, 1),
-    "Cafe Arabica SP": ("/cotacoes/cafe",            "R$/sc 60kg",  "SP", 1, 2, 1),
-    "Algodao SP":      ("/cotacoes/algodao",         "R$/@ 15kg",   "SP", 1, 2, 1),
-    "Acucar SP":       ("/cotacoes/sucroenergetico", "R$/sc 50kg",  "SP", 1, 2, 1),
-    "Arroz RS":        ("/cotacoes/arroz",           "R$/sc 50kg",  "RS", 1, 2, 1),
-    "Feijao PR":       ("/cotacoes/feijao",          "R$/sc 60kg",  "PR", 1, 2, 1),
-    "Sorgo RS":        ("/cotacoes/sorgo",           "R$/sc 60kg",  "RS", 1, 2, 1),
-    "Mandioca MS":     ("/cotacoes/mandioca",        "R$/ton",      "MS", 2, 3, 1),
-    "Amendoim SP":     ("/cotacoes/amendoim",        "R$/sc 25kg",  "SP", 1, 2, 2),
+    "Soja PR":         ("/cotacoes/soja",           "R$/sc 60kg",  "PR", 1),
+    "Milho SP":        ("/cotacoes/milho",           "R$/sc 60kg",  "SP", 1),
+    "Trigo PR":        ("/cotacoes/trigo",           "R$/ton",      "PR", 1),
+    "Cafe Arabica SP": ("/cotacoes/cafe",            "R$/sc 60kg",  "SP", 1),
+    "Algodao SP":      ("/cotacoes/algodao",         "R$/@ 15kg",   "SP", 1),
+    "Acucar SP":       ("/cotacoes/sucroenergetico", "R$/sc 50kg",  "SP", 1),
+    "Arroz RS":        ("/cotacoes/arroz",           "R$/sc 50kg",  "RS", 1),
+    "Feijao PR":       ("/cotacoes/feijao",          "R$/sc 60kg",  "PR", 1),
+    "Sorgo RS":        ("/cotacoes/sorgo",           "R$/sc 60kg",  "RS", 1),
+    "Mandioca MS":     ("/cotacoes/mandioca",        "R$/ton",      "MS", 1),
+    "Amendoim SP":     ("/cotacoes/amendoim",        "R$/sc 25kg",  "SP", 2),
 }
 
 # URLs verificadas em 2026-05-15: bezerro/vaca-gorda → 404; boi-gordo/frango/suinos já validados
 NOTICIAS_AGRO_GADO = {
-    "Boi Gordo SP":  ("/cotacoes/boi-gordo", "R$/@",   "SP", 1, 2, 1),
-    "Frango SP":     ("/cotacoes/frango",    "R$/kg",  "SP", 1, 2, 1),
-    "Suino PR":      ("/cotacoes/suinos",    "R$/kg",  "PR", 2, 3, 2),
-    "Leite SP":      ("/cotacoes/leite",     "R$/L",   "SP", 1, 2, 4),
-    "Ovos SP":       ("/cotacoes/ovos",      "R$/dz",  "SP", 2, 3, 2),
+    "Boi Gordo SP":  ("/cotacoes/boi-gordo", "R$/@",   "SP", 1),
+    "Frango SP":     ("/cotacoes/frango",    "R$/kg",  "SP", 1),
+    "Suino PR":      ("/cotacoes/suinos",    "R$/kg",  "PR", 2),
+    "Leite SP":      ("/cotacoes/leite",     "R$/L",   "SP", 4),
+    "Ovos SP":       ("/cotacoes/ovos",      "R$/dz",  "SP", 2),
 }
 
 # URLs verificadas em 2026-05-15: ureia/map/kcl → 404; sem entradas válidas
@@ -144,16 +160,16 @@ def collect_commodities_cbot() -> dict:
 def collect_commodities_br() -> dict:
     resultado = {}
     with httpx.Client(timeout=15, follow_redirects=True) as client:
-        for nome, (path, unidade, estado, col_preco, col_var, linha_idx) in NOTICIAS_AGRO_COMMODITIES.items():
-            resultado[nome] = _fetch_noticias_agro(client, path, unidade, estado, col_preco, col_var, linha_idx)
+        for nome, (path, unidade, estado, linha_idx) in NOTICIAS_AGRO_COMMODITIES.items():
+            resultado[nome] = _fetch_noticias_agro(client, path, unidade, estado, linha_idx)
     return resultado
 
 
 def collect_gado() -> dict:
     resultado = {}
     with httpx.Client(timeout=15, follow_redirects=True) as client:
-        for nome, (path, unidade, estado, col_preco, col_var, linha_idx) in NOTICIAS_AGRO_GADO.items():
-            resultado[nome] = _fetch_noticias_agro(client, path, unidade, estado, col_preco, col_var, linha_idx)
+        for nome, (path, unidade, estado, linha_idx) in NOTICIAS_AGRO_GADO.items():
+            resultado[nome] = _fetch_noticias_agro(client, path, unidade, estado, linha_idx)
     return resultado
 
 
@@ -162,8 +178,8 @@ def collect_fertilizantes() -> dict:
         return {}
     resultado = {}
     with httpx.Client(timeout=15, follow_redirects=True) as client:
-        for nome, (path, unidade, estado, col_preco, col_var, linha_idx) in NOTICIAS_AGRO_FERTILIZANTES.items():
-            resultado[nome] = _fetch_noticias_agro(client, path, unidade, estado, col_preco, col_var, linha_idx)
+        for nome, (path, unidade, estado, linha_idx) in NOTICIAS_AGRO_FERTILIZANTES.items():
+            resultado[nome] = _fetch_noticias_agro(client, path, unidade, estado, linha_idx)
     return resultado
 
 
@@ -172,8 +188,8 @@ def collect_defensivos() -> dict:
         return {}
     resultado = {}
     with httpx.Client(timeout=15, follow_redirects=True) as client:
-        for nome, (path, unidade, estado, col_preco, col_var, linha_idx) in NOTICIAS_AGRO_DEFENSIVOS.items():
-            resultado[nome] = _fetch_noticias_agro(client, path, unidade, estado, col_preco, col_var, linha_idx)
+        for nome, (path, unidade, estado, linha_idx) in NOTICIAS_AGRO_DEFENSIVOS.items():
+            resultado[nome] = _fetch_noticias_agro(client, path, unidade, estado, linha_idx)
     return resultado
 
 

@@ -8,7 +8,7 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def _bypass_auth():
-    app.dependency_overrides[auth.verify_supabase_jwt] = lambda: {"sub": "admin"}
+    app.dependency_overrides[auth.require_admin] = lambda: {"sub": "admin"}
     yield
     app.dependency_overrides.clear()
 

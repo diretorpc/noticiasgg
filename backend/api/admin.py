@@ -12,7 +12,7 @@ router = APIRouter()
 
 
 @router.get("/api/admin/agent-config")
-def get_agent_config(user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+def get_agent_config(user: dict = Depends(auth.require_admin)) -> dict:
     """Snapshot read-only da config do agente. Exige auth. Sem secrets."""
     return {
         "agent": reporter.describe_config(),
@@ -22,7 +22,7 @@ def get_agent_config(user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
 
 
 @router.get("/api/admin/newsapi-sources")
-def get_newsapi_sources(user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+def get_newsapi_sources(user: dict = Depends(auth.require_admin)) -> dict:
     """Lista as fontes disponíveis na NewsAPI (id/name/category) para o painel.
     Busca server-side para não expor a NEWS_API_KEY no browser."""
     api_key = os.environ.get("NEWS_API_KEY", "")
@@ -58,13 +58,13 @@ class RssValidateBody(BaseModel):
 
 
 @router.post("/api/admin/validate-rss")
-def validate_rss(body: RssValidateBody, user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+def validate_rss(body: RssValidateBody, user: dict = Depends(auth.require_admin)) -> dict:
     """Valida na hora uma URL de RSS/Atom para o painel (parse + nº de itens)."""
     return news.validate_feed(body.url)
 
 
 @router.get("/api/admin/users")
-def list_users(user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+def list_users(user: dict = Depends(auth.require_admin)) -> dict:
     """Lista usuários autorizados com suas preferências (para o painel)."""
     out = []
     for u in supabase.list_authorized():
@@ -95,7 +95,7 @@ class UserPrefsBody(BaseModel):
 
 
 @router.post("/api/admin/user-prefs")
-def save_user_prefs(body: UserPrefsBody, user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+def save_user_prefs(body: UserPrefsBody, user: dict = Depends(auth.require_admin)) -> dict:
     """Salva as preferências de um usuário (edição pelo painel)."""
     supabase.save_preferences(
         body.phone,
@@ -110,7 +110,7 @@ def save_user_prefs(body: UserPrefsBody, user: dict = Depends(auth.verify_supaba
 
 
 @router.delete("/api/admin/user-prefs/{phone}")
-def reset_user_prefs(phone: str, user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+def reset_user_prefs(phone: str, user: dict = Depends(auth.require_admin)) -> dict:
     """Reseta as preferências de um usuário (volta aos defaults)."""
     supabase.delete_preferences(phone)
     return {"ok": True}
@@ -122,7 +122,7 @@ class PreviewReportBody(BaseModel):
 
 
 @router.post("/api/admin/preview-report")
-def preview_report(body: PreviewReportBody, user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+def preview_report(body: PreviewReportBody, user: dict = Depends(auth.require_admin)) -> dict:
     """Gera o relatório do motor novo (lista de mensagens) SEM enviar pro WhatsApp.
     Usado para comparar o layout lado a lado com o n8n."""
     target = supabase.get_authorized_by_phone(body.phone) or {"phone": body.phone, "name": ""}
@@ -136,7 +136,7 @@ class ScheduleBody(BaseModel):
 
 
 @router.get("/api/admin/schedules/{phone}")
-def get_schedules(phone: str, user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+def get_schedules(phone: str, user: dict = Depends(auth.require_admin)) -> dict:
     """Grade de agendamento (motor novo) + flag de opt-in de um usuário."""
     rows = schedules.get_for_phone(phone)
     enabled = schedules.phones_with_engine_enabled()
@@ -145,7 +145,7 @@ def get_schedules(phone: str, user: dict = Depends(auth.verify_supabase_jwt)) ->
 
 @router.put("/api/admin/schedules/{phone}")
 def put_schedules(phone: str, body: ScheduleBody,
-                  user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+                  user: dict = Depends(auth.require_admin)) -> dict:
     """Substitui a grade do usuário e seta a flag do motor novo."""
     rows = schedules.grid_to_rows(phone, body.schedule)
     schedules.replace_for_phone(phone, rows)
@@ -154,7 +154,7 @@ def put_schedules(phone: str, body: ScheduleBody,
 
 
 @router.get("/api/admin/report-prompts")
-def get_report_prompts(user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+def get_report_prompts(user: dict = Depends(auth.require_admin)) -> dict:
     """Os 6 prompts de seção: valor efetivo, se é custom e o default."""
     return {"prompts": report_prompts.describe_prompts()}
 
@@ -165,7 +165,7 @@ class ReportPromptBody(BaseModel):
 
 @router.put("/api/admin/report-prompts/{section}")
 def put_report_prompt(section: str, body: ReportPromptBody,
-                      user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+                      user: dict = Depends(auth.require_admin)) -> dict:
     if section not in report_prompts.SECTIONS:
         raise HTTPException(status_code=400, detail="seção inválida")
     supabase.upsert_config(report_prompts._CONFIG_KEY[section], body.prompt)
@@ -175,7 +175,7 @@ def put_report_prompt(section: str, body: ReportPromptBody,
 
 @router.delete("/api/admin/report-prompts/{section}")
 def delete_report_prompt(section: str,
-                         user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+                         user: dict = Depends(auth.require_admin)) -> dict:
     if section not in report_prompts.SECTIONS:
         raise HTTPException(status_code=400, detail="seção inválida")
     supabase.delete_config(report_prompts._CONFIG_KEY[section])
@@ -190,7 +190,7 @@ class PreviewSectionBody(BaseModel):
 
 @router.post("/api/admin/preview-section")
 def preview_section(body: PreviewSectionBody,
-                    user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+                    user: dict = Depends(auth.require_admin)) -> dict:
     if body.section not in report_prompts.SECTIONS:
         raise HTTPException(status_code=400, detail="seção inválida")
     text = report_engine.preview_section(body.section, body.prompt)
@@ -198,7 +198,7 @@ def preview_section(body: PreviewSectionBody,
 
 
 @router.post("/api/admin/selflink/{phone}")
-def generate_selflink(phone: str, user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+def generate_selflink(phone: str, user: dict = Depends(auth.require_admin)) -> dict:
     if not supabase.get_authorized_by_phone(phone):
         raise HTTPException(status_code=404, detail="usuário não encontrado")
     token = supabase.set_selflink_token(phone)
@@ -207,6 +207,6 @@ def generate_selflink(phone: str, user: dict = Depends(auth.verify_supabase_jwt)
 
 
 @router.delete("/api/admin/selflink/{phone}")
-def revoke_selflink(phone: str, user: dict = Depends(auth.verify_supabase_jwt)) -> dict:
+def revoke_selflink(phone: str, user: dict = Depends(auth.require_admin)) -> dict:
     supabase.clear_selflink_token(phone)
     return {"ok": True}

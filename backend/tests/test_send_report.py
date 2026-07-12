@@ -1,13 +1,29 @@
+import os
 from unittest.mock import patch, MagicMock
+import pytest
 from fastapi.testclient import TestClient
 from backend.api.main import app
 
-client = TestClient(app)
+_SECRET = "test-cron-secret"
+# /api/send-report exige o mesmo segredo dos crons (endpoint interno, não é público).
+client = TestClient(app, headers={"x-cron-secret": _SECRET})
+bare_client = TestClient(app)  # sem segredo, para testar a rejeição
+
+
+@pytest.fixture(autouse=True)
+def _cron_secret(monkeypatch):
+    monkeypatch.setenv("CRON_SECRET", _SECRET)
+
 
 PAYLOAD_DEFAULT = {
     "number": "5534999945010",
     "textMessage": {"text": "Relatório do n8n aqui."}
 }
+
+
+def test_send_report_rejeita_sem_segredo():
+    resp = bare_client.post("/api/send-report", json=PAYLOAD_DEFAULT)
+    assert resp.status_code == 401
 
 
 def test_send_report_sem_preferencias_envia_texto_n8n():

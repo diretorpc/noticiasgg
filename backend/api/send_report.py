@@ -2,9 +2,10 @@ import logging
 import re
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from backend.api.cron_auth import check_cron_secret
 from backend.services import reporter, whatsapp, supabase
 
 logger = logging.getLogger("noticiasgg")
@@ -66,7 +67,7 @@ class SendReportPayload(BaseModel):
     isFirst: bool = False
 
 
-@router.post("/api/send-report")
+@router.post("/api/send-report", dependencies=[Depends(check_cron_secret)])
 async def send_report(payload: SendReportPayload):
     number = payload.number
     n8n_text = payload.textMessage.text
