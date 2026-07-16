@@ -509,7 +509,9 @@ async def whatsapp_webhook(request: Request):
         text = msg_info.get("text", "") if msg_info["type"] == "text" else "[mídia]"
 
         admin_phone = _admin_phone()
-        authorized = supabase.get_authorized(remote_jid)
+        # O remoteJid muda de formato entre versões da Evolution (v1: @lid,
+        # v2: @s.whatsapp.net) — resolve nas duas grafias.
+        authorized = supabase.get_authorized_by_jid(remote_jid)
 
         if not authorized:
             # Não autorizado → cria pendência e notifica admin

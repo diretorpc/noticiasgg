@@ -59,6 +59,30 @@ def get_authorized_by_phone(phone: str) -> dict | None:
         return rows[0] if rows else None
 
 
+def get_authorized_by_jid(jid: str) -> dict | None:
+    """Encontra o usuário a partir do `remoteJid` do webhook.
+
+    O formato varia por versão da Evolution: a v1 manda `<lid>@lid`, a v2 manda
+    `<numero>@s.whatsapp.net`. Para números brasileiros o JID costuma vir sem o
+    9 extra, então tenta as duas grafias.
+    """
+    if not jid:
+        return None
+    if jid.endswith("@lid"):
+        return get_authorized(jid)
+
+    number = jid.split("@")[0]
+    user = get_authorized_by_phone(number)
+    if user:
+        return user
+    if number.startswith("55"):
+        if len(number) == 12:  # sem o 9 extra → tenta com
+            user = get_authorized_by_phone(number[:4] + "9" + number[4:])
+        elif len(number) == 13:  # com o 9 extra → tenta sem
+            user = get_authorized_by_phone(number[:4] + number[5:])
+    return user
+
+
 def add_authorized(lid: str, phone: str, name: str | None = None) -> None:
     with _client() as c:
         r = c.post("/authorized_users", json={"lid": lid, "phone": phone, "name": name})
