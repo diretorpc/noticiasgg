@@ -494,6 +494,7 @@ async def whatsapp_webhook(request: Request):
     payload = await request.json()
     logger.info(f"webhook payload: {payload}")
 
+    remote_jid = ""  # definido aqui para o handler de erro saber a quem responder
     try:
         data = payload.get("data", {})
         key = data.get("key", {})
@@ -722,4 +723,14 @@ async def whatsapp_webhook(request: Request):
         return {"status": "ok"}
     except Exception as e:
         logger.exception("webhook error")
+        # Sem este aviso o bot simplesmente emudece quando algo falha no meio
+        # (ex.: 500 da API do Claude) e o usuário não sabe se espera ou reenvia.
+        if remote_jid:
+            try:
+                whatsapp.send_message(
+                    remote_jid,
+                    "Tive um problema para gerar sua resposta agora 😕\n\nPode mandar de novo daqui a pouco?",
+                )
+            except Exception:
+                logger.warning("falha ao avisar %s sobre o erro do webhook", remote_jid)
         return {"status": "error", "detail": str(e)}
