@@ -24,7 +24,7 @@ WhatsApp do agente: +55 34 99659-2975
 | Indicadores EUA | FRED API (`FRED_API_KEY`) |
 | Indicadores BR | BCB (Banco Central, sem chave) |
 | Notícias | NewsAPI (`NEWS_API_KEY`) |
-| Mensageria | Evolution API v1.8.2 (WhatsApp, self-hosted na VPS Hostinger) |
+| Mensageria | Evolution API v2.3.7 + PostgreSQL + Redis (WhatsApp, self-hosted na VPS Hostinger) |
 | Banco de dados | Supabase (histórico de mensagens) |
 | Frontend | Next.js, React, Tailwind CSS, TypeScript (planejado) |
 | Automação | n8n (workflows configurados — NÃO MEXER) |
@@ -75,6 +75,7 @@ c:\noticiasgg\
 | `EVOLUTION_API_URL` | `http://46.202.179.33:8080` |
 | `EVOLUTION_API_KEY` | `noticiasgg2026` |
 | `EVOLUTION_INSTANCE` | `noticiasgg` |
+| `EVOLUTION_API_V2` | `true` — payload achatado da v2. Sem ela o backend usa o formato v1.8.2 e a v2 rejeita com 500 |
 | `AUTHORIZED_NUMBER` | Número WhatsApp autorizado (formato Evolution: `553496592975`) |
 | `REPLY_TO_NUMBER` | Fallback de destino quando o `remoteJid` é LID (`5534999945010`) |
 | `SUPABASE_URL` | URL do projeto Supabase (histórico) |
@@ -106,7 +107,26 @@ WhatsApp (usuário)
   → WhatsApp (usuário recebe relatório)
 ```
 
-**Nota sobre LID**: Mensagens recebidas vêm com `remoteJid` no formato `<id>@lid` (Linked Identifier do WhatsApp moderno). Para responder, mapeamos LID → número via `/chat/findContacts` da Evolution API (com fallback `REPLY_TO_NUMBER`).
+### ⚠️ Endereçamento no WhatsApp (LID) — leia antes de mexer em envio
+
+Um contato tem **duas** identidades: o **número** (`<numero>@s.whatsapp.net`) e o
+**LID** (`<id>@lid`, o identificador interno do WhatsApp moderno). Errar isso deixa
+o bot mudo — foi a causa do incidente de 14–16/07/2026:
+
+- **Enviar:** vai **para o LID**. Mensagem endereçada ao número é aceita pela
+  Evolution (retorna `PENDING`) e **nunca entregue**, sem erro. `whatsapp.py::_resolve_target`
+  traduz telefone→LID na porta de saída; todos os `send_message`/`send_audio` passam por lá.
+  A v1.8.2 **rejeita** `@lid` no campo `number` — só a v2 aceita.
+- **Receber:** o formato do `remoteJid` **muda por versão**: v1 manda `<lid>@lid`,
+  v2 manda `<numero>@s.whatsapp.net` (no Brasil, normalmente **sem o 9 extra**).
+  `supabase.py::get_authorized_by_jid` resolve as duas grafias — use sempre ela,
+  nunca `get_authorized(remote_jid)` direto.
+- **O campo `status` da Evolution mente:** `PENDING` **não** significa não-entregue.
+  Só a confirmação do destinatário vale. Para diagnosticar, a coluna `source` da
+  tabela `Message` diz a origem: `android` = celular, `web` = robô.
+
+**Infra:** stack v2 em `/root/evolution-v2/docker-compose.yml` na VPS (evolution-v2 +
+evo2-postgres + evo2-redis), porta 8080. Container `evolution-api` (v1.8.2) parado, guardado para rollback.
 
 ---
 
