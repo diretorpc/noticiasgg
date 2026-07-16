@@ -78,13 +78,17 @@ async def send_report(payload: SendReportPayload):
             logger.warning("send_report: número não autorizado %s — ignorado", number)
             return {"status": "skipped", "reason": "unauthorized"}
 
-        prefs = supabase.get_preferences(number)
+        # Usa o telefone canônico do banco (não o `number` cru do n8n, que pode
+        # vir com/sem o 9 extra) para preferências, envio e histórico — Bug C.
+        phone = user.get("phone") or number
+
+        prefs = supabase.get_preferences(phone)
 
         if prefs and prefs.get("report_time"):
             return {"status": "skipped", "reason": "custom_time"}
 
         user_name = (user.get("name") or "").strip()
-        logger.info("send_report: number=%s user_name=%r", number, user_name)
+        logger.info("send_report: number=%s phone=%s user_name=%r", number, phone, user_name)
 
         if prefs and prefs.get("sections"):
             try:
@@ -99,8 +103,8 @@ async def send_report(payload: SendReportPayload):
         else:
             text = _personalize(n8n_text, user_name)
 
-        whatsapp.send_message(number, text)
-        supabase.save_message(number, "assistant", text)
+        whatsapp.send_message(phone, text)
+        supabase.save_message(phone, "assistant", text)
         return {"status": "ok"}
     except Exception as e:
         logger.exception("send_report error for %s", number)
