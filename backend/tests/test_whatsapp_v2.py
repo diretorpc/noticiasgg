@@ -95,8 +95,8 @@ def test_send_message_traduz_telefone_para_lid(monkeypatch):
     assert captured["json"]["number"] == "139247134720249@lid"  # LID, não o telefone
 
 
-def test_send_message_jid_passa_direto(monkeypatch):
-    """Quem já vem com @ (LID ou JID) não é traduzido de novo."""
+def test_send_message_lid_passa_direto(monkeypatch):
+    """Quem já vem como LID é roteável — não traduz de novo."""
     _base_env(monkeypatch, "true")
     captured = {}
     with patch("backend.services.whatsapp.supabase.get_authorized_by_phone") as mock_lookup, \
@@ -104,6 +104,41 @@ def test_send_message_jid_passa_direto(monkeypatch):
         whatsapp.send_message("139247134720249@lid", "oi")
     assert captured["json"]["number"] == "139247134720249@lid"
     mock_lookup.assert_not_called()
+
+
+def test_send_message_traduz_jid_de_telefone_para_lid(monkeypatch):
+    """O `remoteJid` da v2 vem como `<numero>@s.whatsapp.net`, que a Evolution
+    aceita e nunca entrega. Passá-lo direto emudece o bot — foi o que matou o
+    aviso de erro do webhook em 16/07/2026."""
+    _base_env(monkeypatch, "true")
+    captured = {}
+    with patch("backend.services.whatsapp.supabase.get_authorized_by_jid",
+               return_value={"phone": "5516991016898", "lid": "139247134720249@lid"}), \
+         patch("backend.services.whatsapp.httpx.Client", return_value=_mock_client(captured)):
+        whatsapp.send_message("5516991016898@s.whatsapp.net", "oi")
+    assert captured["json"]["number"] == "139247134720249@lid"
+
+
+def test_send_message_jid_de_telefone_sem_lid_cai_no_numero(monkeypatch):
+    """Sem LID cadastrado, envia para o número puro — a Evolution ainda pode
+    resolver. Repassar o JID cru é o único caminho comprovadamente morto."""
+    _base_env(monkeypatch, "true")
+    captured = {}
+    with patch("backend.services.whatsapp.supabase.get_authorized_by_jid", return_value=None), \
+         patch("backend.services.whatsapp.httpx.Client", return_value=_mock_client(captured)):
+        whatsapp.send_message("5516991016898@s.whatsapp.net", "oi")
+    assert captured["json"]["number"] == "5516991016898"
+
+
+def test_send_message_jid_de_telefone_lookup_falha_nao_quebra(monkeypatch):
+    """Supabase fora do ar não pode explodir o envio."""
+    _base_env(monkeypatch, "true")
+    captured = {}
+    with patch("backend.services.whatsapp.supabase.get_authorized_by_jid",
+               side_effect=Exception("supabase timeout")), \
+         patch("backend.services.whatsapp.httpx.Client", return_value=_mock_client(captured)):
+        whatsapp.send_message("5516991016898@s.whatsapp.net", "oi")
+    assert captured["json"]["number"] == "5516991016898"
 
 
 def test_send_message_sem_lid_cai_no_telefone(monkeypatch):

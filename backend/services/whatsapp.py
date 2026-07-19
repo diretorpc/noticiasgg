@@ -27,21 +27,30 @@ def _is_v2() -> bool:
 
 
 def _resolve_target(number: str) -> str:
-    """Traduz telefone → LID antes de enviar.
+    """Traduz telefone ou JID de telefone → LID antes de enviar.
 
     A Evolution não entrega para o JID de telefone (`@s.whatsapp.net`) nesta
     conta: a mensagem é aceita mas nunca chega. Só o LID (`@lid`) é roteável —
-    verificado em produção 16/07/2026. Quem já vem com `@` passa direto.
-    Se a tradução falhar, devolve o número (não pior que o comportamento antigo).
+    verificado em produção 16/07/2026. Por isso o `@s.whatsapp.net` (formato do
+    `remoteJid` na v2) também precisa ser traduzido: repassá-lo é o único
+    caminho comprovadamente morto.
+    Se a tradução falhar, devolve o número puro (não pior que o comportamento
+    antigo, e a Evolution ainda pode resolvê-lo).
     """
-    if not number or "@" in number:
+    if not number:
         return number
+    if number.endswith("@lid"):
+        return number
+    bare = number.split("@")[0]  # número sem o sufixo do JID; fallback quando não há LID
     try:
-        user = supabase.get_authorized_by_phone(number)
-        return (user or {}).get("lid") or number
+        if "@" in number:
+            user = supabase.get_authorized_by_jid(number)
+        else:
+            user = supabase.get_authorized_by_phone(number)
+        return (user or {}).get("lid") or bare
     except Exception:
         logger.warning("lid lookup falhou para %s — enviando para o número", number)
-        return number
+        return bare
 
 
 def send_message(number: str, text: str) -> dict:
