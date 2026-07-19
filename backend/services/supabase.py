@@ -303,6 +303,22 @@ def mark_news_sent(news_id: str, title: str | None = None) -> None:
         r.raise_for_status()
 
 
+def claim_message(message_id: str) -> bool:
+    """Reserva a etiqueta de uma mensagem do WhatsApp para deduplicação.
+
+    Retorna True se esta chamada reservou a etiqueta (mensagem nova) e False se
+    ela já estava reservada (reenvio da Evolution). A atomicidade vem da PRIMARY
+    KEY de processed_messages: um POST com etiqueta repetida devolve 409 e ninguém
+    sobrescreve. NÃO usa merge-duplicates de propósito — precisamos do conflito.
+    """
+    with _client() as c:
+        r = c.post("/processed_messages", json={"message_id": message_id})
+        if r.status_code == 409:  # violação de PK → etiqueta já reservada
+            return False
+        r.raise_for_status()
+        return True
+
+
 def get_recent_sent_titles(hours: int = 24, limit: int = 20) -> list[str]:
     """Títulos de notícias efetivamente entregues (title preenchido só em broadcast)."""
     cutoff = (

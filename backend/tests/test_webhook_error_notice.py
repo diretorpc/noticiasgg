@@ -25,6 +25,7 @@ _PAYLOAD = {
 
 def _base_patches():
     return [
+        patch("backend.api.main.supabase.claim_message", return_value=True),
         patch("backend.api.main.supabase.get_authorized_by_jid", return_value=_USER),
         patch("backend.api.main.supabase.get_preferences", return_value=None),
         patch("backend.api.main.supabase.get_history", return_value=[]),

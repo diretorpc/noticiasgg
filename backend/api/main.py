@@ -501,6 +501,20 @@ async def whatsapp_webhook(request: Request):
         if key.get("fromMe"):
             return {"status": "ignored", "reason": "fromMe"}
 
+        # A Evolution reenvia a mesma mensagem (mesmo id) a cada ~65s quando o
+        # webhook demora — sem esta trava o agente responde do zero a cada
+        # reenvio. Reserva a etiqueta no início; reenvio bate no conflito e para.
+        msg_id = key.get("id", "")
+        if msg_id:
+            try:
+                is_new_message = supabase.claim_message(msg_id)
+            except Exception:
+                logger.warning("dedup: claim falhou para %s — processando mesmo assim", msg_id)
+                is_new_message = True
+            if not is_new_message:
+                logger.info("dedup: mensagem %s já processada — ignorando reenvio", msg_id)
+                return {"status": "ignored", "reason": "duplicate"}
+
         remote_jid = key.get("remoteJid", "")
         push_name = data.get("pushName", "")
         msg_info = _extract_message(data.get("message", {}))
