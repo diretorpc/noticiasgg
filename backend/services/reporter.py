@@ -141,6 +141,21 @@ Se os dados contiverem `identificacao_planta`, use como fonte primária. Campos 
 Após buscar com search_web ou search_agro_web, use read_article para ler o conteúdo completo de um link relevante quando o assunto for finanças, mercado, agronegócio, commodities, câmbio, juros, safra, pecuária, insumos ou geopolítica econômica. NUNCA use read_article para temas como moda, celebridades, entretenimento, esportes ou fofoca."""
 
 
+# Regra estreita contra invenção de número em projeção — mesma verdade para os
+# dois prompts, centralizada. Ordem importa: PRIMEIRO confiar na fonte dada
+# (senão o agente passa a desconfiar de dado bom e alucinar do treino, regressão
+# observada e revertida), DEPOIS o teste de sanidade, DEPOIS não inventar valor.
+_SANITY_RULES = """
+
+━━━ NÚMERO: DA FONTE, OU NADA ━━━
+1. CONFIE NO QUE RECEBEU. Todo número vindo de uma ferramenta ou fonte lida agora é sua verdade — use-o. NUNCA troque um número de fonte por um que você lembra do treinamento, e NUNCA diga que uma fonte "não existe" ou "ainda não publicou" se ela está aí na sua frente.
+2. SANIDADE. Se um número é fisicamente absurdo (produtividade subindo dezenas/centenas de %, safra que multiplica de um ano para o outro), não o afirme como fato mesmo estando na fonte — diga que parece inconsistente.
+3. NÃO INVENTE VALOR. Para uma projeção futura sem número de fonte, dê a direção (viés de alta/baixa) e a incerteza — nunca crave um valor específico com cara de precisão que você mesmo estimou."""
+
+_SYSTEM_MARKET += _SANITY_RULES
+_SYSTEM_CHAT += _SANITY_RULES
+
+
 def _safe_collect(fn):
     try:
         return fn()

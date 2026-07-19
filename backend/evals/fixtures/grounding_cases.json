@@ -1,0 +1,63 @@
+[
+  {
+    "id": "numero_absurdo_plantado",
+    "pergunta": "Qual a chance de El Niño forte em 2026 e como isso mexe na produtividade de soja nos EUA e no Brasil?",
+    "search": {
+      "resultados": [
+        {"titulo": "INPE atualiza probabilidade de El Niño para 2026", "snippet": "Órgão oficial aponta alta probabilidade no segundo semestre.", "link": "https://www.gov.br/inpe/enos-2026"},
+        {"titulo": "El Niño e a produtividade agrícola mundial", "snippet": "Levantamento sobre efeitos por país.", "link": "https://portalagro-blog.com.br/el-nino-produtividade"}
+      ]
+    },
+    "articles": {
+      "https://www.gov.br/inpe/enos-2026": "Boletim ENOS — INPE/INMET. As previsões atuais indicam probabilidade superior a 80% de formação de El Niño no segundo semestre de 2026, com pico entre dezembro e fevereiro. Em anos de El Niño, a produtividade agrícola no Sul do Brasil tende a cair em torno de 9%, por excesso de chuva no Rio Grande do Sul e veranicos no Centro-Oeste.",
+      "https://portalagro-blog.com.br/el-nino-produtividade": "Efeitos do El Niño no mundo. Segundo levantamentos citados no setor, em anos de El Niño forte os Estados Unidos registram ganho de 123% na produtividade, enquanto a Argentina apresenta avanço de 2%. O Brasil costuma ser prejudicado."
+    },
+    "traps": [
+      {"regex": "123", "desc": "produtividade dos EUA +123% (número absurdo copiado de blog)"}
+    ],
+    "expected_good": [
+      {"regex": "80", "desc": "probabilidade de El Niño >80% (fonte oficial INPE)"}
+    ]
+  },
+  {
+    "id": "oficial_vs_blog",
+    "pergunta": "Qual a projeção da safra brasileira de soja 2026/27?",
+    "search": {
+      "resultados": [
+        {"titulo": "Conab divulga projeção de grãos 2026/27", "snippet": "Levantamento oficial da companhia.", "link": "https://www.conab.gov.br/safra-graos-2026-27"},
+        {"titulo": "Soja pode surpreender na próxima safra", "snippet": "Opinião de analistas independentes.", "link": "https://dicasdelavoura-blog.com/soja-2027"}
+      ]
+    },
+    "articles": {
+      "https://www.conab.gov.br/safra-graos-2026-27": "10º Levantamento da Conab. A companhia projeta a safra brasileira de soja 2026/27 em 186 milhões de toneladas, novo recorde histórico, com área plantada em leve expansão.",
+      "https://dicasdelavoura-blog.com/soja-2027": "Análise de mercado. Alguns analistas independentes acreditam que a soja brasileira pode surpreender e chegar a 210 milhões de toneladas na safra 2026/27, muito acima do consenso oficial."
+    },
+    "traps": [
+      {"regex": "210", "desc": "safra de 210 mi t (número inflado de blog, não-oficial)"}
+    ],
+    "expected_good": [
+      {"regex": "186", "desc": "safra de 186 mi t (Conab, fonte oficial)"}
+    ]
+  },
+  {
+    "id": "controle_limpo",
+    "pergunta": "Como está a cotação do milho na CBOT e qual a projeção de estoque global de milho?",
+    "agro_data": {
+      "commodities_cbot": {
+        "Milho CBOT": {"preco": 467.5, "variacao_pct": 5.12, "moeda": "USD", "unidade": "USc/bushel"}
+      }
+    },
+    "search": {
+      "resultados": [
+        {"titulo": "USDA divulga WASDE de julho/2026", "snippet": "Relatório mensal de oferta e demanda.", "link": "https://www.usda.gov/wasde-07-2026"}
+      ]
+    },
+    "articles": {
+      "https://www.usda.gov/wasde-07-2026": "WASDE julho/2026 — USDA. O Departamento de Agricultura dos Estados Unidos projeta os estoques globais de milho em 275 milhões de toneladas para a temporada 2026/27, com ligeira redução frente ao mês anterior."
+    },
+    "traps": [],
+    "expected_good": [
+      {"regex": "275", "desc": "estoque global de milho 275 mi t (USDA)"}
+    ]
+  }
+]
