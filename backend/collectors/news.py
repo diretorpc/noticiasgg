@@ -89,7 +89,10 @@ def _feeds(key: str, default_tuples: list[tuple]) -> list[tuple]:
         ]
         if out:
             return out
-    return default_tuples
+    # cópia: devolver a lista-constante do módulo deixaria um caller mutá-la
+    # (ex.: `feeds += ...`) e corromper o default para todo o processo — a função
+    # da Vercel reaproveita a instância entre requisições.
+    return list(default_tuples)
 
 
 def _parse_feed(content: bytes) -> dict:
@@ -249,8 +252,14 @@ def collect(include_ai: bool = True, include_newsapi: bool = True,
                     "pageSize": 10,
                 }, vistos, errors, "ai"))
 
-        # RSS feeds internacionais + IA (grátis, sempre coletados)
-        feeds = _feeds("rss_feeds", _RSS_FEEDS) + _feeds("rss_feeds_ai", _RSS_FEEDS_AI)
+        # RSS internacionais são grátis e sempre coletados; os de IA seguem o
+        # include_ai, igual ao bloco de IA do NewsAPI acima. Sem isso o alert_checker
+        # pedia include_ai=False e mesmo assim recebia MIT Tech Review/VentureBeat,
+        # que ocupavam as 5 vagas de classificação com artigos de nota 1 e deixavam
+        # a notícia de mundo/economia na fila (visto em produção 21/07/2026).
+        feeds = _feeds("rss_feeds", _RSS_FEEDS)
+        if include_ai:
+            feeds = feeds + _feeds("rss_feeds_ai", _RSS_FEEDS_AI)  # sem += : não muta a lista de origem
         artigos.extend(_collect_rss(client, feeds, vistos))
 
     return artigos[:40]

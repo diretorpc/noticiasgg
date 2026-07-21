@@ -85,6 +85,45 @@ def test_parse_rss_date_invalid():
     assert _parse_rss_date("not-a-date") is None
 
 
+def _feeds_usados(include_ai: bool) -> list[str]:
+    """Roda collect() e devolve os NOMES dos feeds RSS que ele mandou coletar."""
+    import os
+    from backend.collectors import news as news_mod
+    capturado: list[str] = []
+
+    def fake_collect_rss(client, feeds, vistos):
+        capturado.extend(nome for nome, _ in feeds)
+        return []
+
+    with patch.dict(os.environ, {"NEWS_API_KEY": "k"}), \
+         patch("backend.collectors.news._collect_rss", side_effect=fake_collect_rss), \
+         patch("backend.collectors.news.httpx.Client"):
+        news_mod.collect(include_ai=include_ai, include_newsapi=False)
+    return capturado
+
+
+def test_collect_sem_ai_exclui_feeds_rss_de_ia():
+    """include_ai=False tem que valer para o RSS também, não só para o NewsAPI.
+
+    Regressão do caso real de 21/07/2026: o alert_checker pedia include_ai=False e
+    mesmo assim recebia MIT Technology Review/VentureBeat, que entupiam as 5 vagas
+    de classificação com artigos de nota 1 — a notícia de mundo/economia ficava na
+    fila sem nunca ser olhada.
+    """
+    nomes = _feeds_usados(include_ai=False)
+    nomes_ai = [n for n, _ in _RSS_FEEDS_AI]
+    assert nomes, "os feeds internacionais têm que continuar sendo coletados"
+    for n in nomes_ai:
+        assert n not in nomes, f"feed de IA '{n}' não deveria estar presente"
+
+
+def test_collect_com_ai_mantem_feeds_rss_de_ia():
+    """Guarda: o boletim/chat (include_ai padrão=True) segue recebendo IA."""
+    nomes = _feeds_usados(include_ai=True)
+    for n, _ in _RSS_FEEDS_AI:
+        assert n in nomes, f"feed de IA '{n}' deveria estar presente"
+
+
 def test_collect_rss_parses_items():
     mock_resp = MagicMock()
     mock_resp.status_code = 200
