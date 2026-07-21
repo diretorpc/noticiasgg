@@ -239,6 +239,10 @@ def _check_eia(recipients: list[dict], errors: list[str] | None = None) -> int:
 _NEWS_GLOBAL_COOLDOWN_HOURS = 0.5  # 30 min between any news alerts
 _NEWSAPI_FETCH_COOLDOWN_HOURS = 0.75  # 45 min entre fetches NewsAPI (free tier: 100 req/dia)
 _SOURCE_COOLDOWN_HOURS = 3  # 1 alerta por veículo a cada 3h (anti live blog)
+# Quantas notícias a varredura pode percorrer atrás de candidatas ainda não vistas.
+# O teto que importa para custo é `limit` (classificações via IA); este só limita as
+# consultas de dedup ao banco para a lista não crescer sem freio.
+_NEWS_SCAN_CAP = 20
 
 
 def _source_rule_id(source: str) -> str:
@@ -317,7 +321,14 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
 
     logger.info("news check: %d articles fetched, limit=%d, min_score=%d", len(articles), limit, min_score)
 
-    for article in articles[:limit]:
+    # `limit` conta CLASSIFICAÇÕES, não posições da lista. Cortar `articles[:limit]`
+    # antes do dedup fazia notícia já vista consumir a cota e engolir em silêncio a
+    # notícia nova mais atrás na lista (visto em produção 21/07/2026: "10 articles
+    # fetched" e zero classificadas, o dia inteiro).
+    classified = 0
+    for article in articles[:_NEWS_SCAN_CAP]:
+        if classified >= limit:
+            break
         title = article.get("titulo") or article.get("title", "")
         if not title:
             logger.warning("news check: article has no title, skipping")
@@ -336,6 +347,7 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
         url_id = hashlib.md5(article_url.encode()).hexdigest() if article_url else None
         if not test_mode and (supabase.is_news_sent(news_id) or (url_id and supabase.is_news_sent(url_id))):
             continue
+        classified += 1
         logger.info("news check: classifying '%s'", title[:80])
         try:
             resp = client.messages.create(

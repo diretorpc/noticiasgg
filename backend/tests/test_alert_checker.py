@@ -107,6 +107,62 @@ def test_check_news_dedup_por_url_bloqueia_live_blog():
     mock_anthropic.return_value.messages.create.assert_not_called()
 
 
+def _fake_classifier_resp(score: int):
+    payload = f'{{"score": {score}, "categoria": "GEOPOLÍTICA", "titulo_pt": "t", "resumo": "r"}}'
+    return type("R", (), {"content": [type("C", (), {"text": payload})()]})()
+
+
+def _vistas_e_nova():
+    """5 notícias já enviadas na frente da lista + 1 nova atrás."""
+    import hashlib
+    vistas = [{"titulo": f"velha {i}", "fonte": f"Fonte{i}", "url": f"https://ex.com/{i}"} for i in range(5)]
+    nova = {"titulo": "nova relevante", "fonte": "FonteNova", "url": "https://ex.com/nova"}
+    ja_vistos = set()
+    for a in vistas:
+        ja_vistos.add(hashlib.md5(a["titulo"].encode()).hexdigest())
+        ja_vistos.add(hashlib.md5(a["url"].encode()).hexdigest())
+    return vistas + [nova], ja_vistos
+
+
+def test_check_news_varre_alem_das_ja_vistas():
+    """Regressão do caso real de 21/07/2026: o corte `articles[:limit]` acontecia
+    ANTES do dedup, então 5 notícias já vistas consumiam a cota e a notícia nova
+    da posição 6 nunca era classificada — em silêncio, sem log nenhum."""
+    artigos, ja_vistos = _vistas_e_nova()
+
+    with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
+         patch("backend.collectors.news.collect", return_value=artigos), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", side_effect=lambda i: i in ja_vistos), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.services.alert_checker._mark_sent"), \
+         patch("backend.services.alert_checker.Anthropic") as mock_anthropic:
+        mock_anthropic.return_value.messages.create.return_value = _fake_classifier_resp(1)
+        alert_checker._check_news(_RECIPIENTS, test_mode=False)
+
+    create = mock_anthropic.return_value.messages.create
+    assert create.call_count == 1, "a notícia nova (posição 6) tinha que ser classificada"
+    enviado = create.call_args.kwargs["messages"][0]["content"]
+    assert "nova relevante" in enviado
+
+
+def test_check_news_respeita_teto_de_classificacoes():
+    """Guarda de custo: mesmo com muita notícia nova, classifica no máximo `limit` (5)."""
+    artigos = [{"titulo": f"nova {i}", "fonte": f"F{i}", "url": f"https://ex.com/n{i}"} for i in range(12)]
+
+    with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
+         patch("backend.collectors.news.collect", return_value=artigos), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.services.alert_checker._mark_sent"), \
+         patch("backend.services.alert_checker.Anthropic") as mock_anthropic:
+        mock_anthropic.return_value.messages.create.return_value = _fake_classifier_resp(1)
+        alert_checker._check_news(_RECIPIENTS, test_mode=False)
+
+    assert mock_anthropic.return_value.messages.create.call_count == 5
+
+
 def test_check_news_cooldown_por_fonte():
     """Fonte em cooldown de 3h → artigo pulado antes de classificar."""
     def cooldown(rule_id, hours):
