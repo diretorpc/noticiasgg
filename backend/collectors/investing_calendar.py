@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import time
 
 import httpx
 
@@ -9,6 +10,12 @@ logger = logging.getLogger("noticiasgg.investing")
 
 _SCRAPER_URL = "https://api.scraperapi.com/"
 _PAGE_URL = "https://br.investing.com/economic-calendar/"
+
+# O ScraperAPI pede até 70s para devolver a página; 60s cortava respostas lentas
+# mas válidas. Duas tentativas x 70s + pausa cabem no maxDuration de 300s.
+_TIMEOUT = 70
+_ATTEMPTS = 2
+_RETRY_SLEEP = 2
 
 _NEXT_DATA_RE = re.compile(
     r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.DOTALL)
@@ -18,10 +25,20 @@ def fetch() -> str:
     key = os.environ.get("SCRAPER_API_KEY", "")
     if not key:
         raise ValueError("SCRAPER_API_KEY não configurada")
-    with httpx.Client(timeout=60) as client:
-        r = client.get(_SCRAPER_URL, params={"api_key": key, "url": _PAGE_URL})
-        r.raise_for_status()
-        return r.text
+    for attempt in range(1, _ATTEMPTS + 1):
+        try:
+            with httpx.Client(timeout=_TIMEOUT) as client:
+                r = client.get(_SCRAPER_URL, params={"api_key": key, "url": _PAGE_URL})
+                r.raise_for_status()
+                return r.text
+        except (httpx.TimeoutException, httpx.ConnectError) as e:
+            # Só lentidão/queda de conexão é retentada: erro HTTP (403/500) não
+            # melhora repetindo e ainda gasta crédito do ScraperAPI.
+            if attempt == _ATTEMPTS:
+                raise
+            logger.warning("investing: tentativa %d falhou (%s), repetindo", attempt, e)
+            time.sleep(_RETRY_SLEEP)
+    raise AssertionError("unreachable")
 
 
 def _flag_emoji(country_code: str) -> str:
