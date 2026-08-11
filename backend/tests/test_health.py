@@ -172,3 +172,27 @@ def test_health_endpoint_usa_collect_status():
         r = client.get("/api/health")
     assert r.status_code == 200
     assert r.json()["checks"]["dedup"]["status"] == "ok"
+
+
+def test_collect_status_nao_toca_a_rede_de_noticias():
+    """/api/health é público e sem senha (main.py:59). Se collect_status coletar as
+    fontes, qualquer um dispara 20 buscas na internet no seu servidor a cada chamada
+    — amplificação, e o endereço de saúde passa de instantâneo para ~9s."""
+    with patch("backend.collectors.news.source_health") as espiao, \
+         patch("backend.services.health.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.health.supabase.count_recent_broadcasts", return_value=0), \
+         patch("backend.services.health.supabase.get_polls", return_value=[{"i": 1}]), \
+         patch("backend.services.health.whatsapp.connection_state", return_value="open"):
+        st = health.collect_status()
+    espiao.assert_not_called()
+    assert "news_sources" not in st["checks"]
+
+
+def test_digest_diario_confere_as_fontes():
+    """O boletim é o único lugar que precisa da medição — 1x/dia, não a cada visita."""
+    with patch("backend.collectors.news.source_health",
+               return_value={"total": 20, "vivas": 18, "mortas": ["A", "B"], "erro": None}):
+        st = health.collect_status_completo()
+    assert st["checks"]["news_sources"]["status"] == "warn"
+    assert st["checks"]["news_sources"]["mortas"] == ["A", "B"]
+    assert "18/20" in health.format_digest(st)

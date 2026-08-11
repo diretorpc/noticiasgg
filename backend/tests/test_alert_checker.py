@@ -336,6 +336,25 @@ def test_build_classifier_input_publicado_em_no_mesmo_fuso_de_hoje():
     assert "<publicado_em>2026-08-10 22:30</publicado_em>" in out
 
 
+def test_to_brt_meia_noite_mostra_so_a_data():
+    """Fonte que carimba 00:00 GMT quer dizer 'só sei o dia'. Converter para BRT
+    jogava para 21h do dia ANTERIOR — notícia do dia 18 aparecia como dia 17."""
+    assert alert_checker._to_brt("2026-06-18T00:00:00+00:00") == "2026-06-18"
+
+
+def test_to_brt_hora_real_continua_convertendo():
+    """Guarda de regressão: 00:00 é o único caso especial."""
+    assert alert_checker._to_brt("2026-06-18T00:01:00+00:00") == "2026-06-17 21:01"
+    assert alert_checker._to_brt("2026-06-18T14:23:00+00:00") == "2026-06-18 11:23"
+
+
+def test_to_brt_data_absurda_nao_estoura():
+    """dt.astimezone estourava OverflowError fora do try com data de ano 1.
+    À meia-noite o atalho da data resolve; fora dela, o try tem que segurar."""
+    assert alert_checker._to_brt("0001-01-01T00:00:00+00:00") == "0001-01-01"
+    assert alert_checker._to_brt("0001-01-01T01:00:00+00:00") == "0001-01-01T01:00:00+00:00"
+
+
 def test_build_classifier_input_publicado_em_ilegivel_nao_quebra():
     """Feed com data em formato inesperado: passa cru, truncado, sem estourar."""
     article = {"titulo": "X", "publicado_em": "ontem de manha"}

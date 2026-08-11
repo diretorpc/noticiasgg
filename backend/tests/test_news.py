@@ -263,3 +263,158 @@ def test_collect_rss_multiplos_feeds_deduplicados():
     artigos = _collect_rss(mock_client, feeds, set())
     urls = [a["url"] for a in artigos]
     assert len(urls) == len(set(urls)), "URLs duplicadas encontradas"
+
+
+def test_is_fresh_data_sem_fuso_horario_e_tratada_como_utc():
+    """Data sem fuso derrubava a comparação com TypeError, e o 'except: return True'
+    engolia o erro — notícia de 10 dias entrava como fresca, para sempre e em silêncio."""
+    velha = (datetime.now(timezone.utc) - timedelta(days=10)).replace(tzinfo=None)
+    assert _is_fresh(velha.isoformat()) is False
+
+    recente = (datetime.now(timezone.utc) - timedelta(hours=2)).replace(tzinfo=None)
+    assert _is_fresh(recente.isoformat()) is True
+
+
+def test_is_fresh_com_fuso_continua_igual():
+    """Guarda de regressão: o caminho que já funcionava não pode mudar."""
+    velha = datetime.now(timezone.utc) - timedelta(days=10)
+    recente = datetime.now(timezone.utc) - timedelta(hours=2)
+    assert _is_fresh(velha.isoformat()) is False
+    assert _is_fresh(recente.isoformat()) is True
+
+
+def test_is_fresh_ilegivel_continua_passando():
+    """Comportamento NÃO alterado de propósito: data ilegível ou ausente segue passando.
+    Só o caso 'sem fuso' foi consertado."""
+    assert _is_fresh(None) is True
+    assert _is_fresh("ontem de manha") is True
+
+
+def _artigo(fonte: str, horas_atras: float) -> dict:
+    dt = datetime.now(timezone.utc) - timedelta(hours=horas_atras)
+    return {"titulo": f"{fonte} h{horas_atras}", "fonte": fonte,
+            "url": f"https://{fonte}.com/{horas_atras}", "publicado_em": dt.isoformat(),
+            "resumo": None}
+
+
+def test_ordena_por_data_mais_recente_primeiro():
+    """A ordem da lista de fontes decidia quem era lido: o robô varre só os 20
+    primeiros e classifica 5. Fonte no fim da lista morria de fome, por mais
+    recente que fosse a notícia dela."""
+    from backend.collectors.news import _ordena_por_recencia
+    bruto = [_artigo("velha", 40), _artigo("nova", 0.5), _artigo("media", 10)]
+    out = _ordena_por_recencia(bruto)
+    assert [a["fonte"] for a in out] == ["nova", "media", "velha"]
+
+
+def test_ordena_sem_data_vai_para_o_fim():
+    """Data ausente/ilegível é o dado menos confiável — não pode furar a fila."""
+    from backend.collectors.news import _ordena_por_recencia
+    sem_data = {"titulo": "x", "fonte": "sem_data", "url": "u", "publicado_em": None}
+    ilegivel = {"titulo": "y", "fonte": "ilegivel", "url": "v", "publicado_em": "ontem"}
+    out = _ordena_por_recencia([sem_data, _artigo("com_data", 30), ilegivel])
+    assert out[0]["fonte"] == "com_data"
+    assert {a["fonte"] for a in out[1:]} == {"sem_data", "ilegivel"}
+
+
+def test_ordena_nao_perde_nem_duplica_artigo():
+    from backend.collectors.news import _ordena_por_recencia
+    bruto = [_artigo(f"f{i}", i) for i in range(10)]
+    out = _ordena_por_recencia(bruto)
+    assert len(out) == 10
+    assert {a["url"] for a in out} == {a["url"] for a in bruto}
+
+
+def test_google_news_url_forca_janela_de_48h():
+    """Sem 'when:2d' o Google ordena por relevância e devolve notícia velha: medido
+    em 11/08/2026, 'OPEC oil production' voltou 0 itens frescos sem o parâmetro e 2 com."""
+    from backend.collectors.news import _google_news
+    url = _google_news("OPEC oil production")
+    assert "when%3A2d" in url or "when:2d" in url
+    assert url.startswith("https://news.google.com/rss/search?q=")
+    assert "ceid=" in url and "hl=" in url
+
+
+def test_google_news_url_escapa_a_busca():
+    from backend.collectors.news import _google_news
+    url = _google_news("soja & milho")
+    assert " " not in url
+    assert "%26" in url  # o & virou escape, não separador de parâmetro
+
+
+def test_feeds_padrao_sem_url_duplicada():
+    """Duas entradas com a mesma URL gastariam tempo de rede coletando o mesmo."""
+    from backend.collectors.news import _RSS_FEEDS
+    urls = [u for _, u in _RSS_FEEDS]
+    assert len(urls) == len(set(urls))
+    nomes = [n for n, _ in _RSS_FEEDS]
+    assert len(nomes) == len(set(nomes))
+
+
+def test_fonte_tagarela_nao_engole_a_janela():
+    """Ordenar só por data fazia fonte que publica muito engolir a janela: medido em
+    11/08/2026, 6 fontes de 20 ocupavam as 20 vagas que o alert_checker examina.
+    Guarda a propriedade, não a implementação: nenhuma fonte repete antes de todas
+    terem tido a primeira vaga."""
+    from backend.collectors.news import _ordena_por_recencia
+    tagarela = [_artigo("G1", h) for h in (0.1, 0.2, 0.3, 0.4, 0.5)]
+    quietas = [_artigo("OPEP", 3), _artigo("USDA", 4)]
+    out = _ordena_por_recencia(tagarela + quietas)
+    assert set(a["fonte"] for a in out[:3]) == {"G1", "OPEP", "USDA"}
+
+
+def test_limite_por_fonte_nao_descarta_artigo():
+    """O excedente é rebaixado, não jogado fora — o relatório diário usa a lista toda."""
+    from backend.collectors.news import _ordena_por_recencia
+    bruto = [_artigo("G1", h) for h in (0.1, 0.2, 0.3, 0.4, 0.5)] + [_artigo("OPEP", 3)]
+    out = _ordena_por_recencia(bruto)
+    assert len(out) == 6
+    assert {a["url"] for a in out} == {a["url"] for a in bruto}
+
+
+def test_excedente_mantem_ordem_de_data_entre_si():
+    from backend.collectors.news import _ordena_por_recencia
+    out = _ordena_por_recencia([_artigo("G1", h) for h in (0.5, 0.1, 0.3, 0.2, 0.4)])
+    assert [a["titulo"] for a in out] == [f"G1 h{h}" for h in (0.1, 0.2, 0.3, 0.4, 0.5)]
+
+
+def test_source_health_separa_vivas_de_mortas():
+    """O boletim diário conferia só se a chave EXISTE, nunca se a fonte TRAZ algo.
+    Foi por isso que 5 feeds ficaram meses mortos sem ninguém ver."""
+    from backend.collectors.news import source_health
+    def _fake(client, feeds, vistos):
+        return [_artigo("Viva A", 1), _artigo("Viva A", 2), _artigo("Viva B", 3)]
+    feeds = [("Viva A", "u1"), ("Viva B", "u2"), ("Morta", "u3")]
+    with patch("backend.collectors.news._collect_rss", _fake), \
+         patch("backend.collectors.news._feeds", return_value=feeds):
+        out = source_health()
+    assert out["total"] == 3
+    assert out["vivas"] == 2
+    assert out["mortas"] == ["Morta"]
+
+
+def test_source_health_falha_de_rede_nao_estoura():
+    from backend.collectors.news import source_health
+    with patch("backend.collectors.news._collect_rss", side_effect=RuntimeError("rede caiu")):
+        out = source_health()
+    assert out["erro"]
+    assert out["vivas"] == 0
+
+
+def test_rodizio_da_uma_vaga_a_cada_fonte_antes_de_repetir():
+    """Teto de 2 ainda deixava fonte tagarela comer a janela: medido 11/08/2026,
+    11 fontes de 20 ocupavam as 20 vagas e as 6 buscas do Google ficavam fora."""
+    from backend.collectors.news import _ordena_por_recencia
+    tagarela = [_artigo("G1", h) for h in (0.1, 0.2, 0.3, 0.4)]
+    quietas = [_artigo("OPEP", 5), _artigo("USDA", 9)]
+    out = _ordena_por_recencia(tagarela + quietas)
+    assert [a["fonte"] for a in out[:3]] == ["G1", "OPEP", "USDA"]
+    assert out[3]["fonte"] == "G1"  # a 2ª do G1 só depois de todo mundo ter a 1ª
+
+
+def test_rodizio_ordena_por_data_dentro_de_cada_rodada():
+    from backend.collectors.news import _ordena_por_recencia
+    bruto = [_artigo("A", 5), _artigo("B", 1), _artigo("A", 6), _artigo("B", 2)]
+    out = _ordena_por_recencia(bruto)
+    assert [a["fonte"] for a in out] == ["B", "A", "B", "A"]
+    assert out[0]["titulo"] == "B h1" and out[1]["titulo"] == "A h5"

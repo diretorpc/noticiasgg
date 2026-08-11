@@ -276,11 +276,15 @@ def _to_brt(published_at: str) -> str:
     publicada 'amanhã' para o modelo entre 21h e meia-noite BRT."""
     try:
         dt = datetime.fromisoformat(str(published_at).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        # 00:00 exato é a convenção de RSS para "só sei o dia, não a hora". Converter
+        # de fuso jogaria para 21h do dia anterior — a data em si é o dado confiável.
+        if (dt.hour, dt.minute) == (0, 0):
+            return dt.strftime("%Y-%m-%d")
+        return dt.astimezone(_BRT).strftime("%Y-%m-%d %H:%M")
     except Exception:
         return str(published_at)[:40]
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(_BRT).strftime("%Y-%m-%d %H:%M")
 
 
 def _build_classifier_input(article: dict, market_snapshot: str, recent_titles: list[str]) -> str:

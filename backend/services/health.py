@@ -53,6 +53,28 @@ def collect_status() -> dict:
     return {"status": overall, "checks": checks, "checked_at": datetime.now(timezone.utc).isoformat()}
 
 
+def collect_status_completo() -> dict:
+    """collect_status + a medição das fontes de notícia, que custa ~9s de rede.
+    Separado de propósito: `GET /api/health` é público e sem senha (main.py:59), então
+    deixar a coleta lá dentro deixaria qualquer um disparar 20 buscas no seu servidor.
+    Só o boletim diário chama isto — uma vez por dia, não a cada visita."""
+    status = collect_status()
+    try:
+        from backend.collectors import news
+        h = news.source_health()
+        if h.get("erro"):
+            check = {"status": "warn", "message": h["erro"]}
+        else:
+            check = {"status": "warn" if h["mortas"] else "ok",
+                     "vivas": h["vivas"], "total": h["total"], "mortas": h["mortas"]}
+    except Exception as e:
+        check = {"status": "warn", "message": str(e)[:120]}
+    status["checks"]["news_sources"] = check
+    if check["status"] == "warn" and status["status"] == "ok":
+        status["status"] = "warn"
+    return status
+
+
 _ICON = {"ok": "✅", "warn": "⚠️", "error": "❌"}
 _SEP = "━━━━━━━━━━━━━━"
 
@@ -87,6 +109,16 @@ def _line_polls(v: dict) -> str:
     return f"• {_ICON['error']} Pesquisas: {v.get('message', 'erro')}"
 
 
+def _line_news_sources(v: dict) -> str:
+    if v.get("status") == "ok":
+        return f"• Fontes de notícia: {v.get('vivas', 0)}/{v.get('total', 0)} entregando"
+    mortas = v.get("mortas")
+    if mortas:
+        return (f"• {_ICON['warn']} Fontes de notícia: {v.get('vivas', 0)}/{v.get('total', 0)}"
+                f" — sem item fresco: {', '.join(mortas[:5])}")
+    return f"• {_ICON['warn']} Fontes de notícia: {v.get('message', 'indisponível')}"
+
+
 def format_digest(status: dict) -> str:
     checks = status.get("checks", {})
     problems = [k for k, v in checks.items() if v.get("status") in ("warn", "error")]
@@ -96,8 +128,10 @@ def format_digest(status: dict) -> str:
              _line_dedup(checks.get("dedup", {})),
              _line_broadcasts(checks.get("broadcasts", {})),
              _line_evolution(checks.get("evolution", {})),
-             _line_keys(checks.get("keys", {})),
-             _line_polls(checks.get("polls", {}))]
+             _line_keys(checks.get("keys", {}))]
+    if "news_sources" in checks:  # ausente quando veio do collect_status simples
+        lines.append(_line_news_sources(checks["news_sources"]))
+    lines.append(_line_polls(checks.get("polls", {})))
     return "\n".join(lines)
 
 
@@ -122,7 +156,7 @@ def send_daily_digest() -> dict:
     admin = os.environ.get("REPLY_TO_NUMBER") or os.environ.get("AUTHORIZED_NUMBER", "")
     if not admin:
         return {"status": "error", "reason": "no admin number"}
-    status = collect_status()
+    status = collect_status_completo()
     whatsapp.send_message(admin, format_digest(status))
     try:
         supabase.set_alert_triggered("health_digest_daily")
