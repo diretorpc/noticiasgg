@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import httpx
@@ -310,7 +311,45 @@ def test_build_classifier_input_completo():
 def test_build_classifier_input_minimo():
     article = {"titulo": "OPEC+ cuts output", "resumo": None}
     out = alert_checker._build_classifier_input(article, "", [])
-    assert out == "<titulo>OPEC+ cuts output</titulo>"
+    hoje = datetime.now(timezone(timedelta(hours=-3))).strftime("%Y-%m-%d")
+    assert out == f"<hoje>{hoje}</hoje>\n<titulo>OPEC+ cuts output</titulo>"
+
+
+def test_build_classifier_input_injeta_data_de_hoje():
+    """Sem a data de hoje o classificador chuta o ano de memória (escreveu '2024' em ago/2026)."""
+    hoje = datetime.now(timezone(timedelta(hours=-3))).strftime("%Y-%m-%d")
+    out = alert_checker._build_classifier_input({"titulo": "Hottest July on record"}, "", [])
+    assert f"<hoje>{hoje}</hoje>" in out
+
+
+def test_build_classifier_input_injeta_publicado_em():
+    """publicado_em é coletado pelo news.py e era descartado aqui. Sai convertido para BRT."""
+    article = {"titulo": "Hottest July on record", "publicado_em": "2026-08-10T14:23:00+00:00"}
+    out = alert_checker._build_classifier_input(article, "", [])
+    assert "<publicado_em>2026-08-10 11:23</publicado_em>" in out
+
+
+def test_build_classifier_input_publicado_em_no_mesmo_fuso_de_hoje():
+    """UTC cru fazia o modelo ler 'notícia publicada amanhã' entre 21h e meia-noite BRT."""
+    article = {"titulo": "X", "publicado_em": "2026-08-11T01:30:00Z"}
+    out = alert_checker._build_classifier_input(article, "", [])
+    assert "<publicado_em>2026-08-10 22:30</publicado_em>" in out
+
+
+def test_build_classifier_input_publicado_em_ilegivel_nao_quebra():
+    """Feed com data em formato inesperado: passa cru, truncado, sem estourar."""
+    article = {"titulo": "X", "publicado_em": "ontem de manha"}
+    out = alert_checker._build_classifier_input(article, "", [])
+    assert "<publicado_em>ontem de manha</publicado_em>" in out
+
+
+def test_build_classifier_input_sem_publicado_em_mantem_hoje():
+    """Feed RSS sem data legível: a tag some, mas <hoje> continua ancorando o ano."""
+    hoje = datetime.now(timezone(timedelta(hours=-3))).strftime("%Y-%m-%d")
+    for article in ({"titulo": "X"}, {"titulo": "X", "publicado_em": None}):
+        out = alert_checker._build_classifier_input(article, "", [])
+        assert "<publicado_em>" not in out
+        assert f"<hoje>{hoje}</hoje>" in out
 
 
 def test_classifier_prompt_tem_contrato_v2():
@@ -318,6 +357,9 @@ def test_classifier_prompt_tem_contrato_v2():
     p = alert_checker._NEWS_CLASSIFIER_SYSTEM
     assert "CADEIAS DE TRANSMISSÃO" in p
     assert "<resumo>" in p and "<ja_enviadas>" in p and "<contexto_mercado>" in p
+    # as tags de data também precisam estar declaradas: o "dentro dessas tags" da
+    # defesa anti-injection só cobre o que a frase de apresentação lista.
+    assert "<hoje>" in p and "<publicado_em>" in p
     assert '"ativos"' in p and '"direcao"' in p and '"duplicada"' in p
 
 
