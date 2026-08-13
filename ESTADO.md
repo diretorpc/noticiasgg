@@ -22,6 +22,81 @@ Agente de IA multi-domínio, backend em Python/FastAPI:
 
 Fonte viva do que existe hoje: `README.md` e `CLAUDE.md` na raiz do projeto.
 
+## Estado em 13/08/2026 — suíte de testes estabilizada e portão do CI ampliado
+
+O pedido era consertar falhas intermitentes da suíte, atribuídas a bloqueio de cota
+(rate limit) das APIs de fornecedor. **A instabilidade não reproduziu:** 8 rodadas
+completas no dia, todas verdes. O bloqueio do CoinGecko é episódico, não permanente —
+a evidência da manhã é real, mas não se reproduz sob demanda.
+
+O que a medição achou de fato:
+
+1. **O portão do CI mentia.** O `ci.yml` roda `pytest backend -m unit`, e o marcador
+   `unit` promete "sem rede". Um teste marcado assim saía para a internet. Pior: o
+   furo **pulava de teste em teste** conforme a ordem, porque a configuração fica
+   guardada em memória e só o primeiro da fila paga a conexão.
+2. **O portão cobria pouco.** 265 dos 334 testes ficavam fora dele — inclusive os 47
+   de `test_alert_checker.py`, o coração do pipeline de alertas.
+3. **Três testes do `alert_checker` batiam no Supabase de PRODUÇÃO.** Esqueceram de
+   simular `get_recent_sent_titles`; o resultado dependia dos dados do dia.
+4. **Dois bugs de dado no relatório** (achados de tabela, não pedidos):
+   `crypto.py` transformava variação ausente em `0,00%` — "não sei" publicado no
+   WhatsApp como "não mudou" —, e os testes de cripto conferiam se a CHAVE existia,
+   nunca se o VALOR era número, então preço nulo passava.
+
+Consertos: variação ausente vira `None` e o prompt `_CAMBIO_CRIPTO` aprendeu a tratar
+nulo (sem isso, o conserto trocaria "0%" mentiroso por lixo); conferência de cripto
+olha o valor; `coleta_unica()` no `conftest.py` faz UMA chamada real por arquivo em vez
+de uma por teste (a chamada real continua — some só a repetição, então a detecção de
+contrato quebrado fica intacta); e uma trava faz o teste `unit` **falhar** se abrir
+conexão, para o marcador nunca mais mentir calado.
+
+⚠️ **`test_admin_sources.py` passava só em máquina com `.env`** — dependia de
+`NEWS_API_KEY` existir no ambiente, não do código. Havia mais um caso assim, e pode
+haver outros: teste que lê o ambiente em vez do código passa em casa e reprova no CI.
+
+🔴 **PENDENTE — `test_preferences.py` GRAVA no Supabase de produção.** Ele cria um
+usuário falso (`add_authorized("test_lid_0000000000", ...)`) com horário 08:00 e limpa
+no `teardown_function`. Se a suíte for interrompida entre a gravação e a limpeza
+(Ctrl+C, tempo esgotado, falha antes do teardown), o usuário falso **fica** na tabela
+de autorizados, e a rotina horária passa a tentar mandar relatório para um número que
+não existe, todo dia, calado. `test_health.py` também bate no banco real (só lê).
+Ficou fora do recorte desta sessão — é o próximo candidato ao mesmo tratamento dado ao
+`test_alert_checker.py`.
+
+⚠️ **A trava de rede não é garantia total.** Ela pega conexão síncrona e assíncrona
+(inclusive o caminho do Windows, que não passa pelo mesmo ponto do Linux). NÃO pega:
+exceção engolida por `asyncio.gather(return_exceptions=True)`, rede aberta dentro de
+thread (a conexão é barrada, mas o teste segue verde), conexão já aberta antes do teste,
+e consulta de nome (DNS). Os quatro casos estão medidos e escritos no cabeçalho de
+`backend/tests/_trava_rede.py`, com os pontos de `polls_br.py` que os exercem. Todos
+latentes em 13/08 — zero ocorrência no portão do CI.
+
+⚠️ **Armadilha do `conftest.py`: ele é carregado DUAS vezes** (como `conftest` e como
+`backend.tests.conftest`, objetos distintos), porque existe `backend/tests/__init__.py`
+sem `backend/__init__.py`. Enquanto o arquivo não guardar estado, é inofensivo. Guardou
+— contador, cache, classe de exceção — e metade do sistema enxerga uma cópia, metade a
+outra. Foi exatamente esse o defeito que fez a primeira versão da trava de rede não
+funcionar: duas classes de erro diferentes. Por isso a trava mora em
+`backend/tests/_trava_rede.py`, importada pelo caminho absoluto, e não no conftest.
+
+⚠️ **Este worktree não tem `.env`, mas alcança a internet mesmo assim:** o
+`load_dotenv()` sobe as pastas e acha o `.env` do repositório principal. Rodar teste
+"isolado" aqui NÃO é o mesmo que rodar no CI.
+
+Medir (não cravar número aqui):
+```
+python -m pytest backend/tests/ -q -p backend.tools.medir_rede_testes
+```
+Confere quantas conexões externas a suíte abre e QUEM abre. Rodar um arquivo sozinho é
+o que revela a verdade daquele arquivo — na suíte inteira a conexão é atribuída a quem
+chegou primeiro, não a quem depende dela.
+
+Conferir o tamanho do portão do CI e se ele passa sem credencial nenhuma:
+```
+python -m pytest backend -m unit -q
+```
+
 ## Estado em 13/08/2026 — volume de alertas freado
 
 O boletim de saúde de 13/08 acusou o efeito colateral previsto do dia 11: **64 alertas

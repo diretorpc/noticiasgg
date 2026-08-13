@@ -3,8 +3,15 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import httpx
+import pytest
 
 from backend.services import alert_checker
+
+# Coração do pipeline de alertas: 47 testes que rodavam FORA do portão do CI.
+# Três deles chamavam o Supabase de produção por esquecerem de simular
+# get_recent_sent_titles — o resultado dependia dos dados do dia. Corrigido, o
+# arquivo é determinístico (medido: zero conexões) e entra no portão.
+pytestmark = pytest.mark.unit
 
 _ADMIN = "5534999945010"
 _RECIPIENTS = [{"phone": "5534999000001", "name": "A"}]
@@ -101,6 +108,7 @@ def test_check_news_dedup_por_url_bloqueia_live_blog():
     with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
          patch("backend.collectors.news.collect", return_value=[_LIVE_BLOG_V2]), \
          patch("backend.services.alert_checker.supabase.is_news_sent", side_effect=is_sent), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
          patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
          patch("backend.services.alert_checker.Anthropic") as mock_anthropic:
         total = alert_checker._check_news(_RECIPIENTS, test_mode=False)
@@ -174,6 +182,7 @@ def test_check_news_cooldown_por_fonte():
     with patch("backend.services.alert_checker._cooldown_ok", side_effect=cooldown), \
          patch("backend.collectors.news.collect", return_value=[_LIVE_BLOG_V1]), \
          patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
          patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
          patch("backend.services.alert_checker.Anthropic") as mock_anthropic:
         total = alert_checker._check_news(_RECIPIENTS, test_mode=False)
@@ -188,6 +197,7 @@ def test_check_news_envio_marca_cooldown_da_fonte():
     with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
          patch("backend.collectors.news.collect", return_value=[_LIVE_BLOG_V1]), \
          patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
          patch("backend.services.alert_checker.supabase.mark_news_sent"), \
          patch("backend.services.alert_checker.supabase.set_alert_triggered") as mock_set, \
          patch("backend.services.alert_checker.whatsapp.send_message"), \

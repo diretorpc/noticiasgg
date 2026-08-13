@@ -9,6 +9,12 @@ from fastapi.testclient import TestClient
 
 from backend.api.main import app
 from backend.services import auth
+import pytest
+
+# Arquivo sem nenhuma chamada de rede (medido rodando o arquivo isolado).
+# O marcador vale para todos os testes abaixo e coloca este arquivo no
+# portao do CI, que roda `pytest backend -m unit`.
+pytestmark = pytest.mark.unit
 
 client = TestClient(app)
 _PRIV = ec.generate_private_key(ec.SECP256R1())
@@ -42,7 +48,10 @@ def test_newsapi_sources_requires_auth():
     assert resp.status_code == 401
 
 
-def test_newsapi_sources_returns_simplified_list():
+def test_newsapi_sources_returns_simplified_list(monkeypatch):
+    # A rota devolve lista vazia quando NEWS_API_KEY está ausente. Sem fixar a
+    # chave aqui, o teste só passava em máquina com .env — no CI reprovaria.
+    monkeypatch.setenv("NEWS_API_KEY", "chave-de-teste")
     fake = SimpleNamespace(
         status_code=200,
         json=lambda: _NEWSAPI_PAYLOAD,

@@ -36,7 +36,7 @@ _COMMODITIES = """Você é um agente especialista em agronegócio e commodities 
 🐷 Suíno Vivo PR: R$ X,XX/kg 🔴 -X,XX%
 🍚 Arroz Tipo 1 RS: R$ XX,XX/sc 50kg 🔴 -X,XX%"""
 
-_CAMBIO_CRIPTO = """Você é um agente especialista em finanças globais, mercado brasileiro, agronegócio e jornalismo econômico. Gere APENAS câmbio e cripto no formato exato abaixo, sem texto adicional, sem títulos com ##, sem tabelas markdown, sem traços separadores. Use texto simples com emojis. Use 🟢 se variação positiva, 🔴 se variação negativa e 🟡 se variação zero ou estável. Nunca mostre cálculos. Gere APENAS a seção de CÂMBIO e CRIPTOMOEDAS. Formato obrigatório:
+_CAMBIO_CRIPTO = """Você é um agente especialista em finanças globais, mercado brasileiro, agronegócio e jornalismo econômico. Gere APENAS câmbio e cripto no formato exato abaixo, sem texto adicional, sem títulos com ##, sem tabelas markdown, sem traços separadores. Use texto simples com emojis. Use 🟢 se variação positiva, 🔴 se variação negativa e 🟡 se variação zero, estável ou null. Se a variação for null, exiba 🟡 e omita o percentual — NUNCA escreva 0% nesse caso, porque null significa "dado não recebido", não "não mudou". Nunca mostre cálculos. Gere APENAS a seção de CÂMBIO e CRIPTOMOEDAS. Formato obrigatório:
 
 💵 *CÂMBIO*
 Dólar USD/BRL: R$ X,XX 🟢 +X,XX%

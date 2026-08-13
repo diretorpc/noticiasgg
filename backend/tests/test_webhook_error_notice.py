@@ -5,9 +5,15 @@ engoliu o erro e o bot simplesmente emudeceu para o usuário.
 """
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.api.main import app
+
+# Arquivo sem nenhuma chamada de rede (medido rodando o arquivo isolado).
+# O marcador vale para todos os testes abaixo e coloca este arquivo no
+# portão do CI, que roda `pytest backend -m unit`.
+pytestmark = pytest.mark.unit
 
 client = TestClient(app)
 

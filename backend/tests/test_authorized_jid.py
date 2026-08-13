@@ -5,7 +5,14 @@ normalmente sem o 9 extra). A lista de autorizados é indexada por lid.
 """
 from unittest.mock import patch
 
+import pytest
+
 from backend.services import supabase
+
+# Arquivo sem nenhuma chamada de rede (medido rodando o arquivo isolado).
+# O marcador vale para todos os testes abaixo e coloca este arquivo no
+# portão do CI, que roda `pytest backend -m unit`.
+pytestmark = pytest.mark.unit
 
 _USER = {"lid": "139247134720249@lid", "phone": "5534999945010", "name": "Matheus (admin)"}
 

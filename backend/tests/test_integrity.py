@@ -1,6 +1,11 @@
 import pytest
 from backend.services import integrity
 
+# Arquivo sem nenhuma chamada de rede (medido rodando o arquivo isolado).
+# O marcador vale para todos os testes abaixo e coloca este arquivo no
+# portao do CI, que roda `pytest backend -m unit`.
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.unit
 def test_build_fact_corpus_includes_market_and_truncates():
