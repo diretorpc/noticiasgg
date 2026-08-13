@@ -238,7 +238,19 @@ def _check_eia(recipients: list[dict], errors: list[str] | None = None) -> int:
     return sent
 
 
-_NEWS_GLOBAL_COOLDOWN_HOURS = 0.5  # 30 min between any news alerts
+# Os dois parafusos do volume. Com 20 fontes vivas (antes era 1 sobrevivente), o
+# volume saltou de ~5,4 para 64 alertas/dia — medido em 12/08/2026 contra a média de
+# 06-10/08. O conteúdo não é ruim; é vazão demais.
+#
+# Por que 5, e não 4 ou 6: reclassificando 126 notícias reais de 11-13/08, a nota sai
+# quase BIMODAL — o classificador decide "isto é 4" ou "isto é 7", e quase nada no
+# meio (1 caso de nota 5 em 126). O corte no 5 cai nesse vazio, então é estável: nota
+# que oscila um ponto entre duas leituras não muda o resultado. Pelo mesmo motivo,
+# subir para 6 ou 7 NÃO compraria silêncio — só perderia qualidade de graça.
+# Medir antes de mexer de novo — número em comentário apodrece:
+#   python -m backend.tools.medir_volume_alertas
+_NEWS_MIN_SCORE = 5
+_NEWS_GLOBAL_COOLDOWN_HOURS = 1.0  # 1h between any news alerts
 _NEWSAPI_FETCH_COOLDOWN_HOURS = 0.75  # 45 min entre fetches NewsAPI (free tier: 100 req/dia)
 _SOURCE_COOLDOWN_HOURS = 3  # 1 alerta por veículo a cada 3h (anti live blog)
 # Quantas notícias a varredura pode percorrer atrás de candidatas ainda não vistas.
@@ -307,6 +319,28 @@ def _build_classifier_input(article: dict, market_snapshot: str, recent_titles: 
     return "\n".join(parts)
 
 
+def _format_news_alert(result: dict, source: str, titulo_pt: str,
+                       score: int, test_mode: bool) -> str:
+    categoria = result.get("categoria", "")
+    header = (f"📰 *Notícia Relevante — {categoria}*"
+              if categoria and categoria != "OUTRO" else "📰 *Notícia Relevante*")
+    msg = f"{header}\n\n*{titulo_pt}*"
+    if source:
+        msg += f"\n_{source}_"
+    if result.get("resumo"):
+        msg += f"\n\n{result['resumo']}"
+    ativos = [a for a in (result.get("ativos") or []) if isinstance(a, str)][:4]
+    if ativos:
+        rotulo = {
+            "alta": "📈 Impacto provável: alta",
+            "baixa": "📉 Impacto provável: baixa",
+        }.get(result.get("direcao"), "⚖️ Impacto incerto")
+        msg += f"\n\n{rotulo} — {', '.join(ativos)}"
+    if test_mode:
+        msg += f"\n\n_[TESTE — score: {score}/10]_"
+    return msg
+
+
 def _check_news(recipients: list[dict], test_mode: bool = False,
                 errors: list[str] | None = None, market_data: dict | None = None) -> int:
     from backend.collectors import news as news_collector
@@ -339,9 +373,8 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
 
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     total = 0
-    min_score = 1 if test_mode else 3
+    min_score = 1 if test_mode else _NEWS_MIN_SCORE
     limit = 1 if test_mode else 5
-    sent_sources: set[str] = set()
 
     logger.info("news check: %d articles fetched, limit=%d, min_score=%d", len(articles), limit, min_score)
 
@@ -350,6 +383,7 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
     # notícia nova mais atrás na lista (visto em produção 21/07/2026: "10 articles
     # fetched" e zero classificadas, o dia inteiro).
     classified = 0
+    candidatas: list[dict] = []
     for article in articles[:_NEWS_SCAN_CAP]:
         if classified >= limit:
             break
@@ -358,9 +392,6 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
             logger.warning("news check: article has no title, skipping")
             continue
         source = article.get("fonte") or article.get("source", "")
-        if not test_mode and source and source in sent_sources:
-            logger.info("news check: source '%s' already sent this run, skipping", source)
-            continue
         if not test_mode and source and not _cooldown_ok(_source_rule_id(source), _SOURCE_COOLDOWN_HOURS):
             logger.info("news check: source '%s' em cooldown de 3h, skipping", source)
             continue
@@ -409,38 +440,46 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
                 _mark_sent(news_id, url_id)
             continue
 
-        titulo_pt = result.get("titulo_pt") or title
-        resumo = result.get("resumo", "")
-        categoria = result.get("categoria", "")
-        header = f"📰 *Notícia Relevante — {categoria}*" if categoria and categoria != "OUTRO" else "📰 *Notícia Relevante*"
-        msg = f"{header}\n\n*{titulo_pt}*"
-        if source:
-            msg += f"\n_{source}_"
-        if resumo:
-            msg += f"\n\n{resumo}"
-        ativos = [a for a in (result.get("ativos") or []) if isinstance(a, str)][:4]
-        if ativos:
-            rotulo = {
-                "alta": "📈 Impacto provável: alta",
-                "baixa": "📉 Impacto provável: baixa",
-            }.get(result.get("direcao"), "⚖️ Impacto incerto")
-            msg += f"\n\n{rotulo} — {', '.join(ativos)}"
-        if test_mode:
-            msg += f"\n\n_[TESTE — score: {score}/10]_"
+        candidatas.append({"score": score, "result": result, "source": source,
+                           "title": title, "news_id": news_id, "url_id": url_id})
 
-        logger.info("news check: broadcasting to %d recipients", len(recipients))
-        sent = _broadcast(msg, recipients, errors)
-        logger.info("news check: broadcast done, sent=%d", sent)
+    if not candidatas:
+        return 0
+
+    # Uma mensagem por rodada, a de MAIOR nota. A trava global é conferida uma única
+    # vez na entrada da função, então o laço antigo despejava até 5 de uma vez — em
+    # 12/08/2026 saíram 64 alertas, e em 7 dias houve 20 rajadas com 3-4 grudadas.
+    # Antes ia a PRIMEIRA acima do corte na ordem da lista, sem nunca comparar notas.
+    #
+    # Empate é o caso COMUM, não a exceção (em 126 notícias reais, 49 tiraram 7):
+    # `max` devolve o primeiro e a lista chega ordenada por recência, então no empate
+    # ganha a mais recente. É critério defensável, mas é IMPLÍCITO — se alguém mexer
+    # em `news._ordena_por_recencia`, o desempate muda junto. Há teste prendendo isso.
+    #
+    # As perdedoras não são marcadas: `is_news_sent` não tem prazo, então marcar aqui
+    # mataria para sempre notícia boa que só perdeu para outra melhor. Na prática elas
+    # raramente são relidas (~4/dia) — as novidades ocupam as vagas antes. O ganho é
+    # não perder sinal, não é "elas competem de novo".
+    melhor = max(candidatas, key=lambda c: c["score"])
+    score, result, source = melhor["score"], melhor["result"], melhor["source"]
+    titulo_pt = result.get("titulo_pt") or melhor["title"]
+    msg = _format_news_alert(result, source, titulo_pt, score, test_mode)
+
+    logger.info("news check: %d candidatas, enviando a de score=%d ('%s')",
+                len(candidatas), score, titulo_pt[:60])
+    sent = _broadcast(msg, recipients, errors)
+    logger.info("news check: broadcast done, sent=%d", sent)
+    if sent > 0:
+        total += sent
         if not test_mode:
-            _mark_sent(news_id, url_id, title=titulo_pt)
-        if sent > 0:
-            total += sent
-            if not test_mode:
-                supabase.set_alert_triggered("news_alert_global")
-                if source:
-                    sent_sources.add(source)
-                    supabase.set_alert_triggered(_source_rule_id(source))
-            logger.info("news alert sent: '%s' (score=%d)", title[:60], score)
+            # marcar só depois de entregue: com a Evolution fora do ar, marcar aqui
+            # queimaria a melhor notícia de cada rodada sem ninguém ver, e ainda faria
+            # as próximas sobre o mesmo fato virarem "duplicada" de algo nunca lido.
+            _mark_sent(melhor["news_id"], melhor["url_id"], title=titulo_pt)
+            supabase.set_alert_triggered("news_alert_global")
+            if source:
+                supabase.set_alert_triggered(_source_rule_id(source))
+        logger.info("news alert sent: '%s' (score=%d)", melhor["title"][:60], score)
 
     return total
 

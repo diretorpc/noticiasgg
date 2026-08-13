@@ -499,3 +499,127 @@ def test_broadcast_com_sucesso_nao_reporta_erro():
         sent = alert_checker._broadcast("msg", _RECIPIENTS, errors)
     assert sent == 1
     assert errors == []
+
+
+def test_corte_de_nota_e_trava_calibrados_para_o_volume():
+    """Com 20 fontes vivas (antes era 1), o volume saltou de ~5,4 para 64 alertas/dia
+    — medido em 12/08/2026, contra a média de 06-10/08. Amostra de 20 classificações
+    de 126 notícias reais mostrou nota quase BIMODAL — o classificador decide "isto é
+    4" ou "isto é 7", quase nada no meio (1 caso de nota 5 em 126). O corte no 5 cai
+    nesse vazio e por isso é estável. Estes dois números são o freio; medir antes:
+      python -m backend.tools.medir_volume_alertas"""
+    assert alert_checker._NEWS_MIN_SCORE == 5
+    assert alert_checker._NEWS_GLOBAL_COOLDOWN_HOURS == 1.0
+
+
+def test_nota_abaixo_do_corte_nao_envia():
+    resp = '{"score": 4, "categoria": "BRASIL", "titulo_pt": "t", "resumo": "r", "ativos": ["soja"], "direcao": "alta", "duplicada": false}'
+    with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.services.alert_checker._mark_sent"), \
+         patch("backend.collectors.news.collect", return_value=[_ARTIGO]), \
+         patch("backend.services.alert_checker.Anthropic") as mock_cli, \
+         patch("backend.services.alert_checker._broadcast", return_value=1) as mock_bc:
+        mock_cli.return_value.messages.create.return_value = _fake_resp(resp)
+        enviados = alert_checker._check_news(_RECIPIENTS)
+    assert enviados == 0
+    mock_bc.assert_not_called()
+
+
+def _resp_nota(score: int, titulo_pt: str):
+    p = (f'{{"score": {score}, "categoria": "MACRO", "titulo_pt": "{titulo_pt}", '
+         f'"resumo": "r", "ativos": ["soja"], "direcao": "alta", "duplicada": false}}')
+    return type("R", (), {"content": [type("C", (), {"text": p})()]})()
+
+
+_TRES_CANDIDATAS = [
+    {"titulo": "media", "fonte": "F1", "url": "https://e.com/1"},
+    {"titulo": "a mais forte", "fonte": "F2", "url": "https://e.com/2"},
+    {"titulo": "fraca", "fonte": "F3", "url": "https://e.com/3"},
+]
+
+
+def _rodar_com_notas(notas: list[int]):
+    """Roda _check_news com uma nota por artigo, na ordem. Devolve (enviados, whatsapp, mark_sent)."""
+    from unittest.mock import MagicMock
+    respostas = [_resp_nota(n, f"pt {n}") for n in notas]
+    with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.services.alert_checker._mark_sent") as mock_mark, \
+         patch("backend.collectors.news.collect", return_value=list(_TRES_CANDIDATAS)), \
+         patch("backend.services.alert_checker.Anthropic") as mock_cli, \
+         patch("backend.services.alert_checker.whatsapp") as mock_wa:
+        mock_cli.return_value.messages.create.side_effect = respostas
+        mock_wa.send_message.return_value = True
+        enviados = alert_checker._check_news([{"phone": "5534999000001", "name": "A"}])
+    return enviados, mock_wa, mock_mark
+
+
+def test_manda_apenas_a_de_maior_nota_da_rodada():
+    """A trava global é conferida uma vez por rodada, não por mensagem, então o laço
+    despejava até 5 de uma vez (medido 13/08/2026: 64 alertas/dia em rajadas).
+    Agora classifica as candidatas, compara e manda só a mais forte."""
+    enviados, wa, _ = _rodar_com_notas([6, 8, 5])
+    assert wa.send_message.call_count == 1, "só UMA mensagem por rodada"
+    assert "pt 8" in wa.send_message.call_args[0][1], "tem que ser a de maior nota"
+    assert enviados == 1
+
+
+def test_candidatas_perdedoras_nao_sao_queimadas():
+    """Marcar a perdedora como enviada a mataria para sempre (is_news_sent não tem
+    prazo). Ela tem que poder competir na próxima rodada."""
+    _, _, mark = _rodar_com_notas([6, 8, 5])
+    marcados = [c.args[0] for c in mark.call_args_list]
+    import hashlib
+    vencedora = hashlib.md5("a mais forte".encode()).hexdigest()
+    perdedora = hashlib.md5("media".encode()).hexdigest()
+    assert vencedora in marcados
+    assert perdedora not in marcados, "a perdedora de nota 6 não pode morrer"
+
+
+def test_abaixo_do_corte_continua_sendo_queimada():
+    """Comportamento antigo preservado: nota baixa é marcada para não voltar."""
+    import hashlib
+    _, wa, mark = _rodar_com_notas([2, 7, 1])
+    marcados = [c.args[0] for c in mark.call_args_list]
+    assert hashlib.md5("media".encode()).hexdigest() in marcados
+    assert hashlib.md5("fraca".encode()).hexdigest() in marcados
+    assert wa.send_message.call_count == 1
+
+
+def test_nenhuma_candidata_nao_envia_nada():
+    enviados, wa, _ = _rodar_com_notas([2, 1, 2])
+    assert enviados == 0
+    wa.send_message.assert_not_called()
+
+
+def test_empate_de_nota_ganha_a_mais_recente():
+    """35-45% das rodadas empatam no topo (medido em 126 notícias reais: 49 tiraram 7).
+    O desempate decide quase metade dos envios, então tem que estar preso por teste:
+    a lista chega ordenada por recência e o max() devolve o primeiro."""
+    _, wa, _ = _rodar_com_notas([7, 7, 5])
+    assert "pt 7" in wa.send_message.call_args[0][1]
+    assert wa.send_message.call_count == 1
+
+
+def test_nao_queima_a_noticia_quando_a_entrega_falha():
+    """Evolution fora do ar: _broadcast devolve 0. Marcar como enviada mataria a
+    notícia para sempre (is_news_sent não tem prazo) e ainda entraria no
+    get_recent_sent_titles, fazendo as próximas sobre o mesmo fato virarem
+    'duplicada' de algo que o dono nunca viu."""
+    with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.services.alert_checker._mark_sent") as mock_mark, \
+         patch("backend.collectors.news.collect", return_value=[dict(_TRES_CANDIDATAS[0])]), \
+         patch("backend.services.alert_checker.Anthropic") as mock_cli, \
+         patch("backend.services.alert_checker._broadcast", return_value=0):
+        mock_cli.return_value.messages.create.return_value = _resp_nota(8, "forte")
+        enviados = alert_checker._check_news(_RECIPIENTS)
+    assert enviados == 0
+    mock_mark.assert_not_called(), "sem entrega, a notícia continua disponível"
