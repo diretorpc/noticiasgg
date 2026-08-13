@@ -22,6 +22,32 @@ Agente de IA multi-domínio, backend em Python/FastAPI:
 
 Fonte viva do que existe hoje: `README.md` e `CLAUDE.md` na raiz do projeto.
 
+## Estado em 13/08/2026 — volume de alertas freado
+
+O boletim de saúde de 13/08 acusou o efeito colateral previsto do dia 11: **64 alertas
+em 12/08**, contra média de ~5,4/dia antes das 20 fontes entrarem. O conteúdo estava
+bom (WASDE, Conab, Ormuz, OPEP, CPI, Moratória da Soja — 3 discutíveis em 51 lidos);
+o problema era vazão.
+
+Causa que ninguém tinha percebido: **a trava global é conferida uma vez por RODADA,
+não por mensagem**. O laço então despejava até 5 de uma vez — "30 min entre alertas"
+nunca significou um alerta a cada meia hora. Em 7 dias, 20 rajadas com 3-4 grudadas.
+
+Consertos (`9c62ae0`): uma mensagem por rodada, a de maior nota; corte de nota 3→5;
+trava 0,5→1,0 h. E um bug anterior que apareceu junto — a vencedora era marcada como
+enviada mesmo com entrega falhando, o que com a Evolution fora do ar queimaria a melhor
+notícia de cada rodada sem ninguém ver.
+
+**Passou a existir teto duro de 24 alertas/dia** — o `_check_news` envia uma vez e tem
+um só chamador. Antes não havia teto nenhum.
+
+Medir (não cravar número aqui):
+```
+python -m backend.tools.medir_volume_alertas --dias 3 --sem-classificar
+```
+Acima de 25/dia é impossível pelo desenho — se aparecer, há caminho de envio não
+mapeado, reverter. Abaixo de 8/dia por dois dias, a trava está apertada: voltar a 0,75.
+
 ## Estado em 11/08/2026 — pipeline de notícias reconstruído
 
 Dúvida de 04/08 resolvida: o merge de 22/07 **entrou** (`57cfa96`, na master).
@@ -73,9 +99,13 @@ python -c "from backend.collectors import news; print(news.source_health())"
 
 ## Aberto
 
-- [ ] **Contar os alertas/dia a partir de 14/08.** Com 20 fontes vivas em vez de 1, o
-      volume deve subir; a média anterior era ~5,6/dia e não há teto diário no código.
-      Acima de ~15/dia, subir `_NEWS_GLOBAL_COOLDOWN_HOURS` (`alert_checker.py`) de 0,5.
+- [ ] **Conferir o volume em 16/08** com o comando acima (esperado ~18/dia). É a
+      primeira medição depois do freio de `9c62ae0`.
+- [ ] Testes que batem em API externa (`test_crypto.py`, `test_indicators_br.py`) falham
+      de forma intermitente quando a suíte inteira roda — bloqueio por excesso de
+      requisições. O sintoma esconde o problema real: `collectors/crypto.py` não tem
+      repetição nem tratamento de 429, então em produção ele simplesmente falha quando
+      o CoinGecko cortar. Não resolver pondo simulação no teste — esconderia a falha.
 - [ ] Nome real do veículo nas buscas do Google — hoje chega `GN OPEP` ao usuário.
 - [ ] Resumo das buscas do Google vem como HTML do agregador: o classificador julga sem
       resumo e ainda paga o token. Limpar ou descartar.
