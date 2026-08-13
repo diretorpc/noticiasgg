@@ -292,9 +292,14 @@ def _to_brt(published_at: str) -> str:
             dt = dt.replace(tzinfo=timezone.utc)
         # 00:00 exato é a convenção de RSS para "só sei o dia, não a hora". Converter
         # de fuso jogaria para 21h do dia anterior — a data em si é o dado confiável.
+        # date().isoformat() em vez de strftime("%Y-..."): o %Y do Linux corta os
+        # zeros do ano ("1-01-01") e o do Windows mantém ("0001-01-01"). Idêntico
+        # para data normal; só muda em ano < 1000, onde antes o formato dependia
+        # de em qual máquina o código rodava.
         if (dt.hour, dt.minute) == (0, 0):
-            return dt.strftime("%Y-%m-%d")
-        return dt.astimezone(_BRT).strftime("%Y-%m-%d %H:%M")
+            return dt.date().isoformat()
+        brt = dt.astimezone(_BRT)
+        return f"{brt.date().isoformat()} {brt:%H:%M}"
     except Exception:
         return str(published_at)[:40]
 

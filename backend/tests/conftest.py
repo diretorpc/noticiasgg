@@ -46,6 +46,22 @@ def _admin_allowlist(monkeypatch):
     monkeypatch.setenv("ADMIN_EMAILS", "matheusmouro@hotmail.com")
 
 
+@pytest.fixture(autouse=True)
+def _chave_anthropic_de_teste(monkeypatch):
+    """Dezenas de testes simulam o cliente do Claude, mas o código lê
+    `os.environ["ANTHROPIC_API_KEY"]` ANTES de chegar na simulação — e chave
+    ausente estoura KeyError, que não é o que esses testes exercem.
+
+    Preenche só quando a chave NÃO EXISTE (caso do CI). Em máquina com `.env`,
+    não encosta em nada — inclusive para não atrapalhar os testes `smoke`, que
+    chamam o Claude de verdade.
+
+    Cuidado com a diferença que me pegou: variável AUSENTE estoura,
+    variável VAZIA não. Simular o CI com `X=""` é mais fraco que a realidade."""
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "chave-de-teste-sem-valor-real")
+
+
 def pytest_collection_modifyitems(config, items):
     """Anota quais testes prometem 'sem rede'. Roda uma vez, na coleta."""
     for item in items:
