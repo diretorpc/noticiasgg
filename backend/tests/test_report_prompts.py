@@ -1,11 +1,32 @@
 import pytest
 from backend.services import report_prompts
 
+# Arquivo sem nenhuma chamada de rede (medido rodando o arquivo isolado).
+# O marcador vale para todos os testes abaixo e coloca este arquivo no
+# portao do CI, que roda `pytest backend -m unit`.
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.unit
 def test_all_sections_have_default_prompt():
     for s in report_prompts.SECTIONS:
         assert report_prompts.DEFAULTS[s].strip()
+
+
+@pytest.mark.unit
+def test_prompt_bolsas_traz_o_cabecalho_da_secao():
+    """Cobertura que vivia em test_report_engine.py e saía para a rede para
+    conferir isto. O lugar certo é aqui, onde não precisa de internet."""
+    assert "🌎 BOLSAS" in report_prompts.DEFAULTS["bolsas"]
+
+
+@pytest.mark.unit
+def test_prompt_cambio_cripto_sabe_lidar_com_variacao_nula():
+    """O coletor de cripto emite None quando o CoinGecko não manda a variação
+    (ver crypto.py). Se o prompt não souber tratar nulo, o WhatsApp recebe lixo.
+    O prompt de bolsas já tem essa instrução; câmbio/cripto tem que ter também."""
+    body = report_prompts.DEFAULTS["cambio_cripto"].lower()
+    assert "null" in body, "prompt precisa instruir o que fazer com variação nula"
 
 
 @pytest.mark.unit

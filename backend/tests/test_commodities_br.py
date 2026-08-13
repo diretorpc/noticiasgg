@@ -3,6 +3,11 @@ from bs4 import BeautifulSoup
 
 from backend.collectors import commodities_br as cb
 
+# Arquivo sem nenhuma chamada de rede (medido rodando o arquivo isolado).
+# O marcador vale para todos os testes abaixo e coloca este arquivo no
+# portao do CI, que roda `pytest backend -m unit`.
+pytestmark = pytest.mark.unit
+
 # HTML espelhando a estrutura real do noticiasagricolas (capturada 2026-07-12).
 _SOJA = b"""<table>
 <tr><th>Data</th><th>Valor R$</th><th>Variacao (%)</th></tr>

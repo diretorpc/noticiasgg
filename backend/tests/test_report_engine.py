@@ -1,6 +1,11 @@
 import pytest
 from backend.services import report_engine as re
 
+# Arquivo sem nenhuma chamada de rede (medido rodando o arquivo isolado).
+# O marcador vale para todos os testes abaixo e coloca este arquivo no
+# portao do CI, que roda `pytest backend -m unit`.
+pytestmark = pytest.mark.unit
+
 
 class _Block:
     def __init__(self, text):
@@ -25,6 +30,15 @@ class _FakeClient:
         return _Resp(self._text)
 
 
+@pytest.fixture(autouse=True)
+def _prompt_local(monkeypatch):
+    """`get_prompt` consulta o Supabase. Sem esta simulação, o PRIMEIRO teste
+    do arquivo que chamar `_render` sai para a rede — e como a configuração fica
+    guardada em memória, o furo pula de teste em teste conforme a ordem muda.
+    Vale para o arquivo todo; quem precisa de outro prompt sobrescreve depois."""
+    monkeypatch.setattr(re.report_prompts, "get_prompt", lambda section: f"PROMPT::{section}")
+
+
 @pytest.mark.unit
 def test_render_uses_section_prompt_and_returns_text():
     client = _FakeClient()
@@ -32,8 +46,8 @@ def test_render_uses_section_prompt_and_returns_text():
     out = re._render("bolsas", ctx, client)
     assert "IBOVESPA" in out
     assert client.calls[0]["model"] == "claude-sonnet-4-6"
-    # prompt da seção foi usado como system
-    assert "🌎 BOLSAS" in client.calls[0]["system"]
+    # prompt da seção pedida (e não o de outra seção) foi usado como system
+    assert client.calls[0]["system"] == "PROMPT::bolsas"
 
 
 @pytest.mark.unit

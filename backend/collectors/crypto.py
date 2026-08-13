@@ -31,11 +31,14 @@ def collect() -> list[dict]:
     for coin_id in ["bitcoin", "ethereum"]:
         c = coins_map.get(coin_id)
         if c:
+            # Variação ausente vira None, nunca 0: o relatório não pode afirmar
+            # "ficou estável" quando na verdade o dado não veio.
+            variacao = c.get("price_change_percentage_24h")
             result.append({
                 "nome": c["name"],
                 "simbolo": c["symbol"].upper(),
                 "preco_usd": c["current_price"],
-                "variacao_24h_pct": round(c.get("price_change_percentage_24h") or 0, 2),
+                "variacao_24h_pct": round(variacao, 2) if variacao is not None else None,
             })
 
     return result
