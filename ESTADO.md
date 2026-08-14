@@ -38,6 +38,12 @@ Observar: se aparecer alerta "pelado" (sem a linha de impacto), é porque o clas
 devolveu `ativos` vazio — nesse caso a mensagem fica só com o título. Não foi observado
 em produção; o conserto barato seria exigir `ativos` no prompt para nota ≥ 5.
 
+⚠️ **A medição das 36 notícias é datada (14/08/2026) e NÃO tem comando que a refaça** —
+foi feita à mão, rodando as mesmas notícias pelos dois prompts e comparando `ativos` e
+contagem de tokens. Quem quiser contestar precisa repetir assim. O que ficou automático
+é só a trava: `test_classifier_prompt_tem_contrato_v2` reprova se o campo `resumo` sair
+do prompt.
+
 ## Estado em 13/08/2026 — suíte de testes estabilizada e portão do CI ampliado
 
 O pedido era consertar falhas intermitentes da suíte, atribuídas a bloqueio de cota

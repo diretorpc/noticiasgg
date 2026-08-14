@@ -7,7 +7,7 @@ import pytest
 
 from backend.services import alert_checker
 
-# Coração do pipeline de alertas: 47 testes que rodavam FORA do portão do CI.
+# Coração do pipeline de alertas: os testes deste arquivo rodavam FORA do portão do CI.
 # Três deles chamavam o Supabase de produção por esquecerem de simular
 # get_recent_sent_titles — o resultado dependia dos dados do dia. Corrigido, o
 # arquivo é determinístico (medido: zero conexões) e entra no portão.
@@ -390,6 +390,11 @@ def test_classifier_prompt_tem_contrato_v2():
     # defesa anti-injection só cobre o que a frase de apresentação lista.
     assert "<hoje>" in p and "<publicado_em>" in p
     assert '"ativos"' in p and '"direcao"' in p and '"duplicada"' in p
+    # `resumo` NÃO aparece mais na mensagem, mas continua no contrato de propósito:
+    # é escrito antes de `ativos`/`direcao` e serve de rascunho para eles. Sem esta
+    # linha a suíte fica verde ao apagá-lo do prompt — e apagá-lo muda a lista de
+    # ativos em ~metade das notícias sem economizar token (medido em 14/08/2026).
+    assert '"resumo"' in p
 
 
 def _fake_resp(payload: str):
