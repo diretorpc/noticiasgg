@@ -434,6 +434,15 @@ def test_check_news_mensagem_inclui_impacto():
     assert "petróleo" in msg
 
 
+def test_format_news_alert_omite_resumo():
+    result = {"categoria": "MACRO", "resumo": "ANALISE QUE NAO DEVE APARECER",
+              "ativos": ["soja"], "direcao": "alta"}
+    msg = alert_checker._format_news_alert(result, "Reuters", "Vendas caem 0,6%", 7, False)
+    assert "ANALISE QUE NAO DEVE APARECER" not in msg
+    assert "Vendas caem 0,6%" in msg
+    assert "📈 Impacto provável: alta — soja" in msg
+
+
 def test_check_news_persiste_titulo_traduzido():
     with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
          patch("backend.collectors.news.collect", return_value=[_ARTIGO]), \

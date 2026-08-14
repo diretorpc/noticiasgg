@@ -332,8 +332,9 @@ def _format_news_alert(result: dict, source: str, titulo_pt: str,
     msg = f"{header}\n\n*{titulo_pt}*"
     if source:
         msg += f"\n_{source}_"
-    if result.get("resumo"):
-        msg += f"\n\n{result['resumo']}"
+    # O `resumo` do classificador NÃO entra na mensagem (decisão de 14/08/2026): o
+    # usuário quer só a manchete e o impacto. O campo segue no JSON porque o dedup
+    # e a linha de ativos dependem do mesmo raciocínio.
     ativos = [a for a in (result.get("ativos") or []) if isinstance(a, str)][:4]
     if ativos:
         rotulo = {
