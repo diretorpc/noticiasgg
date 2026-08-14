@@ -22,6 +22,22 @@ Agente de IA multi-domínio, backend em Python/FastAPI:
 
 Fonte viva do que existe hoje: `README.md` e `CLAUDE.md` na raiz do projeto.
 
+## Estado em 14/08/2026 — alerta de notícia sem o parágrafo de análise
+
+A pedido do Matheus, o alerta de notícia passou a ser **manchete + fonte + linha de
+impacto**. O parágrafo de análise (campo `resumo` do classificador) saiu da mensagem.
+
+**O campo `resumo` continua no JSON do prompt de propósito** — não é sobra para limpar.
+Ele é escrito antes de `ativos`/`direcao` e funciona como rascunho para eles. Medido em
+14/08 sobre 36 notícias reais: tirar o campo do prompt muda a lista de ativos em ~metade
+dos casos e **não economiza token** — sem o campo, o modelo escreve a análise em prosa
+solta depois do JSON, que o leitor descarta. Há teste prendendo tanto o formatador
+quanto o caminho real de envio (`test_alert_checker.py`).
+
+Observar: se aparecer alerta "pelado" (sem a linha de impacto), é porque o classificador
+devolveu `ativos` vazio — nesse caso a mensagem fica só com o título. Não foi observado
+em produção; o conserto barato seria exigir `ativos` no prompt para nota ≥ 5.
+
 ## Estado em 13/08/2026 — suíte de testes estabilizada e portão do CI ampliado
 
 O pedido era consertar falhas intermitentes da suíte, atribuídas a bloqueio de cota

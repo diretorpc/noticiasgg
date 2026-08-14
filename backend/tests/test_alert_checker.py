@@ -396,8 +396,8 @@ def _fake_resp(payload: str):
     return type("R", (), {"content": [type("C", (), {"text": payload})()]})()
 
 
-_RESP_V2 = '{"score": 9, "categoria": "OFERTA/CLIMA", "titulo_pt": "OPEC+ corta produção", "resumo": "r", "ativos": ["petróleo", "diesel"], "direcao": "alta", "duplicada": false}'
-_RESP_DUP = '{"score": 9, "categoria": "OFERTA/CLIMA", "titulo_pt": "OPEC+ corta produção", "resumo": "r", "ativos": ["petróleo"], "direcao": "alta", "duplicada": true}'
+_RESP_V2 = '{"score": 9, "categoria": "OFERTA/CLIMA", "titulo_pt": "OPEC+ corta produção", "resumo": "PARAGRAFO_DE_ANALISE", "ativos": ["petróleo", "diesel"], "direcao": "alta", "duplicada": false}'
+_RESP_DUP = '{"score": 9, "categoria": "OFERTA/CLIMA", "titulo_pt": "OPEC+ corta produção", "resumo": "PARAGRAFO_DE_ANALISE", "ativos": ["petróleo"], "direcao": "alta", "duplicada": true}'
 _ARTIGO = {"titulo": "OPEC+ cuts output", "fonte": "Reuters", "url": "https://r.com/1", "resumo": "Cut of 1M bpd"}
 
 
@@ -432,6 +432,9 @@ def test_check_news_mensagem_inclui_impacto():
     msg = mock_send.call_args[0][1]
     assert "📈 Impacto provável: alta" in msg
     assert "petróleo" in msg
+    # prende o caminho REAL de produção: nem o formatador nem o _check_news podem
+    # colar o parágrafo de análise de volta na mensagem
+    assert "PARAGRAFO_DE_ANALISE" not in msg
 
 
 def test_format_news_alert_omite_resumo():
@@ -532,7 +535,7 @@ def test_corte_de_nota_e_trava_calibrados_para_o_volume():
 
 
 def test_nota_abaixo_do_corte_nao_envia():
-    resp = '{"score": 4, "categoria": "BRASIL", "titulo_pt": "t", "resumo": "r", "ativos": ["soja"], "direcao": "alta", "duplicada": false}'
+    resp = '{"score": 4, "categoria": "BRASIL", "titulo_pt": "t", "resumo": "PARAGRAFO_DE_ANALISE", "ativos": ["soja"], "direcao": "alta", "duplicada": false}'
     with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
          patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
          patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
@@ -549,7 +552,7 @@ def test_nota_abaixo_do_corte_nao_envia():
 
 def _resp_nota(score: int, titulo_pt: str):
     p = (f'{{"score": {score}, "categoria": "MACRO", "titulo_pt": "{titulo_pt}", '
-         f'"resumo": "r", "ativos": ["soja"], "direcao": "alta", "duplicada": false}}')
+         f'"resumo": "PARAGRAFO_DE_ANALISE", "ativos": ["soja"], "direcao": "alta", "duplicada": false}}')
     return type("R", (), {"content": [type("C", (), {"text": p})()]})()
 
 

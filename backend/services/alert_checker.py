@@ -333,8 +333,11 @@ def _format_news_alert(result: dict, source: str, titulo_pt: str,
     if source:
         msg += f"\n_{source}_"
     # O `resumo` do classificador NÃO entra na mensagem (decisão de 14/08/2026): o
-    # usuário quer só a manchete e o impacto. O campo segue no JSON porque o dedup
-    # e a linha de ativos dependem do mesmo raciocínio.
+    # usuário quer só a manchete e o impacto. O campo CONTINUA no JSON de propósito —
+    # ele é escrito antes de `ativos`/`direcao` e serve de rascunho para eles. Medido
+    # em 14/08 sobre 36 notícias reais: tirar o campo do prompt muda a lista de ativos
+    # em ~metade dos casos e NÃO economiza token (o modelo escreve a análise em prosa
+    # solta depois do JSON, que o leitor descarta). Não "limpe" isso sem medir de novo.
     ativos = [a for a in (result.get("ativos") or []) if isinstance(a, str)][:4]
     if ativos:
         rotulo = {
