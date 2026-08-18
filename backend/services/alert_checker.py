@@ -325,7 +325,7 @@ def _build_classifier_input(article: dict, market_snapshot: str, recent_titles: 
 
 
 def _format_news_alert(result: dict, source: str, titulo_pt: str,
-                       score: int, test_mode: bool) -> str:
+                       score: int, test_mode: bool, url: str = "") -> str:
     categoria = result.get("categoria", "")
     header = (f"📰 *Notícia Relevante — {categoria}*"
               if categoria and categoria != "OUTRO" else "📰 *Notícia Relevante*")
@@ -345,6 +345,11 @@ def _format_news_alert(result: dict, source: str, titulo_pt: str,
             "baixa": "📉 Impacto provável: baixa",
         }.get(result.get("direcao"), "⚖️ Impacto incerto")
         msg += f"\n\n{rotulo} — {', '.join(ativos)}"
+    # O link entra para o leitor conferir a fonte em 5 segundos. Sem ele o usuário
+    # só tem a manchete — foi por aí que em 18/08/2026 a conversa sobre um relatório
+    # do USDA virou cinco datas diferentes, nenhuma conferível.
+    if url:
+        msg += f"\n\n🔗 {url}"
     if test_mode:
         msg += f"\n\n_[TESTE — score: {score}/10]_"
     return msg
@@ -450,7 +455,9 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
             continue
 
         candidatas.append({"score": score, "result": result, "source": source,
-                           "title": title, "news_id": news_id, "url_id": url_id})
+                           "title": title, "news_id": news_id, "url_id": url_id,
+                           "url": article_url,
+                           "publicado_em": article.get("publicado_em")})
 
     if not candidatas:
         return 0
@@ -472,7 +479,8 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
     melhor = max(candidatas, key=lambda c: c["score"])
     score, result, source = melhor["score"], melhor["result"], melhor["source"]
     titulo_pt = result.get("titulo_pt") or melhor["title"]
-    msg = _format_news_alert(result, source, titulo_pt, score, test_mode)
+    msg = _format_news_alert(result, source, titulo_pt, score, test_mode,
+                             url=melhor.get("url", ""))
 
     logger.info("news check: %d candidatas, enviando a de score=%d ('%s')",
                 len(candidatas), score, titulo_pt[:60])
@@ -485,6 +493,22 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
             # queimaria a melhor notícia de cada rodada sem ninguém ver, e ainda faria
             # as próximas sobre o mesmo fato virarem "duplicada" de algo nunca lido.
             _mark_sent(melhor["news_id"], melhor["url_id"], title=titulo_pt)
+            # Registro legível para o agente de chat responder "me fale mais sobre
+            # essa notícia" com a fonte na mão. `sent_news` acima só guarda hash,
+            # que não serve para recuperar nada.
+            supabase.log_sent_news({
+                "news_id": melhor["news_id"],
+                "titulo_pt": titulo_pt,
+                "titulo_original": melhor["title"],
+                "fonte": source,
+                "url": melhor.get("url"),
+                "categoria": result.get("categoria"),
+                "resumo": result.get("resumo"),
+                "direcao": result.get("direcao"),
+                "score": score,
+                "ativos": [a for a in (result.get("ativos") or []) if isinstance(a, str)][:4],
+                "publicado_em": melhor.get("publicado_em"),
+            })
             supabase.set_alert_triggered("news_alert_global")
             if source:
                 supabase.set_alert_triggered(_source_rule_id(source))

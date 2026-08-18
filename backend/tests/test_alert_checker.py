@@ -13,6 +13,18 @@ from backend.services import alert_checker
 # arquivo é determinístico (medido: zero conexões) e entra no portão.
 pytestmark = pytest.mark.unit
 
+
+@pytest.fixture(autouse=True)
+def _sem_news_log():
+    """`log_sent_news` entrou no caminho de entrega de _check_news em 18/08/2026.
+    Nenhum teste DESTE arquivo é sobre o registro legível — o comportamento dele
+    mora em test_news_log.py, inclusive a garantia de que ele é chamado. Sem este
+    stub, todo teste que chega a entregar tentaria o Supabase de produção: é
+    exatamente a falha que o comentário do topo descreve."""
+    with patch("backend.services.alert_checker.supabase.log_sent_news"):
+        yield
+
+
 _ADMIN = "5534999945010"
 _RECIPIENTS = [{"phone": "5534999000001", "name": "A"}]
 
