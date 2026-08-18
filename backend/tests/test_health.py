@@ -92,6 +92,64 @@ def test_collect_status_broadcast_sem_registro_no_log_vira_error():
 
 
 @pytest.mark.unit
+def test_collect_status_registro_indisponivel_vira_warn_nao_escrita_silenciosa():
+    """A3: get_news_log devolve {'itens': [], 'aviso': ...} quando a LEITURA falha —
+    isso não prova nada sobre a ESCRITA. Antes o check só olhava `.get('itens')` e
+    descartava o aviso, então uma leitura soluçada com 3 broadcasts na janela virava
+    'escrita silenciosa' (error) — bug que não existe, o dono caçaria à toa."""
+    with patch("backend.services.health._check_keys", return_value=_KEYS_OK), \
+         patch.multiple(
+            "backend.services.health.supabase",
+            get_recent_sent_titles=lambda *a, **k: ["a"],
+            count_recent_broadcasts=lambda *a, **k: 3,
+            get_news_log=lambda *a, **k: {"itens": [], "aviso": "registro indisponível"},
+            get_polls=lambda *a, **k: [{"instituto": "X"}],
+         ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
+        st = health.collect_status()
+    assert st["checks"]["news_log"]["status"] == "warn"
+    assert "registro indisponível" in st["checks"]["news_log"]["message"]
+    assert st["status"] == "warn"  # não pode virar error global por uma leitura soluçada
+
+
+@pytest.mark.unit
+def test_collect_status_news_log_nao_chama_count_recent_broadcasts_duas_vezes():
+    """O check `broadcasts` já calcula `enviados_24h` — reaproveitar evita uma
+    consulta extra por visita a /api/health, que é público e sem senha."""
+    chamadas = {"n": 0}
+
+    def _contar(*a, **k):
+        chamadas["n"] += 1
+        return 5
+
+    with patch("backend.services.health._check_keys", return_value=_KEYS_OK), \
+         patch.multiple(
+            "backend.services.health.supabase",
+            get_recent_sent_titles=lambda *a, **k: ["a"],
+            count_recent_broadcasts=_contar,
+            get_news_log=lambda *a, **k: {"itens": [{"news_id": "x"}]},
+            get_polls=lambda *a, **k: [{"instituto": "X"}],
+         ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
+        health.collect_status()
+    assert chamadas["n"] == 1
+
+
+@pytest.mark.unit
+def test_collect_status_news_log_excecao_vira_warn_nao_error():
+    """Um check que não conseguiu LER o registro não prova que a escrita falhou —
+    escalar para 'error' global por uma exceção de leitura era severidade errada."""
+    with patch("backend.services.health._check_keys", return_value=_KEYS_OK), \
+         patch.multiple(
+            "backend.services.health.supabase",
+            get_recent_sent_titles=lambda *a, **k: ["a"],
+            count_recent_broadcasts=lambda *a, **k: 1,
+            get_news_log=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("timeout")),
+            get_polls=lambda *a, **k: [{"instituto": "X"}],
+         ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
+        st = health.collect_status()
+    assert st["checks"]["news_log"]["status"] == "warn"
+
+
+@pytest.mark.unit
 def test_collect_status_dia_calmo_sem_broadcast_nem_log_fica_ok():
     """Zero alertas e zero registros no mesmo dia é o caso COMUM (dia sem notícia
     relevante) — não pode acender erro."""
@@ -163,6 +221,21 @@ def test_format_digest_news_log_silencioso_aparece_no_boletim():
     msg = health.format_digest(status)
     assert "Registro de notícias" in msg
     assert "escrita silenciosa" in msg
+
+
+@pytest.mark.unit
+def test_format_digest_news_log_registro_indisponivel_mostra_warn_nao_escrita_silenciosa():
+    """A3: a linha do boletim tinha o ícone de erro cravado ('❌') para QUALQUER
+    status com 'message', mesmo quando o status real era 'warn' (leitura falhou).
+    O texto 'escrita silenciosa' é reservado para o caso confirmado (achado A4)."""
+    status = {**_STATUS_OK, "checks": {
+        **_STATUS_OK["checks"],
+        "news_log": {"status": "warn", "message": "registro indisponível"},
+    }}
+    msg = health.format_digest(status)
+    assert "⚠️" in msg
+    assert "registro indisponível" in msg
+    assert "escrita silenciosa" not in msg
 
 
 _ADMIN_ENV = {"REPLY_TO_NUMBER": "5534999945010"}
