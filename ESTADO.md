@@ -77,6 +77,44 @@ Notícias — inclusive a do incidente — a âncora é fraca. O `url` é uma p�
 como markup (10 de 20 feeds) ou vazio (3 de 20). Sobra título + veículo. **A Story 1
 sozinha não cura o caso do USDA** — depende da Story 3.
 
+### Parte A/B/C — conteúdo capturado + id de mensagem + resposta ancorada (18/08, branch `feat/noticias-ancoradas`)
+
+Os dois furos que o dono apontou na Story 1 (registro guarda PONTEIRO, não a notícia;
+"qual notícia é essa" era o modelo escolhendo entre 20) — fechados no código, **migration
+008 ainda não rodou em produção** (ver `backend/migrations/008_news_log_conteudo_e_mensagens.sql`,
+igual à 007: SQL Editor, à mão).
+
+- **Parte A** — `news_log.conteudo`/`conteudo_fonte`: `alert_checker._capture_conteudo`
+  chama `web_search.read_article` DEPOIS do broadcast (alerta já entregue), grava o
+  texto ou `None` (nunca markup, nunca a página de erro do Google).
+- **Medição real dos 20 feeds (18/08/2026):** 14 de 20 (os RSS diretos) devolvem texto
+  útil de cara. **Os 6 feeds `GN *` devolviam 404 em 6 de 6** — confirmado o que o ESTADO.md
+  já suspeitava. Achado o caminho: `render=true` do ScraperAPI (executa o JS do
+  redirecionamento) resolveu **6 de 6**, custando **10 créditos por chamada em vez de 1**
+  (header `sa-credit-cost`) e **18–49s por link** (contra poucos segundos do fetch
+  simples). Implementado em `web_search.read_article` — só ativa para `news.google.com`,
+  nunca para o tráfego geral da tool (o agente de chat também usa `read_article` livremente).
+  Custo real: no máximo 1 render por rodada de `check-alerts` (só quando a notícia
+  VENCEDORA é de feed GN), teto de 24 alertas/dia → pior caso ~240 créditos/dia. Conta
+  tinha 87.526 créditos sobrando de 100.000/mês em 18/08 — folga grande. `_CONTEUDO_TIMEOUT`
+  = 75s (1,5× o pior caso medido, 48,9s), roda só depois do alerta já ter saído.
+- **Parte B** — `news_log_messages` (novo, migration 008): `alert_checker._broadcast_com_ids`
+  (nova função, só usada por `_check_news` — os outros 3 chamadores de `_broadcast`
+  ficaram intocados) devolve `(phone, message_id)` de cada entrega; `log_sent_news` passou
+  a devolver o `id` da linha inserida; `supabase.log_alert_messages` grava um par por
+  destinatário.
+- **Parte C** — `main.py:_extract_quoted_message_id` lê `contextInfo.stanzaId` do TOPO do
+  registro (formato medido ao vivo em 18/08 para texto simples) com fallback para dentro
+  de `extendedTextMessage`; `supabase.get_news_by_message_id` casa por igualdade de string;
+  se achou, `reporter.generate_report(..., anchored_news=noticia)` injeta um bloco
+  `<noticia_citada>` no prompt (`reporter._format_anchored_news`) — determinístico, o
+  modelo não escolhe entre candidatas. Sem conteúdo capturado, o bloco diz explicitamente
+  "não capturado — diga isso e não invente".
+- Testes: `backend/tests/test_news_log.py` (Partes A/B), `test_web_search.py` (render
+  fallback), `test_reporter_sections.py` (bloco ancorado), `test_webhook_anchored_news.py`
+  (novo arquivo, extração do id + integração do webhook). `pytest backend -m unit` → 381
+  passed, 0 failed (era 341 no início desta sessão).
+
 ### Varredura de credencial (fora do plano, virou metade da sessão)
 
 Revisando a Story 1, o Apolo achou que erro de fornecedor voltava CRU para o contexto
@@ -270,9 +308,17 @@ python -c "from backend.collectors import news; print(news.source_health())"
 
 ## Aberto
 
-- [ ] 🔴 **Rodar a migration `007_news_log.sql` no SQL Editor do Supabase.** Sem ela a
-      Story 1 está no código e morta no banco, em silêncio. Comando de conferência na
-      seção de 18/08.
+- [ ] 🔴 **Rodar a migration `008_news_log_conteudo_e_mensagens.sql` no SQL Editor do
+      Supabase — ANTES de mergear/deployar esta branch, não depois.** (A 007 já rodou e
+      foi conferida — ver seção "Story 1" acima; este item ficou desatualizado apontando
+      pra ela.) **Risco medido, não só teórico:** `log_sent_news` manda `conteudo`/
+      `conteudo_fonte` no MESMO POST que título/score/url. Se a coluna não existir ainda,
+      o PostgREST rejeita o INSERT INTEIRO com 400 — não perde só os dois campos novos,
+      perde a LINHA TODA, sempre que a captura de conteúdo tiver sucesso (14 dos 20 feeds
+      capturam de cara — não é caso raro). Isso ressuscitaria calado o mesmo buraco que
+      a Story 1 existe pra fechar. `news_log_messages` já era tabela nova, então
+      `log_alert_messages`/`get_news_by_message_id` degradam sozinhos (warning, sem
+      travar o webhook) — só o ponto acima é agudo.
 - [ ] 🔴 **Stories 2, 3 e 4 do plano anti-alucinação** —
       `docs/superpowers/plans/2026-08-18-noticias-ancoradas-e-antialucinacao.md`.
       Enquanto não forem feitas, o agente segue inventando número e data quando
