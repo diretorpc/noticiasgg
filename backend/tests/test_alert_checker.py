@@ -21,8 +21,16 @@ def _sem_news_log():
     Nenhum teste DESTE arquivo é sobre o registro legível — o comportamento dele
     mora em test_news_log.py, inclusive a garantia de que ele é chamado. Sem este
     stub, todo teste que chega a entregar tentaria o Supabase de produção: é
-    exatamente a falha que o comentário do topo descreve."""
-    with patch("backend.services.alert_checker.supabase.log_sent_news"):
+    exatamente a falha que o comentário do topo descreve.
+
+    `_capture_conteudo` e `log_alert_messages` entraram no mesmo caminho em
+    18/08/2026 (sessão 'noticias-ancoradas', Partes A e B): sem stub, todo
+    teste que chega a entregar tentaria o ScraperAPI (real, até 75s de
+    timeout) e o Supabase de novo — o comportamento deles mora em
+    test_news_log.py."""
+    with patch("backend.services.alert_checker.supabase.log_sent_news"), \
+         patch("backend.services.alert_checker._capture_conteudo", return_value=(None, None)), \
+         patch("backend.services.alert_checker.supabase.log_alert_messages"):
         yield
 
 
@@ -582,7 +590,7 @@ def test_nota_abaixo_do_corte_nao_envia():
          patch("backend.services.alert_checker._mark_sent"), \
          patch("backend.collectors.news.collect", return_value=[_ARTIGO]), \
          patch("backend.services.alert_checker.Anthropic") as mock_cli, \
-         patch("backend.services.alert_checker._broadcast", return_value=1) as mock_bc:
+         patch("backend.services.alert_checker._broadcast_com_ids", return_value=[("x", "y")]) as mock_bc:
         mock_cli.return_value.messages.create.return_value = _fake_resp(resp)
         enviados = alert_checker._check_news(_RECIPIENTS)
     assert enviados == 0
@@ -668,10 +676,10 @@ def test_empate_de_nota_ganha_a_mais_recente():
 
 
 def test_nao_queima_a_noticia_quando_a_entrega_falha():
-    """Evolution fora do ar: _broadcast devolve 0. Marcar como enviada mataria a
-    notícia para sempre (is_news_sent não tem prazo) e ainda entraria no
-    get_recent_sent_titles, fazendo as próximas sobre o mesmo fato virarem
-    'duplicada' de algo que o dono nunca viu."""
+    """Evolution fora do ar: _broadcast_com_ids devolve lista vazia. Marcar
+    como enviada mataria a notícia para sempre (is_news_sent não tem prazo) e
+    ainda entraria no get_recent_sent_titles, fazendo as próximas sobre o
+    mesmo fato virarem 'duplicada' de algo que o dono nunca viu."""
     with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
          patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
          patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
@@ -679,7 +687,7 @@ def test_nao_queima_a_noticia_quando_a_entrega_falha():
          patch("backend.services.alert_checker._mark_sent") as mock_mark, \
          patch("backend.collectors.news.collect", return_value=[dict(_TRES_CANDIDATAS[0])]), \
          patch("backend.services.alert_checker.Anthropic") as mock_cli, \
-         patch("backend.services.alert_checker._broadcast", return_value=0):
+         patch("backend.services.alert_checker._broadcast_com_ids", return_value=[]):
         mock_cli.return_value.messages.create.return_value = _resp_nota(8, "forte")
         enviados = alert_checker._check_news(_RECIPIENTS)
     assert enviados == 0

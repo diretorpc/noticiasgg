@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from anthropic import Anthropic
 
 from backend.collectors import eia, market
-from backend.services import supabase, whatsapp
+from backend.services import supabase, web_search, whatsapp
 from backend.services.alert_rules import RULES, COPOM_DATES_2026, AlertRule
 from backend.services.secrets_mask import sanitize_error
 
@@ -151,6 +151,39 @@ def _broadcast(message: str, recipients: list[dict], errors: list[str] | None = 
     return sent
 
 
+def _broadcast_com_ids(message: str, recipients: list[dict],
+                       errors: list[str] | None = None) -> list[tuple[str, str | None]]:
+    """Como `_broadcast`, mas devolve (phone, message_id) de cada entrega —
+    a Evolution manda uma mensagem DIFERENTE por destinatário, com um id
+    diferente (`resposta["key"]["id"]`), e a Parte B da sessão
+    'noticias-ancoradas' (18/08/2026) precisa disso para o webhook casar a
+    resposta citada com a notícia exata. Só `_check_news` usa esta versão: os
+    outros três chamadores de `_broadcast` (`_check_price_rules`,
+    `_check_copom`, `_check_eia`) não precisam do id, e mudar a assinatura de
+    `_broadcast` para todo mundo seria invasivo por um ganho que só a
+    notícia usa.
+
+    Defensivo contra formato de resposta inesperado: `isinstance(resp, dict)`
+    em vez de assumir a forma — um retorno que não é dict (erro de
+    fornecedor, mock de teste) não vira exceção aqui, só um message_id
+    ausente. `sent` (contagem de entregas) continua igual a `_broadcast`,
+    mesmo quando o id não pôde ser extraído.
+    """
+    entregues: list[tuple[str, str | None]] = []
+    for user in recipients:
+        try:
+            resp = whatsapp.send_message(user["phone"], message)
+            message_id = resp.get("key", {}).get("id") if isinstance(resp, dict) else None
+            if not message_id:
+                logger.warning("send to %s: sem message_id no retorno da Evolution", user["phone"])
+            entregues.append((user["phone"], message_id))
+        except Exception as e:
+            logger.warning("send failed to %s: %s", user["phone"], e)
+    if errors is not None and recipients and not entregues:
+        errors.append(f"whatsapp: broadcast entregou 0/{len(recipients)}")
+    return entregues
+
+
 def _is_market_hours() -> bool:
     """True entre 07:00 e 22:00 BRT. Fora desse intervalo, dados de bolsa/câmbio/commodities
     são estáticos (fechamento) e variacao_pct não representa movimento real."""
@@ -289,6 +322,42 @@ def _mark_sent(news_id: str, url_id: str | None, title: str | None = None) -> No
     supabase.mark_news_sent(news_id, title=title)
     if url_id:
         supabase.mark_news_sent(url_id)
+
+
+# render=true no ScraperAPI (necessário para os 6 feeds "GN *" — ver
+# web_search.read_article) mediu até 48,9s por link real em 18/08/2026; 75s dá
+# folga de ~1,5x sobre o pior caso visto sem deixar a captura correr solta.
+# Fetch simples (14 dos 20 feeds) termina em poucos segundos — o teto largo
+# não pune quem não precisa dele. Roda DEPOIS do broadcast (alerta já
+# entregue), então o tempo aqui não atrasa quem recebe a mensagem — só a
+# escrita do registro, que já é best-effort.
+_CONTEUDO_TIMEOUT = 75.0
+
+
+def _capture_conteudo(url: str) -> tuple[str | None, str | None]:
+    """Tenta capturar o texto da matéria para ancorar respostas futuras do
+    agente. Nunca pode derrubar nem atrasar o alerta — ele já foi ENTREGUE
+    quando isto roda (mesma garantia de `log_sent_news`).
+
+    Falha (sem URL, erro do ScraperAPI, timeout, texto vazio) devolve
+    (None, None): campo ausente é honesto — o agente vê e diz que não tem o
+    texto. NUNCA grava markup nem a página de erro do Google Notícias; quem
+    decide o que é "útil" é `web_search.read_article` (só `conteudo`
+    preenchido conta), não uma verificação de tamanho aqui.
+    """
+    if not url:
+        return None, None
+    try:
+        resultado = web_search.read_article(url, timeout=_CONTEUDO_TIMEOUT)
+    except Exception as e:
+        logger.warning("captura de conteúdo: exceção não tratada para %s: %s", url, sanitize_error(e))
+        return None, None
+    conteudo = resultado.get("conteudo")
+    if not conteudo:
+        if resultado.get("erro"):
+            logger.warning("captura de conteúdo falhou para %s: %s", url, resultado["erro"])
+        return None, None
+    return conteudo, "read_article"
 
 
 def _market_snapshot(market: dict | None) -> str:
@@ -546,11 +615,17 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
 
     logger.info("news check: %d candidatas, enviando a de score=%d ('%s')",
                 len(candidatas), score, titulo_pt[:60])
-    sent = _broadcast(msg, recipients, errors)
+    entregues = _broadcast_com_ids(msg, recipients, errors)
+    sent = len(entregues)
     logger.info("news check: broadcast done, sent=%d", sent)
     if sent > 0:
         total += sent
         if not test_mode:
+            # Captura o texto da matéria DEPOIS do broadcast — o alerta já saiu,
+            # então o tempo daqui (até 75s para link de Google Notícias, ver
+            # _CONTEUDO_TIMEOUT) não atrasa quem recebe. Nunca estoura: falha vira
+            # (None, None), campo ausente e honesto.
+            conteudo, conteudo_fonte = _capture_conteudo(melhor.get("url", ""))
             # Registro legível ANTES de marcar o dedup: `_mark_sent` → mark_news_sent
             # faz `raise_for_status()` sem try. Se o Supabase soluçar bem aqui, a
             # ordem antiga perdia o registro E a marca de dedup juntos; nesta ordem,
@@ -558,7 +633,7 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
             # reclassificada — tolerável), nunca o vestígio que o agente de chat usa
             # para responder "me fale mais sobre essa notícia" (achado A9).
             # `log_sent_news` não estoura por construção — reordenar é custo zero.
-            supabase.log_sent_news({
+            news_log_id = supabase.log_sent_news({
                 "news_id": melhor["news_id"],
                 "titulo_pt": titulo_pt,
                 "titulo_original": melhor["title"],
@@ -573,7 +648,14 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
                 "score": score,
                 "ativos": _extrai_ativos(result),
                 "publicado_em": melhor.get("publicado_em"),
+                "conteudo": conteudo,
+                "conteudo_fonte": conteudo_fonte,
             })
+            # id da mensagem por destinatário — permite o webhook casar uma resposta
+            # citada com esta notícia exata (Parte C). news_log_id None (o insert
+            # acima falhou) não pode virar linha órfã; log_alert_messages já barra.
+            if news_log_id:
+                supabase.log_alert_messages(news_log_id, entregues)
             # marcar só depois de entregue: com a Evolution fora do ar, marcar aqui
             # queimaria a melhor notícia de cada rodada sem ninguém ver, e ainda faria
             # as próximas sobre o mesmo fato virarem "duplicada" de algo nunca lido.

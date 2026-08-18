@@ -343,7 +343,7 @@ def get_recent_sent_titles(hours: int = 24, limit: int = 20) -> list[str]:
 _NEWS_LOG_FIELDS = (
     "news_id", "titulo_pt", "titulo_original", "fonte", "feed", "url",
     "url_publisher", "categoria", "resumo", "resumo_fonte", "direcao",
-    "score", "ativos", "publicado_em",
+    "score", "ativos", "publicado_em", "conteudo", "conteudo_fonte",
 )
 
 
@@ -359,8 +359,14 @@ def _iso_valido(valor) -> bool:
         return False
 
 
-def log_sent_news(entry: dict) -> None:
+def log_sent_news(entry: dict) -> int | None:
     """Registro legível da notícia entregue como alerta.
+
+    Devolve o `id` da linha inserida (None em falha) — a Parte B da sessão
+    'noticias-ancoradas' (18/08/2026) precisa dele para gravar em
+    `news_log_messages` qual mensagem, de qual destinatário, corresponde a
+    qual notícia. `_client()` já manda `Prefer: return=representation`, então
+    o POST devolve a linha inserida sem round-trip extra.
 
     Nunca estoura para o chamador: o alerta já foi ENVIADO quando isto roda,
     então falhar aqui não pode desfazer nem interromper o broadcast. A lista
@@ -375,11 +381,81 @@ def log_sent_news(entry: dict) -> None:
         with _client() as c:
             r = c.post("/news_log", json=payload)
             r.raise_for_status()
+            rows = r.json()
+            return rows[0]["id"] if rows else None
     except Exception as e:
         # já foi entregue quando isto roda — não pode desfazer o broadcast, mas
         # não pode ficar mudo: sem isto, a migration não executada ou a escrita
         # falhando ficava invisível para sempre (achado A4, revisão 18/08/2026).
         logger.warning("news_log write failed: %s", e)
+        return None
+
+
+def log_alert_messages(news_log_id: int, pares: list[tuple[str, str | None]]) -> None:
+    """Grava o id da mensagem ENVIADA, por destinatário (Parte B,
+    'noticias-ancoradas', 18/08/2026) — cada destinatário recebe uma mensagem
+    DIFERENTE da Evolution, com um id diferente; não cabe numa coluna só de
+    `news_log`. É o que o webhook usa depois para casar `contextInfo.stanzaId`
+    (a resposta citada) com a notícia exata, sem o modelo escolher entre uma
+    lista.
+
+    Entrada sem `message_id` (extração falhou ou a Evolution não devolveu
+    `key.id`) é descartada — a coluna é NOT NULL. Nunca estoura para o
+    chamador: a notícia já foi entregue e logada quando isto roda.
+    """
+    linhas = [
+        {"news_log_id": news_log_id, "phone": phone, "message_id": message_id}
+        for phone, message_id in pares
+        if message_id
+    ]
+    if not news_log_id or not linhas:
+        return
+    try:
+        with _client() as c:
+            r = c.post("/news_log_messages", json=linhas)
+            r.raise_for_status()
+    except Exception as e:
+        logger.warning("news_log_messages write failed: %s", e)
+
+
+def get_news_by_message_id(message_id: str) -> dict | None:
+    """Casa o id EXATO de uma mensagem enviada com a notícia que ela carregava
+    (Parte C, 'noticias-ancoradas', 18/08/2026). Determinístico — comparação
+    de string contra `news_log_messages.message_id`, não o modelo escolhendo
+    entre candidatas. Id desconhecido (mensagem não é uma notícia, ou o
+    registro já foi limpo) devolve None; o webhook segue sem ancorar nada.
+
+    Duas consultas (não `select=news_log(*)` embutido do PostgREST) de
+    propósito: mais fácil de simular em teste sem depender da FK ser
+    reconhecida como relacionamento pelo PostgREST, e o caminho é raro o
+    bastante (só quando alguém responde citando) para o round-trip extra não
+    importar.
+    """
+    if not message_id or not str(message_id).strip():
+        return None
+    try:
+        with _client() as c:
+            r = c.get(
+                f"/news_log_messages?message_id=eq.{_f(message_id)}"
+                f"&select=news_log_id&limit=1"
+            )
+            r.raise_for_status()
+            rows = r.json()
+            if not rows:
+                return None
+            news_log_id = rows[0]["news_log_id"]
+            r2 = c.get(
+                f"/news_log?id=eq.{_f(news_log_id)}"
+                f"&select=titulo_pt,titulo_original,fonte,url,url_publisher,"
+                f"categoria,resumo,resumo_fonte,direcao,score,ativos,"
+                f"publicado_em,conteudo,conteudo_fonte,sent_at&limit=1"
+            )
+            r2.raise_for_status()
+            rows2 = r2.json()
+            return rows2[0] if rows2 else None
+    except Exception as e:
+        logger.warning("get_news_by_message_id failed: %s", e)
+        return None
 
 
 def _clamp_int(value, minimo: int, maximo: int, default: int) -> int:
