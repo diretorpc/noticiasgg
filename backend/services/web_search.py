@@ -15,9 +15,19 @@ _MAX_ARTICLE_CHARS = 4000
 _API_KEY_RE = re.compile(r"api_key=[^&\s]*")
 
 
-def _sanitize_error(e: Exception) -> str:
-    """Mascara a SCRAPER_API_KEY antes de devolver str(e) ao chamador."""
+def sanitize_error(e: Exception) -> str:
+    """Mascara a SCRAPER_API_KEY antes de devolver str(e) ao chamador.
+
+    Pública porque `agro_search` fala com o mesmo fornecedor e tem o mesmo
+    desenho (chave no query string). Se um dia outro parâmetro precisar de
+    máscara, o regex acima é o único lugar a mudar — por isso os dois módulos
+    compartilham esta função em vez de cada um ter a sua.
+    """
     return _API_KEY_RE.sub("api_key=***", str(e))
+
+
+# Nome antigo, mantido para não quebrar chamador interno já escrito.
+_sanitize_error = sanitize_error
 
 
 def read_article(url: str) -> dict:
