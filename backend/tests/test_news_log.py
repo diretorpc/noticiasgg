@@ -163,6 +163,22 @@ def test_get_news_log_nao_houve_noticia_e_soh_lista_vazia_sem_aviso():
 
 
 @pytest.mark.unit
+def test_get_news_log_falha_registra_warning_sem_estourar(caplog):
+    """A6: o irmão log_sent_news loga a própria falha e tem teste com caplog;
+    get_news_log ficava mudo — o dono não teria como saber que a LEITURA
+    quebrou sem olhar o `aviso` no retorno."""
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.get = MagicMock(side_effect=RuntimeError("timeout"))
+    with patch.object(supabase, "_client", return_value=client):
+        with caplog.at_level("WARNING", logger="noticiasgg.supabase"):
+            resultado = supabase.get_news_log()
+    assert resultado == {"itens": [], "aviso": "registro indisponível"}
+    assert any("get_news_log failed" in r.message for r in caplog.records)
+
+
+@pytest.mark.unit
 def test_get_news_log_trava_limit_malicioso():
     """`limit` entra CRU na URL (`_f()` só protege `cutoff`). Na Story 2 vem de
     texto interpretado pelo modelo — sem trava, `limit="5&titulo_pt=eq.x"` é

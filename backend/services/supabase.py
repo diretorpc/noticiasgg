@@ -419,7 +419,11 @@ def get_news_log(hours: int = 72, limit: int = 20) -> dict:
             )
             r.raise_for_status()
             return {"itens": r.json()}
-    except Exception:
+    except Exception as e:
+        # sem isto, uma leitura falhando ficava invisível para sempre — o irmão
+        # `log_sent_news` já loga a própria falha; este ficava mudo (achado A6,
+        # revisão 18/08/2026).
+        logger.warning("get_news_log failed: %s", e)
         return {"itens": [], "aviso": "registro indisponível"}
 
 
