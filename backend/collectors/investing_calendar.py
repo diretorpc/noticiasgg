@@ -36,11 +36,20 @@ def fetch() -> str:
         except httpx.HTTPStatusError as e:
             # str(e) do httpx carrega a URL completa da requisição — com a
             # SCRAPER_API_KEY no query string. Sem mascarar aqui, a chave vaza
-            # pro log (logger.exception em investing_digest.run), pra mensagem
-            # de WhatsApp do admin (notify_admin) e pro corpo JSON de
-            # /api/cron/investing quando o erro sobe até lá (achado extra,
+            # pra mensagem de WhatsApp do admin (notify_admin) e pro corpo JSON
+            # de /api/cron/investing quando o erro sobe até lá (achado extra,
             # 18/08/2026 — não estava na lista original do levantamento).
-            raise RuntimeError(sanitize_error(e)) from e
+            #
+            # `from None`, não `from e`: mascarar só a mensagem do RuntimeError
+            # não bastava — `from e` mantém __cause__ apontando pra
+            # HTTPStatusError original, e `logger.exception` (investing_digest.run)
+            # formata a cadeia INTEIRA ("The above exception was the direct
+            # cause..."), reimprimindo a URL crua no log mesmo com o RuntimeError
+            # mascarado (achado 1, revisão 18/08/2026 — 4ª rodada). `from None`
+            # suprime cause E context; o traceback do RuntimeError continua
+            # apontando pra esta linha, então não se perde ONDE quebrou — só a
+            # URL crua do httpx, que é exatamente o que não pode vazar.
+            raise RuntimeError(sanitize_error(e)) from None
         except (httpx.TimeoutException, httpx.ConnectError) as e:
             # Só lentidão/queda de conexão é retentada: erro HTTP (403/500) não
             # melhora repetindo e ainda gasta crédito do ScraperAPI.
