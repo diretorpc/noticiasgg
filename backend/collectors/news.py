@@ -1,9 +1,11 @@
 import os
+import re
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote
+from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException
 import httpx
 from dotenv import load_dotenv
@@ -250,6 +252,25 @@ def _parse_rss_date(date_str: str | None) -> str | None:
             return None
 
 
+def _limpa_resumo(description: str | None) -> str | None:
+    """Limpa o `<description>` cru do RSS antes de guardar em `resumo`.
+
+    Medido contra os 20 feeds reais (18/08/2026): 10 devolvem HTML, 3 vazio, 7 texto
+    limpo — nos 6 feeds do Google Notícias o valor é literalmente o `<a href=...>`
+    de volta para a mesma página, ilegível. `resumo` é a âncora factual do agente
+    (Story 2): markup no lugar de texto é ruído que o modelo parafraseia como fato.
+    Se sobrar só um link ou nada, devolve None — campo ausente é honesto, o agente
+    vê e diz "não tenho o texto"; markup faz ele inventar (achado A2, revisão 18/08/2026).
+    """
+    if not description:
+        return None
+    texto = BeautifulSoup(description, "html.parser").get_text(separator=" ").strip()
+    texto = re.sub(r"\s+", " ", texto).strip()
+    if not texto or texto.startswith(("http://", "https://")):
+        return None
+    return texto[:300]
+
+
 def _collect_rss(client: httpx.Client, feeds: list[tuple[str, str]], vistos: set) -> list[dict]:
     artigos = []
     for source_name, url in feeds:
@@ -288,7 +309,7 @@ def _collect_rss(client: httpx.Client, feeds: list[tuple[str, str]], vistos: set
                     "url": link,
                     "url_publisher": publisher_url,
                     "publicado_em": pub_date,
-                    "resumo": description[:300].strip() if description else None,
+                    "resumo": _limpa_resumo(description),
                 })
         except Exception:
             continue

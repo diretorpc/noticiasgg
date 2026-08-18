@@ -509,6 +509,42 @@ def test_rodizio_da_uma_vaga_a_cada_fonte_antes_de_repetir():
 
 
 @pytest.mark.unit
+def test_limpa_resumo_html_com_texto_vira_texto_limpo():
+    """Caso real do Hellenic Shipping (medido 18/08/2026): entidades HTML soltas
+    junto de tags — precisa sobrar só o texto, sem markup e sem entidade crua."""
+    from backend.collectors.news import _limpa_resumo
+    bruto = "<p>Freight rates &#38; container volumes rose&#160;this week.</p>"
+    limpo = _limpa_resumo(bruto)
+    assert limpo == "Freight rates & container volumes rose this week."
+
+
+@pytest.mark.unit
+def test_limpa_resumo_so_link_vira_none():
+    """Caso real dos 6 feeds do Google Notícias (medido 18/08/2026): a description
+    É o link de volta para a mesma página, ilegível e cortado em 300 chars — zero
+    fato. None é honesto; o agente vê o campo ausente em vez de inventar em cima
+    de um link (achado A2, revisão 18/08/2026)."""
+    from backend.collectors.news import _limpa_resumo
+    bruto = ('<a href="https://news.google.com/rss/articles/CBMi_fake_base64">'
+             'https://news.google.com/rss/articles/CBMi_fake_base64</a>')
+    assert _limpa_resumo(bruto) is None
+
+
+@pytest.mark.unit
+def test_limpa_resumo_vazio_vira_none():
+    from backend.collectors.news import _limpa_resumo
+    assert _limpa_resumo("") is None
+    assert _limpa_resumo(None) is None
+
+
+@pytest.mark.unit
+def test_limpa_resumo_texto_limpo_passa_direto():
+    from backend.collectors.news import _limpa_resumo
+    assert _limpa_resumo("Corn conditions dropped to 61% good/excellent.") == \
+        "Corn conditions dropped to 61% good/excellent."
+
+
+@pytest.mark.unit
 def test_rodizio_ordena_por_data_dentro_de_cada_rodada():
     from backend.collectors.news import _ordena_por_recencia
     bruto = [_artigo("A", 5), _artigo("B", 1), _artigo("A", 6), _artigo("B", 2)]
