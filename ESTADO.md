@@ -22,6 +22,46 @@ Agente de IA multi-domínio, backend em Python/FastAPI:
 
 Fonte viva do que existe hoje: `README.md` e `CLAUDE.md` na raiz do projeto.
 
+## Estado em 18/08/2026 — alucinação em conversa: causa achada, plano escrito, NADA implementado
+
+**O incidente.** Às 12:00–12:11 de 18/08 o agente respondeu cinco vezes sobre o mesmo
+relatório do USDA e deu números e datas diferentes em cada uma (milho 67%→63%, depois
+72%, depois 63%→61%; datas 12/08/2026, 12/08/2025, 04/08/2026, 10/08/2026). Numa das
+respostas ele mesmo escreveu *"inventei percentuais que não vieram de fonte"* — e na
+mensagem seguinte, para o outro número, inventou de novo. Os dois telefones
+(`5534999945010` e `5516991016898`) receberam versões diferentes do mesmo fato.
+
+Conversa lida direto de `conversation_history` no Supabase, não de memória.
+
+**Três causas, medidas no código — não teorizadas:**
+
+1. `services/integrity.py:54` — `validate_and_fix` retorna cedo quando a resposta não
+   tem `ANALYSIS_MARKERS` (`📊`, `ANÁLISE`, `Visão Macro`…). Resposta de conversa nunca
+   tem esses marcadores. **O validador anti-alucinação está desligado em 100% dos
+   chats.** A correção anterior (jul/2026) cobriu só o relatório diário.
+2. `services/integrity.py:56` — `build_fact_corpus(data)` monta o corpus só dos
+   coletores (`market`, `crypto`, `indicators_*`, `commodities_br`, `news`). O que
+   volta de `search_web`/`read_article` — a fonte real do número do USDA — **não entra
+   no corpus**. Mesmo ligado, o validador conferiria contra o corpus errado.
+3. `services/alert_checker.py:479-490` — o alerta de notícia sai por `_broadcast` e o
+   único rastro é o hash em `sent_news` (`_mark_sent`). **Nunca há `save_message`**,
+   nem título, link ou data em forma legível. Quando o usuário responde "me fale mais
+   sobre essa notícia", o agente não tem vestígio nenhum dela e preenche do nada.
+
+**O que existe hoje:** só o plano. Nenhuma linha de código mudou nesta sessão.
+→ `docs/superpowers/plans/2026-08-18-noticias-ancoradas-e-antialucinacao.md`
+4 stories, ordem obrigatória: (1) tabela `news_log` + link no alerta; (2) ferramenta
+`get_sent_news` no chat; (3) validador ligado em chat com corpus de ferramenta + data
+de hoje etiquetada `<hoje>`; (4) evals no CI com a conversa real como fixture.
+
+**Armadilha da Story 1:** a migration `007_news_log.sql` roda À MÃO no SQL Editor do
+Supabase. Se esquecer, `log_sent_news` engole a falha em silêncio de propósito (para
+não derrubar o alerta já entregue) e a Story 2 devolve lista vazia para sempre.
+
+**Como conferir que a correção pegou, depois de implementada:**
+`python -m backend.evals.news_recall_eval` — meta: `recuperou_do_log` igual a `casos`,
+`armadilhas` em zero.
+
 ## Estado em 14/08/2026 — alerta de notícia sem o parágrafo de análise
 
 A pedido do Matheus, o alerta de notícia passou a ser **manchete + fonte + linha de
@@ -196,6 +236,11 @@ python -c "from backend.collectors import news; print(news.source_health())"
 
 ## Aberto
 
+- [ ] 🔴 **Executar o plano anti-alucinação de 18/08** (4 stories, ordem obrigatória) —
+      `docs/superpowers/plans/2026-08-18-noticias-ancoradas-e-antialucinacao.md`.
+      Enquanto não rodar, o agente segue inventando número e data quando perguntam
+      sobre notícia do RSS. Falta o Matheus escolher como executar (subagente por
+      story vs. inline).
 - [ ] **Conferir o volume em 16/08** com o comando acima (esperado ~18/dia). É a
       primeira medição depois do freio de `9c62ae0`.
 - [ ] Testes que batem em API externa (`test_crypto.py`, `test_indicators_br.py`) falham
