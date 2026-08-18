@@ -324,6 +324,27 @@ def _build_classifier_input(article: dict, market_snapshot: str, recent_titles: 
     return "\n".join(parts)
 
 
+# Teto que casa com _build_classifier_input (`title[:300]`, `resumo[:300]`) — não é
+# um número solto: URL de busca aberta do Google Notícias (6 dos 20 feeds) pode
+# devolver lixo, e uma mensagem de WhatsApp não deveria carregar isso sem checagem
+# (achado A7, revisão 18/08/2026).
+_URL_MAX_LEN = 400
+
+
+def _url_exibivel(url: str) -> bool:
+    """Só http(s) e tamanho razoável entram na mensagem — link de terceiro (seis
+    feeds são busca aberta do Google Notícias) não é validado antes de chegar aqui."""
+    return bool(url) and url.startswith(("http://", "https://")) and len(url) < _URL_MAX_LEN
+
+
+def _extrai_ativos(result: dict) -> list[str]:
+    """Até 4 ativos válidos do JSON do classificador. Centralizado porque a mensagem
+    do WhatsApp e o registro em news_log usavam a mesma expressão em dois lugares —
+    mudar o corte num só faria a mensagem mostrar 4 e o log guardar 6, divergência
+    que o validador da Story 3 acusaria como erro do próprio sistema (achado A12)."""
+    return [a for a in (result.get("ativos") or []) if isinstance(a, str)][:4]
+
+
 def _format_news_alert(result: dict, source: str, titulo_pt: str,
                        score: int, test_mode: bool, url: str = "") -> str:
     categoria = result.get("categoria", "")
@@ -338,7 +359,7 @@ def _format_news_alert(result: dict, source: str, titulo_pt: str,
     # em 14/08 sobre 36 notícias reais: tirar o campo do prompt muda a lista de ativos
     # em ~metade dos casos e NÃO economiza token (o modelo escreve a análise em prosa
     # solta depois do JSON, que o leitor descarta). Não "limpe" isso sem medir de novo.
-    ativos = [a for a in (result.get("ativos") or []) if isinstance(a, str)][:4]
+    ativos = _extrai_ativos(result)
     if ativos:
         rotulo = {
             "alta": "📈 Impacto provável: alta",
@@ -348,7 +369,7 @@ def _format_news_alert(result: dict, source: str, titulo_pt: str,
     # O link entra para o leitor conferir a fonte em 5 segundos. Sem ele o usuário
     # só tem a manchete — foi por aí que em 18/08/2026 a conversa sobre um relatório
     # do USDA virou cinco datas diferentes, nenhuma conferível.
-    if url:
+    if _url_exibivel(url):
         msg += f"\n\n🔗 {url}"
     if test_mode:
         msg += f"\n\n_[TESTE — score: {score}/10]_"
@@ -457,6 +478,14 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
         candidatas.append({"score": score, "result": result, "source": source,
                            "title": title, "news_id": news_id, "url_id": url_id,
                            "url": article_url,
+                           # publicador real (Google Notícias) e apelido do feed de
+                           # busca, separados — ver achados A2/A6. resumo_fonte é o
+                           # texto CRU do RSS/NewsAPI, não a análise do classificador
+                           # (achado A3) — ancorar o agente na paráfrase de outro LLM
+                           # seria a mesma doença que o news_log existe para curar.
+                           "url_publisher": article.get("url_publisher"),
+                           "feed": article.get("feed"),
+                           "resumo_fonte": article.get("resumo"),
                            "publicado_em": article.get("publicado_em")})
 
     if not candidatas:
@@ -489,26 +518,33 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
     if sent > 0:
         total += sent
         if not test_mode:
-            # marcar só depois de entregue: com a Evolution fora do ar, marcar aqui
-            # queimaria a melhor notícia de cada rodada sem ninguém ver, e ainda faria
-            # as próximas sobre o mesmo fato virarem "duplicada" de algo nunca lido.
-            _mark_sent(melhor["news_id"], melhor["url_id"], title=titulo_pt)
-            # Registro legível para o agente de chat responder "me fale mais sobre
-            # essa notícia" com a fonte na mão. `sent_news` acima só guarda hash,
-            # que não serve para recuperar nada.
+            # Registro legível ANTES de marcar o dedup: `_mark_sent` → mark_news_sent
+            # faz `raise_for_status()` sem try. Se o Supabase soluçar bem aqui, a
+            # ordem antiga perdia o registro E a marca de dedup juntos; nesta ordem,
+            # um Supabase instável perde só o dedup (a notícia arrisca ser
+            # reclassificada — tolerável), nunca o vestígio que o agente de chat usa
+            # para responder "me fale mais sobre essa notícia" (achado A9).
+            # `log_sent_news` não estoura por construção — reordenar é custo zero.
             supabase.log_sent_news({
                 "news_id": melhor["news_id"],
                 "titulo_pt": titulo_pt,
                 "titulo_original": melhor["title"],
                 "fonte": source,
+                "feed": melhor.get("feed"),
                 "url": melhor.get("url"),
+                "url_publisher": melhor.get("url_publisher"),
                 "categoria": result.get("categoria"),
                 "resumo": result.get("resumo"),
+                "resumo_fonte": melhor.get("resumo_fonte"),
                 "direcao": result.get("direcao"),
                 "score": score,
-                "ativos": [a for a in (result.get("ativos") or []) if isinstance(a, str)][:4],
+                "ativos": _extrai_ativos(result),
                 "publicado_em": melhor.get("publicado_em"),
             })
+            # marcar só depois de entregue: com a Evolution fora do ar, marcar aqui
+            # queimaria a melhor notícia de cada rodada sem ninguém ver, e ainda faria
+            # as próximas sobre o mesmo fato virarem "duplicada" de algo nunca lido.
+            _mark_sent(melhor["news_id"], melhor["url_id"], title=titulo_pt)
             supabase.set_alert_triggered("news_alert_global")
             if source:
                 supabase.set_alert_triggered(_source_rule_id(source))

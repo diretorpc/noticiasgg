@@ -1,4 +1,5 @@
 import datetime
+import logging
 import os
 import re
 import secrets
@@ -6,6 +7,8 @@ import time
 from urllib.parse import quote
 
 import httpx
+
+logger = logging.getLogger("noticiasgg.supabase")
 
 
 def _f(value) -> str:
@@ -334,9 +337,22 @@ def get_recent_sent_titles(hours: int = 24, limit: int = 20) -> list[str]:
 
 
 _NEWS_LOG_FIELDS = (
-    "news_id", "titulo_pt", "titulo_original", "fonte", "url",
-    "categoria", "resumo", "direcao", "score", "ativos", "publicado_em",
+    "news_id", "titulo_pt", "titulo_original", "fonte", "feed", "url",
+    "url_publisher", "categoria", "resumo", "resumo_fonte", "direcao",
+    "score", "ativos", "publicado_em",
 )
+
+
+def _iso_valido(valor) -> bool:
+    """`publicado_em` do caminho NewsAPI (`publishedAt`) entra cru, sem passar
+    por `_parse_rss_date`. Um valor que o Postgres rejeita (coluna TIMESTAMPTZ)
+    faria o PostgREST devolver 400 e a linha INTEIRA se perder por causa de um
+    campo acessório — melhor descartar só ele."""
+    try:
+        datetime.datetime.fromisoformat(str(valor).replace("Z", "+00:00"))
+        return True
+    except (TypeError, ValueError):
+        return False
 
 
 def log_sent_news(entry: dict) -> None:
@@ -348,32 +364,59 @@ def log_sent_news(entry: dict) -> None:
     devolver 400 e o registro se perder inteiro.
     """
     payload = {k: entry[k] for k in _NEWS_LOG_FIELDS if entry.get(k) is not None}
+    if "publicado_em" in payload and not _iso_valido(payload["publicado_em"]):
+        del payload["publicado_em"]
     payload["sent_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     try:
         with _client() as c:
             r = c.post("/news_log", json=payload)
             r.raise_for_status()
-    except Exception:
-        pass
+    except Exception as e:
+        # já foi entregue quando isto roda — não pode desfazer o broadcast, mas
+        # não pode ficar mudo: sem isto, a migration não executada ou a escrita
+        # falhando ficava invisível para sempre (achado A4, revisão 18/08/2026).
+        logger.warning("news_log write failed: %s", e)
 
 
-def get_news_log(hours: int = 72, limit: int = 20) -> list[dict]:
+def _clamp_int(value, minimo: int, maximo: int, default: int) -> int:
+    """Trava genérica para inteiros que entram CRUS numa query PostgREST
+    (`limit=`/`hours=` não passam por `_f()`, ao contrário de `cutoff`). Na
+    Story 2 esses valores vêm de texto de WhatsApp interpretado pelo modelo —
+    `limit="5&titulo_pt=eq.x"` é injeção de filtro, não um número grande."""
+    try:
+        v = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimo, min(v, maximo))
+
+
+def get_news_log(hours: int = 72, limit: int = 20) -> dict:
     """Notícias entregues na janela, mais recentes primeiro.
-    Devolve [] em qualquer falha — o agente segue com as outras ferramentas."""
+
+    Devolve {"itens": [...]}; em falha, {"itens": [], "aviso": "..."} — a lista
+    vazia sozinha não distingue "não houve notícia" de "o registro não
+    respondeu", e a Story 2 vai usar isto como ferramenta do Claude: lista
+    vazia lida como fato confirmado ("conferi, não enviei nada sobre X") é
+    negativa autoritária e errada — pior que o incidente que esta tabela existe
+    para corrigir (achado A5, revisão 18/08/2026).
+    """
+    hours = _clamp_int(hours, 1, 24 * 90, 72)  # 90 dias = janela de retenção sugerida na migration
+    limit = _clamp_int(limit, 1, 100, 20)
     cutoff = (
         datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
     ).isoformat()
     try:
         with _client() as c:
             r = c.get(
-                f"/news_log?select=news_id,titulo_pt,titulo_original,fonte,url,"
-                f"categoria,resumo,direcao,score,ativos,publicado_em,sent_at"
+                f"/news_log?select=news_id,titulo_pt,titulo_original,fonte,feed,url,"
+                f"url_publisher,categoria,resumo,resumo_fonte,direcao,score,ativos,"
+                f"publicado_em,sent_at"
                 f"&sent_at=gte.{_f(cutoff)}&order=sent_at.desc&limit={limit}"
             )
             r.raise_for_status()
-            return r.json()
+            return {"itens": r.json()}
     except Exception:
-        return []
+        return {"itens": [], "aviso": "registro indisponível"}
 
 
 def count_recent_broadcasts(hours: int = 24) -> int:

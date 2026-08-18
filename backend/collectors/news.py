@@ -272,11 +272,21 @@ def _collect_rss(client: httpx.Client, feeds: list[tuple[str, str]], vistos: set
                 if not _is_fresh(pub_date):
                     continue
                 description = item.findtext("description") or ""
+                # O Google Notícias carimba o veículo real em <source url="...">Nome</source>.
+                # Sem isso, `fonte` era o apelido da BUSCA ("GN USDA/WASDE") — atribuição
+                # de autoria falsa (achado A6) — e o <link> é uma página JS de ~592 KB que
+                # `read_article` não consegue ler (achado A2, incidente USDA de 18/08/2026).
+                # Não decodificar o CBMi... do link: é protobuf não documentado do Google.
+                source_el = item.find("source")
+                publisher_nome = (source_el.text or "").strip() if source_el is not None and source_el.text else ""
+                publisher_url = source_el.get("url") if source_el is not None else None
                 vistos.add(link)
                 artigos.append({
                     "titulo": title.strip(),
-                    "fonte": source_name,
+                    "fonte": publisher_nome or source_name,
+                    "feed": source_name,
                     "url": link,
+                    "url_publisher": publisher_url,
                     "publicado_em": pub_date,
                     "resumo": description[:300].strip() if description else None,
                 })

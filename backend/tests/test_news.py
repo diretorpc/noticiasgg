@@ -147,6 +147,70 @@ def test_collect_rss_parses_items():
     assert artigos[0]["url"] == "https://example.com/article-1"
 
 
+def _google_news_rss(link: str, source_url: str | None, source_nome: str | None) -> bytes:
+    now = datetime.now(timezone.utc)
+    d = format_datetime(now - timedelta(hours=1))
+    source_tag = (
+        f'<source url="{source_url}">{source_nome}</source>'
+        if source_url is not None else ""
+    )
+    return f"""<?xml version="1.0"?><rss version="2.0"><channel>
+    <item>
+      <title>USDA corn report - Farm Progress</title>
+      <link>{link}</link>
+      <pubDate>{d}</pubDate>
+      <description>Corn quality falls.</description>
+      {source_tag}
+    </item>
+    </channel></rss>""".encode()
+
+
+@pytest.mark.unit
+def test_collect_rss_extrai_publisher_do_google_news():
+    """O link do Google Notícias é uma página JS de ~592 KB, ilegível por read_article
+    (404 na prática). O <source url> do item traz o veículo real — sem ele o agente
+    não consegue conferir a fonte (achado A2, incidente USDA de 18/08/2026)."""
+    mock_resp = MagicMock(
+        status_code=200,
+        content=_google_news_rss(
+            "https://news.google.com/rss/articles/CBMi_fake_base64",
+            "https://www.farmprogress.com",
+            "Farm Progress",
+        ),
+    )
+    mock_client = MagicMock()
+    mock_client.get.return_value = mock_resp
+
+    artigos = _collect_rss(mock_client, [("GN USDA/WASDE", "https://news.google.com/rss/search?q=x")], set())
+
+    assert len(artigos) == 1
+    assert artigos[0]["url_publisher"] == "https://www.farmprogress.com"
+    # `fonte` vira o veículo real, não o apelido da busca — attribution correta
+    # para quando a Story 2 disser "segundo X" (achado A6).
+    assert artigos[0]["fonte"] == "Farm Progress"
+    # o apelido do feed sobrevive em campo próprio, para rastrear qual busca achou
+    assert artigos[0]["feed"] == "GN USDA/WASDE"
+
+
+@pytest.mark.unit
+def test_collect_rss_sem_source_mantem_comportamento_atual():
+    """Feed comum (sem <source>, a maioria) não pode regredir: fonte continua
+    sendo o nome do feed, url_publisher fica None."""
+    mock_resp = MagicMock(
+        status_code=200,
+        content=_google_news_rss("https://example.com/artigo", None, None),
+    )
+    mock_client = MagicMock()
+    mock_client.get.return_value = mock_resp
+
+    artigos = _collect_rss(mock_client, [("Farm Progress", "https://www.farmprogress.com/rss.xml")], set())
+
+    assert len(artigos) == 1
+    assert artigos[0]["fonte"] == "Farm Progress"
+    assert artigos[0]["feed"] == "Farm Progress"
+    assert artigos[0]["url_publisher"] is None
+
+
 @pytest.mark.unit
 def test_collect_rss_deduplicates():
     mock_resp = MagicMock()
