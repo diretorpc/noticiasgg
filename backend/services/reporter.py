@@ -162,8 +162,14 @@ def _safe_collect(fn):
     (generate_report → json.dumps(context)) em TODA conversa. Mascara aqui
     de novo mesmo que cada coletor já se proteja por conta própria — é o
     único ponto que os 8 coletores de _COLLECTORS atravessam sempre, então
-    qualquer credencial que escape de um deles (hoje ou por coletor futuro
-    adicionado sem essa proteção) é pega aqui antes de chegar ao Claude."""
+    qualquer parâmetro `api_key=`/`apiKey=`/`API_KEY=` (qualquer grafia) que
+    escape de um deles (hoje ou por coletor futuro adicionado sem essa
+    proteção) é pega aqui antes de chegar ao Claude. NÃO cobre outra forma de
+    credencial — header Authorization, ou outro nome de parâmetro (`token=`,
+    `secret=`) — só o que sanitize_error reconhece (corrigido docstring,
+    achado 2, revisão 18/08/2026 — a frase antiga dizia "qualquer credencial",
+    e isso era falso para o `apiKey=` da NewsAPI antes do regex ficar
+    case-insensitive)."""
     try:
         return fn()
     except Exception as e:
