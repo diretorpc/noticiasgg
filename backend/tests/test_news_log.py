@@ -354,6 +354,40 @@ def test_check_news_manda_o_link_na_mensagem(monkeypatch):
 
 
 @pytest.mark.unit
+def test_check_news_grava_log_antes_de_marcar_dedup(monkeypatch):
+    """log_sent_news (registro legível) tem que rodar ANTES de mark_news_sent
+    (dedup): se o Supabase soluçar entre as duas, essa ordem perde só o dedup —
+    a ordem invertida perderia o vestígio que o agente de chat usa para responder
+    "me fale mais sobre essa notícia" (achado A9). O invariante morava só num
+    comentário no código-fonte; nenhum teste afirmava a ordem — inverter as duas
+    chamadas passava nos 299 testes existentes."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "chave-de-teste")
+    ordem: list[str] = []
+    monkeypatch.setattr(alert_checker.supabase, "log_sent_news",
+                        lambda *a, **k: ordem.append("log"))
+    monkeypatch.setattr(alert_checker.supabase, "mark_news_sent",
+                        lambda *a, **k: ordem.append("mark"))
+    monkeypatch.setattr(alert_checker.supabase, "set_alert_triggered", lambda *a, **k: None)
+    monkeypatch.setattr(alert_checker.supabase, "is_news_sent", lambda *a, **k: False)
+    monkeypatch.setattr(alert_checker.supabase, "get_recent_sent_titles", lambda *a, **k: [])
+    monkeypatch.setattr(alert_checker, "_cooldown_ok", lambda *a, **k: True)
+    monkeypatch.setattr(alert_checker, "_broadcast",
+                        lambda msg, recipients, errors=None: 1)
+    monkeypatch.setattr("backend.collectors.news.collect", lambda *a, **k: [_ARTIGO])
+
+    fake_msg = MagicMock()
+    fake_msg.content = [MagicMock(text=json.dumps(_CLASSIFICACAO))]
+    fake_client = MagicMock()
+    fake_client.messages.create = MagicMock(return_value=fake_msg)
+    monkeypatch.setattr(alert_checker, "Anthropic", lambda *a, **k: fake_client)
+
+    alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
+
+    assert "log" in ordem and "mark" in ordem
+    assert ordem.index("log") < ordem.index("mark")
+
+
+@pytest.mark.unit
 def test_check_news_em_test_mode_nao_grava_no_log(monkeypatch):
     """test_mode existe para conferência visual sem sujar o estado — o log
     não pode virar a exceção que suja."""
