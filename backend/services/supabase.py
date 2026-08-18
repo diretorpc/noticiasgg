@@ -333,6 +333,49 @@ def get_recent_sent_titles(hours: int = 24, limit: int = 20) -> list[str]:
         return [row["title"] for row in r.json()]
 
 
+_NEWS_LOG_FIELDS = (
+    "news_id", "titulo_pt", "titulo_original", "fonte", "url",
+    "categoria", "resumo", "direcao", "score", "ativos", "publicado_em",
+)
+
+
+def log_sent_news(entry: dict) -> None:
+    """Registro legível da notícia entregue como alerta.
+
+    Nunca estoura para o chamador: o alerta já foi ENVIADO quando isto roda,
+    então falhar aqui não pode desfazer nem interromper o broadcast. A lista
+    branca de campos existe porque uma chave fora do contrato faz o PostgREST
+    devolver 400 e o registro se perder inteiro.
+    """
+    payload = {k: entry[k] for k in _NEWS_LOG_FIELDS if entry.get(k) is not None}
+    payload["sent_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    try:
+        with _client() as c:
+            r = c.post("/news_log", json=payload)
+            r.raise_for_status()
+    except Exception:
+        pass
+
+
+def get_news_log(hours: int = 72, limit: int = 20) -> list[dict]:
+    """Notícias entregues na janela, mais recentes primeiro.
+    Devolve [] em qualquer falha — o agente segue com as outras ferramentas."""
+    cutoff = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
+    ).isoformat()
+    try:
+        with _client() as c:
+            r = c.get(
+                f"/news_log?select=news_id,titulo_pt,titulo_original,fonte,url,"
+                f"categoria,resumo,direcao,score,ativos,publicado_em,sent_at"
+                f"&sent_at=gte.{_f(cutoff)}&order=sent_at.desc&limit={limit}"
+            )
+            r.raise_for_status()
+            return r.json()
+    except Exception:
+        return []
+
+
 def count_recent_broadcasts(hours: int = 24) -> int:
     """Nº de notícias efetivamente enviadas (title não-nulo) na janela — sinal de vida."""
     cutoff = (
