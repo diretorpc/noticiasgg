@@ -9,9 +9,10 @@
 -- Colunas pareadas (revisão de 18/08/2026 — achados A2, A3, A6):
 --   fonte x feed: `fonte` é o veículo real (ex: "Farm Progress"), preenchido a
 --     partir do <source> do Google Notícias quando existe; senão cai para o
---     apelido do feed. `feed` guarda SEMPRE o apelido da consulta que achou a
---     notícia (ex: "GN USDA/WASDE") — sem isso o registro atribuía a notícia à
---     busca, não ao jornal que escreveu.
+--     apelido do feed. `feed` guarda o apelido da consulta que achou a notícia
+--     (ex: "GN USDA/WASDE") — sem isso o registro atribuía a notícia à busca, e
+--     não ao jornal que escreveu. Só o caminho RSS preenche `feed`; alerta vindo
+--     do NewsAPI grava NULL (o `fonte` de lá já é o veículo real).
 --   url x url_publisher: `url` é o link que o alerta manda (a busca do Google
 --     Notícias devolve uma página JS de ~592 KB, ilegível por read_article).
 --     `url_publisher` é o domínio do veículo real, quando o feed informa.

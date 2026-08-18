@@ -22,7 +22,7 @@ Agente de IA multi-domínio, backend em Python/FastAPI:
 
 Fonte viva do que existe hoje: `README.md` e `CLAUDE.md` na raiz do projeto.
 
-## Estado em 18/08/2026 — alucinação em conversa: causa achada, plano escrito, NADA implementado
+## Estado em 18/08/2026 — alucinação em conversa: Story 1 ENTREGUE, faltam 2, 3 e 4
 
 **O incidente.** Às 12:00–12:11 de 18/08 o agente respondeu cinco vezes sobre o mesmo
 relatório do USDA e deu números e datas diferentes em cada uma (milho 67%→63%, depois
@@ -48,15 +48,47 @@ Conversa lida direto de `conversation_history` no Supabase, não de memória.
    nem título, link ou data em forma legível. Quando o usuário responde "me fale mais
    sobre essa notícia", o agente não tem vestígio nenhum dela e preenche do nada.
 
-**O que existe hoje:** só o plano. Nenhuma linha de código mudou nesta sessão.
-→ `docs/superpowers/plans/2026-08-18-noticias-ancoradas-e-antialucinacao.md`
+**Plano:** `docs/superpowers/plans/2026-08-18-noticias-ancoradas-e-antialucinacao.md`
 4 stories, ordem obrigatória: (1) tabela `news_log` + link no alerta; (2) ferramenta
 `get_sent_news` no chat; (3) validador ligado em chat com corpus de ferramenta + data
 de hoje etiquetada `<hoje>`; (4) evals no CI com a conversa real como fixture.
 
-**Armadilha da Story 1:** a migration `007_news_log.sql` roda À MÃO no SQL Editor do
-Supabase. Se esquecer, `log_sent_news` engole a falha em silêncio de propósito (para
-não derrubar o alerta já entregue) e a Story 2 devolve lista vazia para sempre.
+### Story 1 — ENTREGUE no código (branch `feat/noticias-ancoradas`, não mergeada)
+
+Tabela `news_log` (migration 007) com título, veículo real, link, data, resumo e nota;
+`log_sent_news`/`get_news_log`; o alerta grava depois de entregar e mostra o 🔗 na
+mensagem; cross-check no boletim diário acusa escrita silenciosa. Stories 2, 3 e 4
+**não foram começadas**.
+
+⛔ **A migration roda À MÃO no SQL Editor do Supabase e ainda NÃO rodou.** Se esquecer,
+`log_sent_news` engole a falha de propósito (para não derrubar alerta já entregue) e o
+registro fica vazio para sempre — o sintoma aparece só no `/api/health` como
+`warn: registro indisponível`. Conferir na fonte viva antes de dizer que está de pé:
+```bash
+python -X utf8 -c "import os,pathlib;[os.environ.setdefault(k.strip(),v.strip().strip(chr(34))) for k,v in (l.split('=',1) for l in pathlib.Path('.env').read_text(encoding='utf-8').splitlines() if '=' in l and not l.strip().startswith('#'))];from backend.services import supabase as s;print('news_log ->', s._client().get('/news_log?select=id&limit=1').status_code)"
+```
+`200` = existe · `404` = não rodou.
+
+**Limite conhecido da Story 1, medido:** para as notícias dos 6 feeds de busca do Google
+Notícias — inclusive a do incidente — a âncora é fraca. O `url` é uma página JS que o
+`read_article` não lê, o `url_publisher` é só o domínio, e o `resumo_fonte` do RSS vem
+como markup (10 de 20 feeds) ou vazio (3 de 20). Sobra título + veículo. **A Story 1
+sozinha não cura o caso do USDA** — depende da Story 3.
+
+### Varredura de credencial (fora do plano, virou metade da sessão)
+
+Revisando a Story 1, o Apolo achou que erro de fornecedor voltava CRU para o contexto
+do agente e para o `conversation_history`. Como o ScraperAPI põe a chave no endereço,
+a `SCRAPER_API_KEY` vazava — e o Matheus a rotacionou em 18/08. A varredura completa
+achou **6 caminhos**, não 1: `web_search`, `agro_search`, `market`, `esalq`, `eia`
+(chave da EIA) e `investing_calendar` (esse vazava por três saídas ao mesmo tempo:
+log, WhatsApp do admin e resposta pública da API). `indicators_us` não tinha proteção
+por série nenhuma — um soluço do FRED mandava a chave dele para toda conversa.
+
+Fechado com `services/secrets_mask.py` (módulo neutro, para coletor não depender de
+serviço) e máscara nos dois `_safe_collect`, que são os pontos únicos por onde todo
+coletor passa antes de entrar no prompt. **Regra que ficou: erro de fornecedor externo
+nunca volta cru para dentro do contexto do agente.**
 
 **Como conferir que a correção pegou, depois de implementada:**
 `python -m backend.evals.news_recall_eval` — meta: `recuperou_do_log` igual a `casos`,
@@ -236,11 +268,20 @@ python -c "from backend.collectors import news; print(news.source_health())"
 
 ## Aberto
 
-- [ ] 🔴 **Executar o plano anti-alucinação de 18/08** (4 stories, ordem obrigatória) —
+- [ ] 🔴 **Rodar a migration `007_news_log.sql` no SQL Editor do Supabase.** Sem ela a
+      Story 1 está no código e morta no banco, em silêncio. Comando de conferência na
+      seção de 18/08.
+- [ ] 🔴 **Stories 2, 3 e 4 do plano anti-alucinação** —
       `docs/superpowers/plans/2026-08-18-noticias-ancoradas-e-antialucinacao.md`.
-      Enquanto não rodar, o agente segue inventando número e data quando perguntam
-      sobre notícia do RSS. Falta o Matheus escolher como executar (subagente por
-      story vs. inline).
+      Enquanto não forem feitas, o agente segue inventando número e data quando
+      perguntam sobre notícia do RSS: a Story 1 guarda o registro, mas **ninguém o lê
+      ainda** (a ferramenta `get_sent_news` é da Story 2).
+- [ ] 🟡 Achados do revisor deixados para depois (nenhum trava a entrega): prompt de
+      commodities pode preencher número quando o scraping cai inteiro; `BRAPI_TOKEN` vai
+      na URL e a máscara não cobre `token=` (hoje não vaza, `stocks.py` engole o erro);
+      `build_fact_corpus` descarta a entrada inteira se ela tiver dado bom E `"erro"`
+      juntos — decidir a regra na Story 3; `score = result.get("score", 0)` devolve
+      `None` se o classificador mandar `null`.
 - [ ] **Conferir o volume em 16/08** com o comando acima (esperado ~18/dia). É a
       primeira medição depois do freio de `9c62ae0`.
 - [ ] Testes que batem em API externa (`test_crypto.py`, `test_indicators_br.py`) falham

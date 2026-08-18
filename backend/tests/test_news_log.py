@@ -248,9 +248,20 @@ def test_format_news_alert_rejeita_url_sem_esquema_http():
 @pytest.mark.unit
 def test_format_news_alert_rejeita_url_absurdamente_longa():
     msg = alert_checker._format_news_alert(
-        {}, "Reuters", "Título", 7, False, url="https://example.com/" + "a" * 400
+        {}, "Reuters", "Título", 7, False, url="https://example.com/" + "a" * 1200
     )
     assert "🔗" not in msg
+
+
+@pytest.mark.unit
+def test_format_news_alert_aceita_link_longo_de_google_noticias():
+    """Regressão medida em 18/08/2026: o teto antigo de 400 apagava o link de
+    10,7% dos itens de feed GN (máximo real medido: 713 caracteres), sem log e
+    sem aviso — justo o link que a Story 1 existe para entregar."""
+    url = "https://news.google.com/rss/articles/" + "CBMi" * 175  # 737 chars
+    assert len(url) > 700
+    msg = alert_checker._format_news_alert({}, "Reuters", "Título", 7, False, url=url)
+    assert url in msg
 
 
 def _prepara_check_news(monkeypatch, artigo, classificacao, sent: int = 1):

@@ -346,11 +346,16 @@ def _build_classifier_input(article: dict, market_snapshot: str, recent_titles: 
     return "\n".join(parts)
 
 
-# Teto que casa com _build_classifier_input (`title[:300]`, `resumo[:300]`) — não é
-# um número solto: URL de busca aberta do Google Notícias (6 dos 20 feeds) pode
-# devolver lixo, e uma mensagem de WhatsApp não deveria carregar isso sem checagem
-# (achado A7, revisão 18/08/2026).
-_URL_MAX_LEN = 400
+# O teto existe para link de terceiro não entrar cru na mensagem (6 dos 20 feeds são
+# busca aberta do Google Notícias). O valor NÃO é analogia com `title[:300]` — essa
+# escolha foi medida e reprovada: dos 225 itens de feed GN numa coleta real de
+# 18/08/2026, 24 (10,7%) tinham link com 400+ caracteres, máximo 713. O teto de 400
+# apagava o 🔗 de 1 em cada 9 alertas do Google, calado — e o link é metade do que a
+# Story 1 existe para entregar. WhatsApp aceita ~4096 numa mensagem, então 1000 tem
+# folga de 1,4× sobre o maior link visto e ainda barra lixo.
+# Medir antes de mexer — número em comentário apodrece:
+#   python -c "from backend.collectors import news; a=news.collect(include_ai=False, include_newsapi=False); u=[x['url'] for x in a if x.get('url')]; print(len(u),'links · max',max(len(x) for x in u))"
+_URL_MAX_LEN = 1000
 
 
 def _url_exibivel(url: str) -> bool:
