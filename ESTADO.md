@@ -60,10 +60,12 @@ Tabela `news_log` (migration 007) com título, veículo real, link, data, resumo
 mensagem; cross-check no boletim diário acusa escrita silenciosa. Stories 2, 3 e 4
 **não foram começadas**.
 
-⛔ **A migration roda À MÃO no SQL Editor do Supabase e ainda NÃO rodou.** Se esquecer,
-`log_sent_news` engole a falha de propósito (para não derrubar alerta já entregue) e o
-registro fica vazio para sempre — o sintoma aparece só no `/api/health` como
-`warn: registro indisponível`. Conferir na fonte viva antes de dizer que está de pé:
+✅ **A migration FOI executada em 18/08** — conferido na fonte viva: tabela existe e as
+15 colunas que o código lê respondem 200. Fica o aviso para o futuro: ela roda À MÃO no
+SQL Editor, e se um dia alguém recriar o ambiente e esquecer, `log_sent_news` engole a
+falha de propósito (para não derrubar alerta já entregue) e o registro fica vazio para
+sempre — o sintoma aparece só no `/api/health` como `warn: registro indisponível`.
+Conferir na fonte viva, nunca no documento:
 ```bash
 python -X utf8 -c "import os,pathlib;[os.environ.setdefault(k.strip(),v.strip().strip(chr(34))) for k,v in (l.split('=',1) for l in pathlib.Path('.env').read_text(encoding='utf-8').splitlines() if '=' in l and not l.strip().startswith('#'))];from backend.services import supabase as s;print('news_log ->', s._client().get('/news_log?select=id&limit=1').status_code)"
 ```
