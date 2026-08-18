@@ -77,7 +77,11 @@ def collect() -> dict:
                         data["unidade"] = unidade
                         resultado[nome] = data
                     except Exception as e:
-                        resultado[nome] = {"erro": sanitize_error(e)}
+                        # Sem log, 3 séries falhando não deixavam rastro nenhum
+                        # (achado 5, revisão 18/08/2026 — 4ª rodada).
+                        err = sanitize_error(e)
+                        logger.warning("eia: série '%s' falhou: %s", nome, err)
+                        resultado[nome] = {"erro": err}
             except TimeoutError:
                 logger.warning("eia: timeout waiting for series, returning partial results")
 

@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
@@ -8,6 +9,7 @@ from backend.services.secrets_mask import sanitize_error
 
 load_dotenv()
 
+logger = logging.getLogger("noticiasgg")
 router = APIRouter()
 
 FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
@@ -69,7 +71,12 @@ def collect() -> dict:
         try:
             resultado[nome] = _fetch_series(series_id, api_key)
         except Exception as e:
-            resultado[nome] = {"erro": sanitize_error(e)}
+            # Sem log, FRED caído 4/4 não deixava uma linha sequer — a
+            # degradação era invisível até alguém notar o relatório manco
+            # (achado 5, revisão 18/08/2026 — 4ª rodada).
+            err = sanitize_error(e)
+            logger.warning("indicators_us: série '%s' falhou: %s", nome, err)
+            resultado[nome] = {"erro": err}
     return resultado
 
 

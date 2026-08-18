@@ -27,6 +27,19 @@ O que DEVE ser preservado:
 Retorne APENAS o relatório corrigido, sem prefácio, sem explicação, sem comentário."""
 
 
+def _sem_series_com_erro(val):
+    """Remove sub-entradas que degradaram individualmente (indicators_us/
+    indicators_br falham por série, não por completo — uma série caída não
+    derruba as outras). Só um nível: `val` é um dict de {chave: sub-dict}, e
+    cada sub-dict pode carregar "erro" isoladamente. Listas (ex: crypto) e
+    dicts de dois níveis (ex: market: categoria→símbolo→dado) passam
+    intactos — não é o formato que este filtro cobre (achado 5, revisão
+    18/08/2026 — 4ª rodada; gêmeo de report_engine._safe_dict)."""
+    if isinstance(val, dict):
+        return {k: v for k, v in val.items() if not (isinstance(v, dict) and "erro" in v)}
+    return val
+
+
 def build_fact_corpus(data: dict) -> str:
     """Serializa as partes mais relevantes dos dados coletados para o validador.
     Limita o tamanho para manter custo de tokens baixo."""
@@ -34,7 +47,8 @@ def build_fact_corpus(data: dict) -> str:
     for key in ("market", "crypto", "indicators_br", "indicators_us", "commodities_br"):
         val = data.get(key)
         if val and not (isinstance(val, dict) and "erro" in val):
-            parts.append(f"{key}: {json.dumps(val, ensure_ascii=False, default=str)}")
+            limpo = _sem_series_com_erro(val)
+            parts.append(f"{key}: {json.dumps(limpo, ensure_ascii=False, default=str)}")
     for key, label, limit in (
         ("news", "Notícias", 10),
         ("politics_br", "Política", 5),
