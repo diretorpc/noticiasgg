@@ -107,6 +107,26 @@ def _extract_message(message: dict) -> dict:
     return {"type": "unknown"}
 
 
+def _extract_quoted_message_id(data: dict) -> str | None:
+    """Id da mensagem CITADA quando o usuário responde com "Responder" no
+    WhatsApp (sessão 'noticias-ancoradas', Parte C, 18/08/2026).
+
+    Medido AO VIVO em 18/08/2026 (mensagem de teste enviada, respondida com
+    "Responder" pelo dono): para texto simples (`messageType` "conversation")
+    o `contextInfo` mora no TOPO do registro — irmão de `message`, NÃO dentro
+    dele. `data.get("contextInfo")` é a primeira tentativa por ser a que foi
+    OBSERVADA; `message.extendedTextMessage.contextInfo` é a segunda porque o
+    formato pode variar por tipo de mensagem (não foi o que apareceu na
+    medição, mas é o caminho sugerido pela forma como a Evolution documenta
+    outros campos aninhados)."""
+    stanza_id = (data.get("contextInfo") or {}).get("stanzaId")
+    if stanza_id:
+        return stanza_id
+    message = data.get("message", {}) or {}
+    ext = message.get("extendedTextMessage", {}) or {}
+    return (ext.get("contextInfo") or {}).get("stanzaId")
+
+
 def _admin_phone() -> str:
     return os.environ.get("REPLY_TO_NUMBER", "")
 
@@ -722,8 +742,16 @@ async def whatsapp_webhook(request: Request):
             return {"status": "ok"}
 
         # ── Texto (fluxo original) ─────────────────────────────────────────────
+        # Resposta citando um alerta de notícia: casa pelo id EXATO da mensagem
+        # (contextInfo.stanzaId) — determinístico, não é o modelo escolhendo
+        # entre candidatas. Id desconhecido (mensagem não é notícia, ou o
+        # registro já foi limpo) devolve None e o fluxo segue igual a antes.
+        quoted_message_id = _extract_quoted_message_id(data)
+        anchored_news = supabase.get_news_by_message_id(quoted_message_id) if quoted_message_id else None
+
         supabase.save_message(target_phone, "user", text)
-        reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"), sections={})
+        reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"),
+                                         sections={}, anchored_news=anchored_news)
         supabase.save_message(target_phone, "assistant", reply)
         _maybe_summarize(target_phone)
         if audio_for_text:

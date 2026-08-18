@@ -326,17 +326,43 @@ def _collect_all(sections: dict | None = None) -> dict:
     }
 
 
+def _format_anchored_news(noticia: dict) -> str:
+    """Bloco de contexto para quando o usuário RESPONDE citando um alerta de
+    notícia que o próprio agente mandou (sessão 'noticias-ancoradas', Parte C,
+    18/08/2026). `main.py` já casou o id exato da mensagem citada com a linha
+    de `news_log` — determinístico, o modelo não escolhe entre candidatas.
+    `conteudo` vem vazio quando a captura (Parte A) falhou: o texto explícito
+    de fallback existe para o modelo DIZER que não tem o texto em vez de
+    inventar a partir só do título."""
+    titulo = noticia.get("titulo_pt") or noticia.get("titulo_original") or ""
+    conteudo = noticia.get("conteudo") or "não capturado — diga isso e não invente"
+    return (
+        "<noticia_citada>\n"
+        "Esta é a notícia que o usuário está citando. Ela FOI enviada por você. "
+        "Use SÓ os fatos daqui.\n"
+        f"titulo: {titulo}\n"
+        f"fonte: {noticia.get('fonte') or ''}\n"
+        f"publicado_em: {noticia.get('publicado_em') or ''}\n"
+        f"url: {noticia.get('url') or ''}\n"
+        f"conteudo: {conteudo}\n"
+        "</noticia_citada>"
+    )
+
+
 def generate_report(
     user_message: str,
     history: list[dict] | None = None,
     user_name: str | None = None,
     sections: dict | None = None,
     media_attachment: dict | None = None,
+    anchored_news: dict | None = None,
 ) -> str:
     """Gera resposta do agente.
 
     media_attachment: {"type": "image"|"document", "b64": str, "mime": str}
     Quando presente, passa a mídia diretamente para Claude Vision/Documents API.
+    anchored_news: notícia que o usuário está citando (resposta com "Responder"
+    do WhatsApp a um alerta), já casada pelo id exato da mensagem em main.py.
     """
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], timeout=_ANTHROPIC_TIMEOUT, max_retries=1)
     data = _collect_all(sections=sections)
@@ -372,6 +398,9 @@ def generate_report(
         )
     else:
         text_block = f"Mensagem do usuário: {user_message}"
+
+    if anchored_news:
+        text_block += "\n\n" + _format_anchored_news(anchored_news)
 
     if media_attachment:
         mime = media_attachment["mime"].split(";")[0].strip()
