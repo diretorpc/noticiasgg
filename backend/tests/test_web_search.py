@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import httpx
 import pytest
@@ -67,3 +67,49 @@ def test_search_sem_chave_nao_faz_requisicao(monkeypatch):
     monkeypatch.delenv("SCRAPER_API_KEY", raising=False)
     result = web_search.search("soja")
     assert result == {"erro": "SCRAPER_API_KEY não configurada"}
+
+
+def _resp_html(html: str) -> MagicMock:
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.text = html
+    return resp
+
+
+@pytest.mark.unit
+def test_read_article_usa_render_para_link_do_google_noticias(monkeypatch):
+    """Medido 18/08/2026: o fetch simples do ScraperAPI devolve 404 para link
+    do Google Notícias em 6 de 6 casos reais — render=true resolve. Só pode
+    ligar para esse domínio: custa 10x (header sa-credit-cost) e o tráfego
+    geral desta tool (usada livremente pelo agente de chat) não pode pagar
+    isso sempre."""
+    monkeypatch.setenv("SCRAPER_API_KEY", "chave-de-teste")
+    with patch("backend.services.web_search.httpx.get", return_value=_resp_html("<p>artigo</p>")) as mock_get:
+        web_search.read_article("https://news.google.com/rss/articles/abc")
+    assert mock_get.call_args.kwargs["params"]["render"] == "true"
+
+
+@pytest.mark.unit
+def test_read_article_nao_usa_render_para_link_normal(monkeypatch):
+    monkeypatch.setenv("SCRAPER_API_KEY", "chave-de-teste")
+    with patch("backend.services.web_search.httpx.get", return_value=_resp_html("<p>artigo</p>")) as mock_get:
+        web_search.read_article("https://www.farmprogress.com/artigo")
+    assert "render" not in mock_get.call_args.kwargs["params"]
+
+
+@pytest.mark.unit
+def test_read_article_timeout_customizavel(monkeypatch):
+    """`alert_checker` precisa de um teto bem maior que os 30s default para
+    dar tempo ao render=true (medido: até 49s por link real de GN)."""
+    monkeypatch.setenv("SCRAPER_API_KEY", "chave-de-teste")
+    with patch("backend.services.web_search.httpx.get", return_value=_resp_html("<p>artigo</p>")) as mock_get:
+        web_search.read_article("https://www.farmprogress.com/artigo", timeout=75.0)
+    assert mock_get.call_args.kwargs["timeout"] == 75.0
+
+
+@pytest.mark.unit
+def test_read_article_timeout_default_preservado(monkeypatch):
+    monkeypatch.setenv("SCRAPER_API_KEY", "chave-de-teste")
+    with patch("backend.services.web_search.httpx.get", return_value=_resp_html("<p>artigo</p>")) as mock_get:
+        web_search.read_article("https://www.farmprogress.com/artigo")
+    assert mock_get.call_args.kwargs["timeout"] == 30.0
