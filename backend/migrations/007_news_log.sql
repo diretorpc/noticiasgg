@@ -33,7 +33,11 @@ CREATE TABLE IF NOT EXISTS news_log (
     resumo          TEXT,
     resumo_fonte    TEXT,
     direcao         TEXT,
-    score           INT,
+    -- NUMERIC, não INT: o score vem do JSON do classificador Haiku. Um dia que
+    -- ele devolver 7.5, INT faz o PostgREST responder 400 e a LINHA INTEIRA se
+    -- perde — visível só como um logger.warning, porque log_sent_news engole a
+    -- exceção de propósito. Aceitar float custa nada e salva o registro.
+    score           NUMERIC,
     ativos          JSONB,
     publicado_em    TIMESTAMPTZ,
     sent_at         TIMESTAMPTZ NOT NULL DEFAULT now()
