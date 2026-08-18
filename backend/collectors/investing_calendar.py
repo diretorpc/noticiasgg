@@ -6,6 +6,8 @@ import time
 
 import httpx
 
+from backend.services.secrets_mask import sanitize_error
+
 logger = logging.getLogger("noticiasgg.investing")
 
 _SCRAPER_URL = "https://api.scraperapi.com/"
@@ -31,6 +33,14 @@ def fetch() -> str:
                 r = client.get(_SCRAPER_URL, params={"api_key": key, "url": _PAGE_URL})
                 r.raise_for_status()
                 return r.text
+        except httpx.HTTPStatusError as e:
+            # str(e) do httpx carrega a URL completa da requisição — com a
+            # SCRAPER_API_KEY no query string. Sem mascarar aqui, a chave vaza
+            # pro log (logger.exception em investing_digest.run), pra mensagem
+            # de WhatsApp do admin (notify_admin) e pro corpo JSON de
+            # /api/cron/investing quando o erro sobe até lá (achado extra,
+            # 18/08/2026 — não estava na lista original do levantamento).
+            raise RuntimeError(sanitize_error(e)) from e
         except (httpx.TimeoutException, httpx.ConnectError) as e:
             # Só lentidão/queda de conexão é retentada: erro HTTP (403/500) não
             # melhora repetindo e ainda gasta crédito do ScraperAPI.

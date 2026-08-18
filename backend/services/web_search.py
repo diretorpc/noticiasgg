@@ -3,30 +3,16 @@ import re
 import httpx
 from bs4 import BeautifulSoup
 
+from backend.services.secrets_mask import sanitize_error
+
 SCRAPER_API_URL = "https://api.scraperapi.com/structured/google/search"
 SCRAPER_FETCH_URL = "https://api.scraperapi.com/"
 
 _MAX_ARTICLE_CHARS = 4000
 
-# httpx.HTTPStatusError (e outras exceções de rede) carregam a URL completa da
-# requisição em str(e) — e a SCRAPER_API_KEY vai no query string dela. Sem
-# mascarar, a chave vaza para o tool_result devolvido ao Claude em reporter.py
-# e é gravada em conversation_history no Supabase (achado A1, revisão 18/08/2026).
-_API_KEY_RE = re.compile(r"api_key=[^&\s]*")
-
-
-def sanitize_error(e: Exception) -> str:
-    """Mascara a SCRAPER_API_KEY antes de devolver str(e) ao chamador.
-
-    Pública porque `agro_search` fala com o mesmo fornecedor e tem o mesmo
-    desenho (chave no query string). Se um dia outro parâmetro precisar de
-    máscara, o regex acima é o único lugar a mudar — por isso os dois módulos
-    compartilham esta função em vez de cada um ter a sua.
-    """
-    return _API_KEY_RE.sub("api_key=***", str(e))
-
-
-# Nome antigo, mantido para não quebrar chamador interno já escrito.
+# Reexportada aqui só por compatibilidade com quem já importa `web_search.sanitize_error`
+# (e o teste que acessa o nome antigo `_sanitize_error`). A definição mora em
+# `backend/services/secrets_mask.py` — ver o docstring de lá para o porquê.
 _sanitize_error = sanitize_error
 
 

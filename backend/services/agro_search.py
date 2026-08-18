@@ -1,7 +1,7 @@
 import os
 import httpx
 
-from backend.services.web_search import sanitize_error
+from backend.services.secrets_mask import sanitize_error
 
 SCRAPER_API_URL = "https://api.scraperapi.com/structured/google/search"
 

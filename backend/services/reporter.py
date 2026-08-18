@@ -14,6 +14,7 @@ from backend.services.integrity import (
     ANALYSIS_MARKERS as _ANALYSIS_MARKERS,
     SYSTEM_VALIDATOR as _SYSTEM_VALIDATOR,
 )
+from backend.services.secrets_mask import sanitize_error
 
 logger = logging.getLogger("noticiasgg")
 
@@ -157,10 +158,16 @@ _SYSTEM_CHAT += _SANITY_RULES
 
 
 def _safe_collect(fn):
+    """Escotilha final antes do contexto virar JSON na mensagem do usuário
+    (generate_report → json.dumps(context)) em TODA conversa. Mascara aqui
+    de novo mesmo que cada coletor já se proteja por conta própria — é o
+    único ponto que os 8 coletores de _COLLECTORS atravessam sempre, então
+    qualquer credencial que escape de um deles (hoje ou por coletor futuro
+    adicionado sem essa proteção) é pega aqui antes de chegar ao Claude."""
     try:
         return fn()
     except Exception as e:
-        return {"erro": str(e)}
+        return {"erro": sanitize_error(e)}
 
 
 _COLLECTORS = {

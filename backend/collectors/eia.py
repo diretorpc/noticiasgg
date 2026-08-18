@@ -7,6 +7,8 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException
 
+from backend.services.secrets_mask import sanitize_error
+
 load_dotenv()
 
 logger = logging.getLogger("noticiasgg")
@@ -75,7 +77,7 @@ def collect() -> dict:
                         data["unidade"] = unidade
                         resultado[nome] = data
                     except Exception as e:
-                        resultado[nome] = {"erro": str(e)}
+                        resultado[nome] = {"erro": sanitize_error(e)}
             except TimeoutError:
                 logger.warning("eia: timeout waiting for series, returning partial results")
 

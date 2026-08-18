@@ -6,6 +6,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as
 import httpx
 from fastapi import APIRouter, HTTPException
 
+from backend.services.secrets_mask import sanitize_error
+
 router = APIRouter()
 
 SYMBOLS = {
@@ -99,7 +101,7 @@ def _fetch_via_scraperapi(symbol: str) -> dict:
         data = _parse_v8_meta(result[0]["meta"])
         return data if data else {"preco": None, "variacao_pct": None, "erro": "sem dados"}
     except Exception as e:
-        return {"preco": None, "variacao_pct": None, "erro": str(e)}
+        return {"preco": None, "variacao_pct": None, "erro": sanitize_error(e)}
 
 
 def _fetch_all_scraperapi(missing_symbols: dict) -> dict:
@@ -115,7 +117,7 @@ def _fetch_all_scraperapi(missing_symbols: dict) -> dict:
             try:
                 resultado[(cat, nom)] = future.result()
             except Exception as e:
-                resultado[(cat, nom)] = {"preco": None, "variacao_pct": None, "erro": str(e)}
+                resultado[(cat, nom)] = {"preco": None, "variacao_pct": None, "erro": sanitize_error(e)}
     return resultado
 
 

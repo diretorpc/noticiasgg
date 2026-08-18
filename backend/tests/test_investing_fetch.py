@@ -77,13 +77,18 @@ def test_fetch_raises_after_second_timeout(monkeypatch, no_sleep):
 
 
 def test_fetch_does_not_retry_on_http_error(monkeypatch, no_sleep):
-    """403/500 do ScraperAPI não é lentidão — repetir só gasta crédito."""
+    """403/500 do ScraperAPI não é lentidão — repetir só gasta crédito.
+
+    fetch() reembrulha httpx.HTTPStatusError em RuntimeError (ver
+    test_investing_calendar_leak.py): str(HTTPStatusError) carrega a URL
+    completa da requisição, com a SCRAPER_API_KEY no query string — precisa
+    passar por sanitize_error antes de subir para quem loga ou notifica."""
     monkeypatch.setenv("SCRAPER_API_KEY", "k")
     calls: list = []
     monkeypatch.setattr(investing_calendar.httpx, "Client", _fake_client_factory(
         [httpx.HTTPStatusError("403", request=None, response=None)], calls))
 
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(RuntimeError):
         investing_calendar.fetch()
     assert len(calls) == 1
 

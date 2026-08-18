@@ -4,6 +4,8 @@ from fastapi import APIRouter, HTTPException
 import httpx
 from dotenv import load_dotenv
 
+from backend.services.secrets_mask import sanitize_error
+
 load_dotenv()
 
 router = APIRouter()
@@ -56,9 +58,18 @@ def collect() -> dict:
     if not api_key:
         raise ValueError("FRED_API_KEY não configurada")
 
+    # Por série, não pro loop inteiro: uma série com problema (rate limit,
+    # instabilidade pontual do FRED) não pode derrubar as outras 3 nem, pior,
+    # deixar `httpx.HTTPStatusError` (que carrega a FRED_API_KEY na URL) subir
+    # cru até `_safe_collect` — daí ela vazaria pro contexto do agente em toda
+    # conversa (achado extra, 18/08/2026 — não estava na lista original;
+    # antes deste fix o loop nem tinha try/except nenhum).
     resultado = {}
     for series_id, nome in SERIES.items():
-        resultado[nome] = _fetch_series(series_id, api_key)
+        try:
+            resultado[nome] = _fetch_series(series_id, api_key)
+        except Exception as e:
+            resultado[nome] = {"erro": sanitize_error(e)}
     return resultado
 
 
