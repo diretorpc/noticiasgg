@@ -8,6 +8,7 @@ from backend.collectors import (
     commodities_br, politics_br, polls_br,
 )
 from backend.services import report_prompts, integrity
+from backend.services.secrets_mask import sanitize_error
 
 logger = logging.getLogger("noticiasgg")
 
@@ -21,7 +22,19 @@ _MAX_TOKENS = {
 
 
 def _safe_dict(val) -> dict:
-    return val if isinstance(val, dict) and "erro" not in val else {}
+    """Descarta o coletor inteiro se ele falhou por completo ({"erro": ...}
+    no topo). Do que sobrar, descarta também cada ENTRADA individual que
+    carrega erro: um coletor que degrada por série (indicators_us,
+    indicators_br — uma série cai, as outras seguem) não tinha esse filtro,
+    então texto de erro HTTP entrava cru no prompt do relatório (achado 5,
+    revisão 18/08/2026 — 4ª rodada). Só um nível de profundidade: cobre
+    indicators_us/indicators_br/commodities (dict de série→dado); bolsas/cambio
+    de `market_out` (dois níveis: categoria→símbolo→dado) não são alcançados
+    por este filtro — não fazia parte do achado, e filtrar errado ali
+    esconderia a categoria inteira em vez do símbolo que falhou."""
+    if not isinstance(val, dict) or "erro" in val:
+        return {}
+    return {k: v for k, v in val.items() if not (isinstance(v, dict) and "erro" in v)}
 
 
 def _safe_list(val) -> list:
@@ -68,10 +81,15 @@ def adapt_politica(politics_out: list, polls_out: list) -> dict:
 
 
 def _safe_collect(fn):
+    """Gêmeo de reporter._safe_collect — chokepoint do caminho de relatório
+    agendado (json.dumps(ctx) vira o prompt de toda seção). Mascara aqui de
+    novo mesmo que cada coletor já se proteja: é o único ponto que os
+    coletores de _collect atravessam sempre (achado 3, revisão 18/08/2026 —
+    4ª rodada; DRY com reporter._safe_collect, mesma justificativa)."""
     try:
         return fn()
     except Exception as e:
-        return {"erro": str(e)}
+        return {"erro": sanitize_error(e)}
 
 
 def _collect(section: str) -> dict:
