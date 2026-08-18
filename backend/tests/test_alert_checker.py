@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -182,6 +183,27 @@ def test_check_news_respeita_teto_de_classificacoes():
         alert_checker._check_news(_RECIPIENTS, test_mode=False)
 
     assert mock_anthropic.return_value.messages.create.call_count == 5
+
+
+def test_source_rule_id_normaliza_caracteres_especiais():
+    """A4: fonte publicadora real (conjunto ABERTO desde o conserto do A6) pode
+    trazer '&', '.', '(' — normaliza para caracteres seguros de URL/rule_id, senão
+    corta a query string do PostgREST em get_alert_last_triggered."""
+    rid = alert_checker._source_rule_id("S&P Global")
+    assert re.fullmatch(r"news_source_[a-z0-9_]+", rid), rid
+    assert "&" not in rid
+
+
+def test_source_rule_id_wicker_gov():
+    """Medido pelo Apolo contra uma coleta real: 'U.S. Senator Roger Wicker (.gov)'
+    é um publicador de verdade que aparece no <source> do Google Notícias."""
+    rid = alert_checker._source_rule_id("U.S. Senator Roger Wicker (.gov)")
+    assert re.fullmatch(r"news_source_[a-z0-9_]+", rid), rid
+
+
+def test_source_rule_id_mantem_compatibilidade_com_fontes_simples():
+    """Guarda de regressão: fonte sem caractere especial continua igual a antes."""
+    assert alert_checker._source_rule_id("Le Monde") == "news_source_le_monde"
 
 
 def test_check_news_cooldown_por_fonte():

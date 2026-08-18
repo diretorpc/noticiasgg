@@ -261,8 +261,12 @@ def get_polls() -> list[dict]:
 
 
 def get_alert_last_triggered(rule_id: str) -> datetime.datetime | None:
+    """`rule_id` hoje é sempre normalizado por quem chama (ex.: `_source_rule_id`),
+    mas `_f()` protege qualquer chamador futuro que esqueça — sem isto um `rule_id`
+    com `&`/`(` corta a query string e o filtro vira outra coisa em silêncio
+    (achado A4, revisão 18/08/2026)."""
     with _client() as c:
-        r = c.get(f"/system_alert_state?rule_id=eq.{rule_id}&select=last_triggered_at")
+        r = c.get(f"/system_alert_state?rule_id=eq.{_f(rule_id)}&select=last_triggered_at")
         r.raise_for_status()
         rows = r.json()
         if not rows:

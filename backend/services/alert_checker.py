@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 
 from anthropic import Anthropic
@@ -260,7 +261,18 @@ _NEWS_SCAN_CAP = 20
 
 
 def _source_rule_id(source: str) -> str:
-    return f"news_source_{source.lower().replace(' ', '_')}"
+    """`source` deixou de ser um apelido escrito por nós (aberto a conjunto FECHADO)
+    e virou o `<source>` real do Google Notícias — conjunto ABERTO: 26 publicadores
+    distintos medidos numa coleta, incluindo "U.S. Senator Roger Wicker (.gov)".
+
+    Sem normalizar, um nome com '&' ("S&P Global", "Dow Jones & Co" são plausíveis
+    nos feeds de Fed/petróleo) corta a query string do PostgREST em `get_alert_last_triggered`
+    (`?rule_id=eq.news_source_s&p_global` → o filtro vira só `news_source_s`) — a trava
+    de 3h por veículo desliga em silêncio e `set_alert_triggered` grava uma linha que
+    nunca mais será lida (achado A4, revisão 18/08/2026).
+    """
+    slug = re.sub(r"[^a-z0-9]+", "_", source.lower()).strip("_")
+    return f"news_source_{slug}"
 
 
 def _mark_sent(news_id: str, url_id: str | None, title: str | None = None) -> None:

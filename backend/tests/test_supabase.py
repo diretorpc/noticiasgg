@@ -160,6 +160,19 @@ def test_count_recent_broadcasts_le_content_range():
     assert "+00:00" not in captured["url"]  # cutoff encodado (lição do bug fa2b5d0)
 
 
+def test_get_alert_last_triggered_encoda_rule_id_com_caractere_especial():
+    """A4: `rule_id` hoje chega normalizado por `_source_rule_id`, mas isto protege
+    qualquer chamador futuro que esqueça — um rule_id com '&' cru cortaria a query
+    string do PostgREST e o filtro viraria outra coisa em silêncio."""
+    captured, fake_handle = _capture_transport([])
+    with patch.dict(os.environ, _ENV), \
+         patch.object(httpx.HTTPTransport, "handle_request", fake_handle):
+        supabase.get_alert_last_triggered("news_source_s&p_global")
+    assert "rule_id=eq.news_source_s%26p_global" in captured["url"]
+    # o '&' cru não pode sobrar separando outro parâmetro
+    assert "rule_id=eq.news_source_s&p_global" not in captured["url"]
+
+
 def test_count_recent_broadcasts_zero_quando_sem_header():
     def fake_handle(self, request):
         return httpx.Response(200, json=[])
