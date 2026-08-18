@@ -8,6 +8,17 @@ SCRAPER_FETCH_URL = "https://api.scraperapi.com/"
 
 _MAX_ARTICLE_CHARS = 4000
 
+# httpx.HTTPStatusError (e outras exceções de rede) carregam a URL completa da
+# requisição em str(e) — e a SCRAPER_API_KEY vai no query string dela. Sem
+# mascarar, a chave vaza para o tool_result devolvido ao Claude em reporter.py
+# e é gravada em conversation_history no Supabase (achado A1, revisão 18/08/2026).
+_API_KEY_RE = re.compile(r"api_key=[^&\s]*")
+
+
+def _sanitize_error(e: Exception) -> str:
+    """Mascara a SCRAPER_API_KEY antes de devolver str(e) ao chamador."""
+    return _API_KEY_RE.sub("api_key=***", str(e))
+
 
 def read_article(url: str) -> dict:
     api_key = os.getenv("SCRAPER_API_KEY")
@@ -28,7 +39,7 @@ def read_article(url: str) -> dict:
     except httpx.TimeoutException:
         return {"erro": "timeout ao buscar artigo", "url": url}
     except Exception as e:
-        return {"erro": str(e), "url": url}
+        return {"erro": _sanitize_error(e), "url": url}
 
 
 def search(query: str) -> dict:
@@ -54,4 +65,4 @@ def search(query: str) -> dict:
     except httpx.TimeoutException:
         return {"erro": "timeout na busca", "resultados": []}
     except Exception as e:
-        return {"erro": str(e), "resultados": []}
+        return {"erro": _sanitize_error(e), "resultados": []}

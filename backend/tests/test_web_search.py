@@ -1,0 +1,64 @@
+from unittest.mock import patch
+
+import httpx
+import pytest
+
+from backend.services import web_search
+
+# Chave FALSA de propósito — nunca a real, nem aqui nem em log de teste.
+_CHAVE_FALSA = "chave-falsa-de-teste-SEGREDO123"
+
+
+def _erro_com_chave_na_url() -> Exception:
+    """Simula o formato real de httpx.HTTPStatusError: `raise_for_status()`
+    monta a mensagem incluindo a URL completa da requisição — e a chave de
+    API vai no query string dela."""
+    request = httpx.Request(
+        "GET", f"https://api.scraperapi.com/?api_key={_CHAVE_FALSA}&url=https://exemplo.com"
+    )
+    response = httpx.Response(500, request=request)
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        return e
+    raise AssertionError("raise_for_status deveria ter levantado")
+
+
+@pytest.mark.unit
+def test_sanitize_error_mascara_api_key():
+    erro = _erro_com_chave_na_url()
+    saida = web_search._sanitize_error(erro)
+    assert _CHAVE_FALSA not in saida
+    assert "api_key=***" in saida
+
+
+@pytest.mark.unit
+def test_read_article_nao_vaza_chave_em_erro(monkeypatch):
+    monkeypatch.setenv("SCRAPER_API_KEY", _CHAVE_FALSA)
+    with patch("backend.services.web_search.httpx.get", side_effect=_erro_com_chave_na_url()):
+        result = web_search.read_article("https://exemplo.com")
+    assert _CHAVE_FALSA not in result["erro"]
+    assert "api_key=***" in result["erro"]
+
+
+@pytest.mark.unit
+def test_search_nao_vaza_chave_em_erro(monkeypatch):
+    monkeypatch.setenv("SCRAPER_API_KEY", _CHAVE_FALSA)
+    with patch("backend.services.web_search.httpx.get", side_effect=_erro_com_chave_na_url()):
+        result = web_search.search("soja")
+    assert _CHAVE_FALSA not in result["erro"]
+    assert "api_key=***" in result["erro"]
+
+
+@pytest.mark.unit
+def test_read_article_sem_chave_nao_faz_requisicao(monkeypatch):
+    monkeypatch.delenv("SCRAPER_API_KEY", raising=False)
+    result = web_search.read_article("https://exemplo.com")
+    assert result == {"erro": "SCRAPER_API_KEY não configurada"}
+
+
+@pytest.mark.unit
+def test_search_sem_chave_nao_faz_requisicao(monkeypatch):
+    monkeypatch.delenv("SCRAPER_API_KEY", raising=False)
+    result = web_search.search("soja")
+    assert result == {"erro": "SCRAPER_API_KEY não configurada"}
