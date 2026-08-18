@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from backend.services import web_search
+from backend.services.secrets_mask import sanitize_error
 
 # Chave FALSA de propósito — nunca a real, nem aqui nem em log de teste.
 _CHAVE_FALSA = "chave-falsa-de-teste-SEGREDO123"
@@ -26,8 +27,12 @@ def _erro_com_chave_na_url() -> Exception:
 
 @pytest.mark.unit
 def test_sanitize_error_mascara_api_key():
+    """A definição mora em backend.services.secrets_mask — achado 6, revisão
+    18/08/2026 (4ª rodada): web_search.py mantinha um alias `_sanitize_error`
+    só para este teste não precisar mudar. Duas grafias da mesma coisa no
+    mesmo módulo; o teste agora aponta pra origem real."""
     erro = _erro_com_chave_na_url()
-    saida = web_search._sanitize_error(erro)
+    saida = sanitize_error(erro)
     assert _CHAVE_FALSA not in saida
     assert "api_key=***" in saida
 

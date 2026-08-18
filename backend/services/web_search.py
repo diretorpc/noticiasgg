@@ -10,11 +10,6 @@ SCRAPER_FETCH_URL = "https://api.scraperapi.com/"
 
 _MAX_ARTICLE_CHARS = 4000
 
-# Reexportada aqui só por compatibilidade com quem já importa `web_search.sanitize_error`
-# (e o teste que acessa o nome antigo `_sanitize_error`). A definição mora em
-# `backend/services/secrets_mask.py` — ver o docstring de lá para o porquê.
-_sanitize_error = sanitize_error
-
 
 def read_article(url: str) -> dict:
     api_key = os.getenv("SCRAPER_API_KEY")
@@ -35,7 +30,7 @@ def read_article(url: str) -> dict:
     except httpx.TimeoutException:
         return {"erro": "timeout ao buscar artigo", "url": url}
     except Exception as e:
-        return {"erro": _sanitize_error(e), "url": url}
+        return {"erro": sanitize_error(e), "url": url}
 
 
 def search(query: str) -> dict:
@@ -61,4 +56,4 @@ def search(query: str) -> dict:
     except httpx.TimeoutException:
         return {"erro": "timeout na busca", "resultados": []}
     except Exception as e:
-        return {"erro": _sanitize_error(e), "resultados": []}
+        return {"erro": sanitize_error(e), "resultados": []}
