@@ -10,6 +10,7 @@ from anthropic import Anthropic
 from backend.collectors import eia, market
 from backend.services import supabase, whatsapp
 from backend.services.alert_rules import RULES, COPOM_DATES_2026, AlertRule
+from backend.services.secrets_mask import sanitize_error
 
 logger = logging.getLogger("noticiasgg.alerts")
 
@@ -64,11 +65,17 @@ Responda APENAS com JSON:
 
 
 def _collect_all() -> dict:
+    """Sem vazamento vivo hoje: `market.collect()` já mascara internamente toda
+    exceção que carregaria a SCRAPER_API_KEY. Mesmo assim mascara aqui de novo
+    — defesa em profundidade contra um `market.collect()` futuro que deixe
+    escapar algo sem proteção; o erro chega a `run_checks`, que o repassa a
+    `notify_admin` (WhatsApp do admin), não só ao log (ponta solta apontada na
+    revisão 18/08/2026 — 4ª rodada; mesmo argumento do achado 3)."""
     data: dict = {}
     try:
         data["market"] = market.collect()
     except Exception as e:
-        data["market"] = {"erro": str(e)}
+        data["market"] = {"erro": sanitize_error(e)}
 
     return data
 
@@ -204,9 +211,12 @@ def _check_eia(recipients: list[dict], errors: list[str] | None = None) -> int:
     except ValueError:
         raise  # EIA_API_KEY não configurada — erro de config, não suprimir
     except Exception as e:
-        logger.warning("eia collection failed: %s", e)
+        # Sem vazamento vivo hoje (eia.collect() mascara por série
+        # internamente), mesma defesa em profundidade do achado 3/ponta solta.
+        err = sanitize_error(e)
+        logger.warning("eia collection failed: %s", err)
         if errors is not None:
-            errors.append(f"eia: {e}")
+            errors.append(f"eia: {err}")
         return 0
 
     lines = []
@@ -402,9 +412,15 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
     try:
         articles = news_collector.collect(include_ai=False, include_newsapi=use_newsapi, errors=errors)
     except Exception as e:
-        logger.warning("news collection failed: %s", e)
+        # Sem vazamento vivo hoje (politics_br.py:40 usa `continue` em vez de
+        # raise_for_status(), então news.collect() nunca propaga
+        # HTTPStatusError com a apiKey= crua) — mesma defesa em profundidade
+        # do achado 3/ponta solta: um raise_for_status() futuro não pegaria
+        # este catch de surpresa.
+        err = sanitize_error(e)
+        logger.warning("news collection failed: %s", err)
         if errors is not None:
-            errors.append(f"news: {e}")
+            errors.append(f"news: {err}")
         return 0
     if use_newsapi and not test_mode:
         supabase.set_alert_triggered("newsapi_fetch")
