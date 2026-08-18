@@ -406,7 +406,12 @@ def source_health() -> dict:
             artigos = _collect_rss(client, feeds, set())
     except Exception as e:
         return {"total": len(feeds), "vivas": 0, "mortas": [], "erro": str(e)[:120]}
-    vivas = {a.get("fonte") for a in artigos}
+    # `feed` é o apelido do feed/busca ("GN USDA/WASDE"); `fonte` virou o publicador
+    # REAL desde o conserto do achado A6 (ex.: "Farm Progress"). Comparar `mortas`
+    # contra `fonte` faz os 6 feeds do Google Notícias nunca baterem, mesmo vivos
+    # — o boletim reportava "6 mortas" para fontes que entregaram item o tempo todo
+    # (achado A1, revisão 18/08/2026).
+    vivas = {a.get("feed") or a.get("fonte") for a in artigos}
     mortas = [nome for nome, _ in feeds if nome not in vivas]
     return {"total": len(feeds), "vivas": len(feeds) - len(mortas), "mortas": mortas, "erro": None}
 

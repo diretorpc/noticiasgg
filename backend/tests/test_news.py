@@ -488,6 +488,25 @@ def test_source_health_separa_vivas_de_mortas():
 
 
 @pytest.mark.unit
+def test_source_health_conta_feed_google_news_como_viva():
+    """A1: `source_health` comparava `mortas` contra `fonte`, que virou o publicador
+    REAL (ex.: 'Farm Progress') depois do conserto do achado A6 — antes `fonte` ERA
+    o apelido do feed e casava. Os 6 feeds de busca do Google Notícias nunca batiam
+    mais, mesmo entregando item: o boletim reportava 6 mortas todo dia, para sempre."""
+    from backend.collectors.news import source_health
+    def _fake(client, feeds, vistos):
+        # artigo do Google Notícias: fonte=publicador real, feed=apelido da busca
+        return [{"titulo": "x", "fonte": "Farm Progress", "feed": "GN USDA/WASDE",
+                 "url": "u", "publicado_em": None, "resumo": None}]
+    feeds = [("GN USDA/WASDE", "https://news.google.com/rss/search?q=x")]
+    with patch("backend.collectors.news._collect_rss", _fake), \
+         patch("backend.collectors.news._feeds", return_value=feeds):
+        out = source_health()
+    assert out["mortas"] == []
+    assert out["vivas"] == 1
+
+
+@pytest.mark.unit
 def test_source_health_falha_de_rede_nao_estoura():
     from backend.collectors.news import source_health
     with patch("backend.collectors.news._collect_rss", side_effect=RuntimeError("rede caiu")):
