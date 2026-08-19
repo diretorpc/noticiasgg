@@ -90,14 +90,23 @@ igual à 007: SQL Editor, à mão).
 - **Medição real dos 20 feeds (18/08/2026):** 14 de 20 (os RSS diretos) devolvem texto
   útil de cara. **Os 6 feeds `GN *` devolviam 404 em 6 de 6** — confirmado o que o ESTADO.md
   já suspeitava. Achado o caminho: `render=true` do ScraperAPI (executa o JS do
-  redirecionamento) resolveu **6 de 6**, custando **10 créditos por chamada em vez de 1**
-  (header `sa-credit-cost`) e **18–49s por link** (contra poucos segundos do fetch
-  simples). Implementado em `web_search.read_article` — só ativa para `news.google.com`,
-  nunca para o tráfego geral da tool (o agente de chat também usa `read_article` livremente).
-  Custo real: no máximo 1 render por rodada de `check-alerts` (só quando a notícia
-  VENCEDORA é de feed GN), teto de 24 alertas/dia → pior caso ~240 créditos/dia. Conta
-  tinha 87.526 créditos sobrando de 100.000/mês em 18/08 — folga grande. `_CONTEUDO_TIMEOUT`
-  = 75s (1,5× o pior caso medido, 48,9s), roda só depois do alerta já ter saído.
+  redirecionamento) resolveu **6 de 6** na medição original. Implementado em
+  `web_search.read_article` — só ativa para host `news.google.com` (comparado por hostname,
+  não substring — achado 3 da revisão do Apolo corrigiu um `"news.google.com" in url` que
+  também casava domínio hostil tipo `evil.com/?x=news.google.com`), nunca para o tráfego
+  geral da tool (o agente de chat também usa `read_article` livremente — por isso
+  `read_article` impõe piso de 75s no timeout quando o render liga, achado 2 da revisão).
+  **Números corrigidos pela revisão do Apolo (achado 5, mesma data, 5 chamadas reais lendo
+  o header `sa-credit-cost`):** custo real é **35 créditos por chamada, não 10** (a medição
+  original tinha lido errado); tempo real é **37,4–56,6s por link, não 18–49s**; e **1 das 4
+  chamadas com render devolveu HTTP 500** — a medição original ("6 de 6") não tinha pegado
+  essa falha. Custo diário: no máximo 1 render por rodada de `check-alerts` (só quando a
+  notícia VENCEDORA é de feed GN), teto de 24 alertas/dia → pior caso **~840 créditos/dia**
+  (não ~240). A decisão sobrevive à correção: conta tinha `creditsLeft 87129` de `100000`
+  em 18/08 (medir de novo: `curl "https://api.scraperapi.com/account?api_key=$SCRAPER_API_KEY"`),
+  basal ~460 créditos/dia sem render + ~840 com render ≈ 1.300/dia ≈ 39.000/mês — cabe
+  dentro dos 100.000/mês. `_CONTEUDO_TIMEOUT` = 75s (~1,3× o pior caso medido, 56,6s — não
+  1,5×), roda só depois do alerta já ter saído.
 - **Parte B** — `news_log_messages` (novo, migration 008): `alert_checker._broadcast_com_ids`
   (nova função, só usada por `_check_news` — os outros 3 chamadores de `_broadcast`
   ficaram intocados) devolve `(phone, message_id)` de cada entrega; `log_sent_news` passou
@@ -109,11 +118,17 @@ igual à 007: SQL Editor, à mão).
   se achou, `reporter.generate_report(..., anchored_news=noticia)` injeta um bloco
   `<noticia_citada>` no prompt (`reporter._format_anchored_news`) — determinístico, o
   modelo não escolhe entre candidatas. Sem conteúdo capturado, o bloco diz explicitamente
-  "não capturado — diga isso e não invente".
+  "não capturado — diga isso e não invente". O bloco escapa `<`/`>`/`&` de todo campo
+  (`reporter._escape_untrusted_text`) e avisa que o conteúdo é DADO de terceiro, não
+  ORDEM — fechado na revisão do Apolo de 18/08 (achado 1: artigo hostil conseguia fechar
+  a tag e injetar instrução no turno do usuário).
 - Testes: `backend/tests/test_news_log.py` (Partes A/B), `test_web_search.py` (render
-  fallback), `test_reporter_sections.py` (bloco ancorado), `test_webhook_anchored_news.py`
-  (novo arquivo, extração do id + integração do webhook). `pytest backend -m unit` → 381
-  passed, 0 failed (era 341 no início desta sessão).
+  fallback, piso de timeout do render, host do Google Notícias por hostname),
+  `test_reporter_sections.py` (bloco ancorado + neutralização de injeção),
+  `test_alert_checker.py` (`_broadcast_com_ids` executada de verdade, não só mockada),
+  `test_webhook_anchored_news.py` (novo arquivo, extração do id + integração do webhook).
+  `pytest backend -m unit` → 391 passed, 0 failed (era 341 no início da sessão, 381 antes
+  da revisão do Apolo de 18/08).
 
 ### Varredura de credencial (fora do plano, virou metade da sessão)
 
