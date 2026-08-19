@@ -22,11 +22,20 @@ Agente de IA multi-domínio, backend em Python/FastAPI:
 
 Fonte viva do que existe hoje: `README.md` e `CLAUDE.md` na raiz do projeto.
 
-## Estado em 19/08/2026 — os 3 defeitos da validação CONSERTADOS (falta subir)
+## Estado em 19/08/2026 — os 3 defeitos da validação CONSERTADOS e EM PRODUÇÃO
 
-Código pronto na árvore de trabalho, suíte verde (`pytest backend/tests/ -q` conta quantos).
-**Ainda NÃO está em produção** — a
-migration 009 tem que rodar ANTES do push (ver "Ordem de deploy" abaixo).
+Migration 009 rodada (conferida no sistema: `select=url_final` → 200), commit `18e9cb0`
+pushado às 16h08, **build READY nos dois projetos Vercel** — o `trafilatura` coube no pacote,
+que era o único risco não mensurável antes do deploy. `/api/health` respondeu 200 com tudo
+`ok` e a Evolution `open`. Suíte verde (`pytest backend/tests/ -q` conta quantos).
+
+⏳ **Falta a prova de campo**: no primeiro alerta que sair, conferir três coisas —
+`url_final` com o endereço do jornal (não o do Google), `conteudo_fonte` =
+`read_article:trafilatura`, e o `conteudo` começando no corpo da matéria. Comando que mede:
+
+```bash
+python -X utf8 -c "import os,pathlib;[os.environ.setdefault(k.strip(),v.strip().strip(chr(34))) for k,v in (l.split('=',1) for l in pathlib.Path('.env').read_text(encoding='utf-8').splitlines() if '=' in l and not l.strip().startswith('#'))];from backend.services import supabase as s;r=s._client().get('/news_log?select=sent_at,titulo_pt,url,url_final,conteudo_fonte,conteudo&order=sent_at.desc&limit=1').json()[0];print(r['sent_at'],r['titulo_pt']);print('url_final:',r['url_final']);print('fonte:',r['conteudo_fonte'],'|',len(r['conteudo'] or ''),'chars');print((r['conteudo'] or '')[:400])"
+```
 
 ### O que mudou, defeito por defeito
 
