@@ -36,6 +36,44 @@ def collect_status() -> dict:
         checks["broadcasts"] = {"status": "warn", "message": str(e)[:120]}
 
     try:
+        # Reaproveita o número já calculado no check `broadcasts` acima — chamar
+        # count_recent_broadcasts de novo custaria uma consulta a mais por visita
+        # anônima (/api/health é público, sem senha) sem nenhum ganho (achado A_dup,
+        # revisão 18/08/2026). Se aquele check já falhou, não há como cross-checar.
+        broadcasts_check = checks["broadcasts"]
+        registro = supabase.get_news_log(hours=24, limit=1)
+        if broadcasts_check.get("status") != "ok":
+            checks["news_log"] = {"status": "warn",
+                                   "message": "contagem de broadcasts indisponível"}
+        elif registro.get("aviso"):
+            # A LEITURA falhou (Supabase soluçou ao consultar news_log) — isto não
+            # prova nada sobre a ESCRITA. Confundir os dois faria o dono caçar um
+            # bug de "escrita silenciosa" que não existe (achado A3, revisão 18/08/2026).
+            checks["news_log"] = {"status": "warn", "message": registro["aviso"],
+                                   "broadcasts_24h": broadcasts_check["enviados_24h"]}
+        else:
+            broadcasts_24h = broadcasts_check["enviados_24h"]
+            registrado = bool(registro.get("itens"))
+            # Dia calmo tem ZERO dos dois — não é sintoma. Só vira erro quando um
+            # alerta SAIU (broadcast) e o registro legível não acompanhou: migration
+            # 007 não executada, ou log_sent_news falhando calado (achado A4).
+            # `log_sent_news` engole a própria exceção de propósito (o alerta já foi
+            # entregue quando ela roda) — este cross-check é o que torna a falha visível.
+            silencioso = broadcasts_24h > 0 and not registrado
+            checks["news_log"] = {
+                "status": "error" if silencioso else "ok",
+                "broadcasts_24h": broadcasts_24h,
+                "registrado": registrado,
+            }
+    except Exception as e:
+        # Este bloco só falha se a própria LEITURA estourar (get_news_log não
+        # costuma levantar — ela mesma se blinda —, mas o defensivo continua aqui).
+        # "warn", não "error": um check que não conseguiu LER não prova que a
+        # ESCRITA falhou — virar "error" global por uma leitura soluçada escalava
+        # a severidade errada (achado A3, revisão 18/08/2026).
+        checks["news_log"] = {"status": "warn", "message": str(e)[:120]}
+
+    try:
         state = whatsapp.connection_state()
         checks["evolution"] = {"status": "ok" if state == "open" else "warn", "estado": state}
     except Exception as e:
@@ -91,6 +129,19 @@ def _line_broadcasts(v: dict) -> str:
     return f"• {_ICON['warn']} Alertas (24h): {v.get('message', 'indisponível')}"
 
 
+def _line_news_log(v: dict) -> str:
+    status = v.get("status")
+    if status == "ok":
+        return f"• Registro de notícias: OK ({v.get('broadcasts_24h', 0)} alertas/24h)"
+    if status == "warn":
+        # Falha de LEITURA (registro não respondeu) — não é o mesmo sintoma que
+        # "escrita silenciosa" abaixo, e usar o ícone/texto errado manda o dono
+        # caçar bug que não existe (achado A3, revisão 18/08/2026).
+        return f"• {_ICON['warn']} Registro de notícias: {v.get('message', 'indisponível')}"
+    return (f"• {_ICON['error']} Registro de notícias: {v.get('broadcasts_24h', 0)} "
+            f"alertas enviados/24h, 0 registrados — escrita silenciosa")
+
+
 def _line_evolution(v: dict) -> str:
     if v.get("status") == "ok":
         return f"• Evolution: conectada ({v.get('estado', '?')})"
@@ -127,6 +178,7 @@ def format_digest(status: dict) -> str:
     lines = [head, _SEP, summary,
              _line_dedup(checks.get("dedup", {})),
              _line_broadcasts(checks.get("broadcasts", {})),
+             _line_news_log(checks.get("news_log", {})),
              _line_evolution(checks.get("evolution", {})),
              _line_keys(checks.get("keys", {}))]
     if "news_sources" in checks:  # ausente quando veio do collect_status simples

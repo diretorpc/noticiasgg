@@ -1,11 +1,15 @@
+import logging
 import os
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 import httpx
 from dotenv import load_dotenv
 
+from backend.services.secrets_mask import sanitize_error
+
 load_dotenv()
 
+logger = logging.getLogger("noticiasgg")
 router = APIRouter()
 
 FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
@@ -56,9 +60,23 @@ def collect() -> dict:
     if not api_key:
         raise ValueError("FRED_API_KEY não configurada")
 
+    # Por série, não pro loop inteiro: uma série com problema (rate limit,
+    # instabilidade pontual do FRED) não pode derrubar as outras 3 nem, pior,
+    # deixar `httpx.HTTPStatusError` (que carrega a FRED_API_KEY na URL) subir
+    # cru até `_safe_collect` — daí ela vazaria pro contexto do agente em toda
+    # conversa (achado extra, 18/08/2026 — não estava na lista original;
+    # antes deste fix o loop nem tinha try/except nenhum).
     resultado = {}
     for series_id, nome in SERIES.items():
-        resultado[nome] = _fetch_series(series_id, api_key)
+        try:
+            resultado[nome] = _fetch_series(series_id, api_key)
+        except Exception as e:
+            # Sem log, FRED caído 4/4 não deixava uma linha sequer — a
+            # degradação era invisível até alguém notar o relatório manco
+            # (achado 5, revisão 18/08/2026 — 4ª rodada).
+            err = sanitize_error(e)
+            logger.warning("indicators_us: série '%s' falhou: %s", nome, err)
+            resultado[nome] = {"erro": err}
     return resultado
 
 

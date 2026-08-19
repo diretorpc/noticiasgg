@@ -147,6 +147,70 @@ def test_collect_rss_parses_items():
     assert artigos[0]["url"] == "https://example.com/article-1"
 
 
+def _google_news_rss(link: str, source_url: str | None, source_nome: str | None) -> bytes:
+    now = datetime.now(timezone.utc)
+    d = format_datetime(now - timedelta(hours=1))
+    source_tag = (
+        f'<source url="{source_url}">{source_nome}</source>'
+        if source_url is not None else ""
+    )
+    return f"""<?xml version="1.0"?><rss version="2.0"><channel>
+    <item>
+      <title>USDA corn report - Farm Progress</title>
+      <link>{link}</link>
+      <pubDate>{d}</pubDate>
+      <description>Corn quality falls.</description>
+      {source_tag}
+    </item>
+    </channel></rss>""".encode()
+
+
+@pytest.mark.unit
+def test_collect_rss_extrai_publisher_do_google_news():
+    """O link do Google Notícias é uma página JS de ~592 KB, ilegível por read_article
+    (404 na prática). O <source url> do item traz o veículo real — sem ele o agente
+    não consegue conferir a fonte (achado A2, incidente USDA de 18/08/2026)."""
+    mock_resp = MagicMock(
+        status_code=200,
+        content=_google_news_rss(
+            "https://news.google.com/rss/articles/CBMi_fake_base64",
+            "https://www.farmprogress.com",
+            "Farm Progress",
+        ),
+    )
+    mock_client = MagicMock()
+    mock_client.get.return_value = mock_resp
+
+    artigos = _collect_rss(mock_client, [("GN USDA/WASDE", "https://news.google.com/rss/search?q=x")], set())
+
+    assert len(artigos) == 1
+    assert artigos[0]["url_publisher"] == "https://www.farmprogress.com"
+    # `fonte` vira o veículo real, não o apelido da busca — attribution correta
+    # para quando a Story 2 disser "segundo X" (achado A6).
+    assert artigos[0]["fonte"] == "Farm Progress"
+    # o apelido do feed sobrevive em campo próprio, para rastrear qual busca achou
+    assert artigos[0]["feed"] == "GN USDA/WASDE"
+
+
+@pytest.mark.unit
+def test_collect_rss_sem_source_mantem_comportamento_atual():
+    """Feed comum (sem <source>, a maioria) não pode regredir: fonte continua
+    sendo o nome do feed, url_publisher fica None."""
+    mock_resp = MagicMock(
+        status_code=200,
+        content=_google_news_rss("https://example.com/artigo", None, None),
+    )
+    mock_client = MagicMock()
+    mock_client.get.return_value = mock_resp
+
+    artigos = _collect_rss(mock_client, [("Farm Progress", "https://www.farmprogress.com/rss.xml")], set())
+
+    assert len(artigos) == 1
+    assert artigos[0]["fonte"] == "Farm Progress"
+    assert artigos[0]["feed"] == "Farm Progress"
+    assert artigos[0]["url_publisher"] is None
+
+
 @pytest.mark.unit
 def test_collect_rss_deduplicates():
     mock_resp = MagicMock()
@@ -424,6 +488,25 @@ def test_source_health_separa_vivas_de_mortas():
 
 
 @pytest.mark.unit
+def test_source_health_conta_feed_google_news_como_viva():
+    """A1: `source_health` comparava `mortas` contra `fonte`, que virou o publicador
+    REAL (ex.: 'Farm Progress') depois do conserto do achado A6 — antes `fonte` ERA
+    o apelido do feed e casava. Os 6 feeds de busca do Google Notícias nunca batiam
+    mais, mesmo entregando item: o boletim reportava 6 mortas todo dia, para sempre."""
+    from backend.collectors.news import source_health
+    def _fake(client, feeds, vistos):
+        # artigo do Google Notícias: fonte=publicador real, feed=apelido da busca
+        return [{"titulo": "x", "fonte": "Farm Progress", "feed": "GN USDA/WASDE",
+                 "url": "u", "publicado_em": None, "resumo": None}]
+    feeds = [("GN USDA/WASDE", "https://news.google.com/rss/search?q=x")]
+    with patch("backend.collectors.news._collect_rss", _fake), \
+         patch("backend.collectors.news._feeds", return_value=feeds):
+        out = source_health()
+    assert out["mortas"] == []
+    assert out["vivas"] == 1
+
+
+@pytest.mark.unit
 def test_source_health_falha_de_rede_nao_estoura():
     from backend.collectors.news import source_health
     with patch("backend.collectors.news._collect_rss", side_effect=RuntimeError("rede caiu")):
@@ -442,6 +525,42 @@ def test_rodizio_da_uma_vaga_a_cada_fonte_antes_de_repetir():
     out = _ordena_por_recencia(tagarela + quietas)
     assert [a["fonte"] for a in out[:3]] == ["G1", "OPEP", "USDA"]
     assert out[3]["fonte"] == "G1"  # a 2ª do G1 só depois de todo mundo ter a 1ª
+
+
+@pytest.mark.unit
+def test_limpa_resumo_html_com_texto_vira_texto_limpo():
+    """Caso real do Hellenic Shipping (medido 18/08/2026): entidades HTML soltas
+    junto de tags — precisa sobrar só o texto, sem markup e sem entidade crua."""
+    from backend.collectors.news import _limpa_resumo
+    bruto = "<p>Freight rates &#38; container volumes rose&#160;this week.</p>"
+    limpo = _limpa_resumo(bruto)
+    assert limpo == "Freight rates & container volumes rose this week."
+
+
+@pytest.mark.unit
+def test_limpa_resumo_so_link_vira_none():
+    """Caso real dos 6 feeds do Google Notícias (medido 18/08/2026): a description
+    É o link de volta para a mesma página, ilegível e cortado em 300 chars — zero
+    fato. None é honesto; o agente vê o campo ausente em vez de inventar em cima
+    de um link (achado A2, revisão 18/08/2026)."""
+    from backend.collectors.news import _limpa_resumo
+    bruto = ('<a href="https://news.google.com/rss/articles/CBMi_fake_base64">'
+             'https://news.google.com/rss/articles/CBMi_fake_base64</a>')
+    assert _limpa_resumo(bruto) is None
+
+
+@pytest.mark.unit
+def test_limpa_resumo_vazio_vira_none():
+    from backend.collectors.news import _limpa_resumo
+    assert _limpa_resumo("") is None
+    assert _limpa_resumo(None) is None
+
+
+@pytest.mark.unit
+def test_limpa_resumo_texto_limpo_passa_direto():
+    from backend.collectors.news import _limpa_resumo
+    assert _limpa_resumo("Corn conditions dropped to 61% good/excellent.") == \
+        "Corn conditions dropped to 61% good/excellent."
 
 
 @pytest.mark.unit

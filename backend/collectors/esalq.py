@@ -5,6 +5,8 @@ import httpx
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException
 
+from backend.services.secrets_mask import sanitize_error
+
 router = APIRouter()
 
 _CEPEA_URL = "https://www.cepea.esalq.usp.br/br/indicador/cana-de-acucar.aspx"
@@ -72,7 +74,7 @@ def collect() -> dict:
                 return result
             last_err = result["erro"]
         except Exception as e:
-            last_err = str(e)
+            last_err = sanitize_error(e)
 
     return {"erro": last_err}
 

@@ -22,6 +22,133 @@ Agente de IA multi-domínio, backend em Python/FastAPI:
 
 Fonte viva do que existe hoje: `README.md` e `CLAUDE.md` na raiz do projeto.
 
+## Estado em 18/08/2026 — alucinação em conversa: Story 1 ENTREGUE, faltam 2, 3 e 4
+
+**O incidente.** Às 12:00–12:11 de 18/08 o agente respondeu cinco vezes sobre o mesmo
+relatório do USDA e deu números e datas diferentes em cada uma (milho 67%→63%, depois
+72%, depois 63%→61%; datas 12/08/2026, 12/08/2025, 04/08/2026, 10/08/2026). Numa das
+respostas ele mesmo escreveu *"inventei percentuais que não vieram de fonte"* — e na
+mensagem seguinte, para o outro número, inventou de novo. Os dois telefones
+(`5534999945010` e `5516991016898`) receberam versões diferentes do mesmo fato.
+
+Conversa lida direto de `conversation_history` no Supabase, não de memória.
+
+**Três causas, medidas no código — não teorizadas:**
+
+1. `services/integrity.py:54` — `validate_and_fix` retorna cedo quando a resposta não
+   tem `ANALYSIS_MARKERS` (`📊`, `ANÁLISE`, `Visão Macro`…). Resposta de conversa nunca
+   tem esses marcadores. **O validador anti-alucinação está desligado em 100% dos
+   chats.** A correção anterior (jul/2026) cobriu só o relatório diário.
+2. `services/integrity.py:56` — `build_fact_corpus(data)` monta o corpus só dos
+   coletores (`market`, `crypto`, `indicators_*`, `commodities_br`, `news`). O que
+   volta de `search_web`/`read_article` — a fonte real do número do USDA — **não entra
+   no corpus**. Mesmo ligado, o validador conferiria contra o corpus errado.
+3. `services/alert_checker.py:479-490` — o alerta de notícia sai por `_broadcast` e o
+   único rastro é o hash em `sent_news` (`_mark_sent`). **Nunca há `save_message`**,
+   nem título, link ou data em forma legível. Quando o usuário responde "me fale mais
+   sobre essa notícia", o agente não tem vestígio nenhum dela e preenche do nada.
+
+**Plano:** `docs/superpowers/plans/2026-08-18-noticias-ancoradas-e-antialucinacao.md`
+4 stories, ordem obrigatória: (1) tabela `news_log` + link no alerta; (2) ferramenta
+`get_sent_news` no chat; (3) validador ligado em chat com corpus de ferramenta + data
+de hoje etiquetada `<hoje>`; (4) evals no CI com a conversa real como fixture.
+
+### Story 1 — ENTREGUE no código (branch `feat/noticias-ancoradas`, não mergeada)
+
+Tabela `news_log` (migration 007) com título, veículo real, link, data, resumo e nota;
+`log_sent_news`/`get_news_log`; o alerta grava depois de entregar e mostra o 🔗 na
+mensagem; cross-check no boletim diário acusa escrita silenciosa. Stories 2, 3 e 4
+**não foram começadas**.
+
+✅ **A migration FOI executada em 18/08** — conferido na fonte viva: tabela existe e as
+15 colunas que o código lê respondem 200. Fica o aviso para o futuro: ela roda À MÃO no
+SQL Editor, e se um dia alguém recriar o ambiente e esquecer, `log_sent_news` engole a
+falha de propósito (para não derrubar alerta já entregue) e o registro fica vazio para
+sempre — o sintoma aparece só no `/api/health` como `warn: registro indisponível`.
+Conferir na fonte viva, nunca no documento:
+```bash
+python -X utf8 -c "import os,pathlib;[os.environ.setdefault(k.strip(),v.strip().strip(chr(34))) for k,v in (l.split('=',1) for l in pathlib.Path('.env').read_text(encoding='utf-8').splitlines() if '=' in l and not l.strip().startswith('#'))];from backend.services import supabase as s;print('news_log ->', s._client().get('/news_log?select=id&limit=1').status_code)"
+```
+`200` = existe · `404` = não rodou.
+
+**Limite conhecido da Story 1, medido:** para as notícias dos 6 feeds de busca do Google
+Notícias — inclusive a do incidente — a âncora é fraca. O `url` é uma página JS que o
+`read_article` não lê, o `url_publisher` é só o domínio, e o `resumo_fonte` do RSS vem
+como markup (10 de 20 feeds) ou vazio (3 de 20). Sobra título + veículo. **A Story 1
+sozinha não cura o caso do USDA** — depende da Story 3.
+
+### Parte A/B/C — conteúdo capturado + id de mensagem + resposta ancorada (18/08, branch `feat/noticias-ancoradas`)
+
+Os dois furos que o dono apontou na Story 1 (registro guarda PONTEIRO, não a notícia;
+"qual notícia é essa" era o modelo escolhendo entre 20) — fechados no código, **migration
+008 ainda não rodou em produção** (ver `backend/migrations/008_news_log_conteudo_e_mensagens.sql`,
+igual à 007: SQL Editor, à mão).
+
+- **Parte A** — `news_log.conteudo`/`conteudo_fonte`: `alert_checker._capture_conteudo`
+  chama `web_search.read_article` DEPOIS do broadcast (alerta já entregue), grava o
+  texto ou `None` (nunca markup, nunca a página de erro do Google).
+- **Medição real dos 20 feeds (18/08/2026):** 14 de 20 (os RSS diretos) devolvem texto
+  útil de cara. **Os 6 feeds `GN *` devolviam 404 em 6 de 6** — confirmado o que o ESTADO.md
+  já suspeitava. Achado o caminho: `render=true` do ScraperAPI (executa o JS do
+  redirecionamento) resolveu **6 de 6** na medição original. Implementado em
+  `web_search.read_article` — só ativa para host `news.google.com` (comparado por hostname,
+  não substring — achado 3 da revisão do Apolo corrigiu um `"news.google.com" in url` que
+  também casava domínio hostil tipo `evil.com/?x=news.google.com`), nunca para o tráfego
+  geral da tool (o agente de chat também usa `read_article` livremente — por isso
+  `read_article` impõe piso de 75s no timeout quando o render liga, achado 2 da revisão).
+  **Números corrigidos pela revisão do Apolo (achado 5, mesma data, 5 chamadas reais lendo
+  o header `sa-credit-cost`):** custo real é **35 créditos por chamada, não 10** (a medição
+  original tinha lido errado); tempo real é **37,4–56,6s por link, não 18–49s**; e **1 das 4
+  chamadas com render devolveu HTTP 500** — a medição original ("6 de 6") não tinha pegado
+  essa falha. Custo diário: no máximo 1 render por rodada de `check-alerts` (só quando a
+  notícia VENCEDORA é de feed GN), teto de 24 alertas/dia → pior caso **~840 créditos/dia**
+  (não ~240). A decisão sobrevive à correção: conta tinha `creditsLeft 87129` de `100000`
+  em 18/08 (medir de novo: `curl "https://api.scraperapi.com/account?api_key=$SCRAPER_API_KEY"`),
+  basal ~460 créditos/dia sem render + ~840 com render ≈ 1.300/dia ≈ 39.000/mês — cabe
+  dentro dos 100.000/mês. `_CONTEUDO_TIMEOUT` = 75s (~1,3× o pior caso medido, 56,6s — não
+  1,5×), roda só depois do alerta já ter saído.
+- **Parte B** — `news_log_messages` (novo, migration 008): `alert_checker._broadcast_com_ids`
+  (nova função, só usada por `_check_news` — os outros 3 chamadores de `_broadcast`
+  ficaram intocados) devolve `(phone, message_id)` de cada entrega; `log_sent_news` passou
+  a devolver o `id` da linha inserida; `supabase.log_alert_messages` grava um par por
+  destinatário.
+- **Parte C** — `main.py:_extract_quoted_message_id` lê `contextInfo.stanzaId` do TOPO do
+  registro (formato medido ao vivo em 18/08 para texto simples) com fallback para dentro
+  de `extendedTextMessage`; `supabase.get_news_by_message_id` casa por igualdade de string;
+  se achou, `reporter.generate_report(..., anchored_news=noticia)` injeta um bloco
+  `<noticia_citada>` no prompt (`reporter._format_anchored_news`) — determinístico, o
+  modelo não escolhe entre candidatas. Sem conteúdo capturado, o bloco diz explicitamente
+  "não capturado — diga isso e não invente". O bloco escapa `<`/`>`/`&` de todo campo
+  (`reporter._escape_untrusted_text`) e avisa que o conteúdo é DADO de terceiro, não
+  ORDEM — fechado na revisão do Apolo de 18/08 (achado 1: artigo hostil conseguia fechar
+  a tag e injetar instrução no turno do usuário).
+- Testes: `backend/tests/test_news_log.py` (Partes A/B), `test_web_search.py` (render
+  fallback, piso de timeout do render, host do Google Notícias por hostname),
+  `test_reporter_sections.py` (bloco ancorado + neutralização de injeção),
+  `test_alert_checker.py` (`_broadcast_com_ids` executada de verdade, não só mockada),
+  `test_webhook_anchored_news.py` (novo arquivo, extração do id + integração do webhook).
+  `pytest backend -m unit` → 391 passed, 0 failed (era 341 no início da sessão, 381 antes
+  da revisão do Apolo de 18/08).
+
+### Varredura de credencial (fora do plano, virou metade da sessão)
+
+Revisando a Story 1, o Apolo achou que erro de fornecedor voltava CRU para o contexto
+do agente e para o `conversation_history`. Como o ScraperAPI põe a chave no endereço,
+a `SCRAPER_API_KEY` vazava — e o Matheus a rotacionou em 18/08. A varredura completa
+achou **6 caminhos**, não 1: `web_search`, `agro_search`, `market`, `esalq`, `eia`
+(chave da EIA) e `investing_calendar` (esse vazava por três saídas ao mesmo tempo:
+log, WhatsApp do admin e resposta pública da API). `indicators_us` não tinha proteção
+por série nenhuma — um soluço do FRED mandava a chave dele para toda conversa.
+
+Fechado com `services/secrets_mask.py` (módulo neutro, para coletor não depender de
+serviço) e máscara nos dois `_safe_collect`, que são os pontos únicos por onde todo
+coletor passa antes de entrar no prompt. **Regra que ficou: erro de fornecedor externo
+nunca volta cru para dentro do contexto do agente.**
+
+**Como conferir que a correção pegou, depois de implementada:**
+`python -m backend.evals.news_recall_eval` — meta: `recuperou_do_log` igual a `casos`,
+`armadilhas` em zero.
+
 ## Estado em 14/08/2026 — alerta de notícia sem o parágrafo de análise
 
 A pedido do Matheus, o alerta de notícia passou a ser **manchete + fonte + linha de
@@ -196,6 +323,28 @@ python -c "from backend.collectors import news; print(news.source_health())"
 
 ## Aberto
 
+- [ ] 🔴 **Rodar a migration `008_news_log_conteudo_e_mensagens.sql` no SQL Editor do
+      Supabase — ANTES de mergear/deployar esta branch, não depois.** (A 007 já rodou e
+      foi conferida — ver seção "Story 1" acima; este item ficou desatualizado apontando
+      pra ela.) **Risco medido, não só teórico:** `log_sent_news` manda `conteudo`/
+      `conteudo_fonte` no MESMO POST que título/score/url. Se a coluna não existir ainda,
+      o PostgREST rejeita o INSERT INTEIRO com 400 — não perde só os dois campos novos,
+      perde a LINHA TODA, sempre que a captura de conteúdo tiver sucesso (14 dos 20 feeds
+      capturam de cara — não é caso raro). Isso ressuscitaria calado o mesmo buraco que
+      a Story 1 existe pra fechar. `news_log_messages` já era tabela nova, então
+      `log_alert_messages`/`get_news_by_message_id` degradam sozinhos (warning, sem
+      travar o webhook) — só o ponto acima é agudo.
+- [ ] 🔴 **Stories 2, 3 e 4 do plano anti-alucinação** —
+      `docs/superpowers/plans/2026-08-18-noticias-ancoradas-e-antialucinacao.md`.
+      Enquanto não forem feitas, o agente segue inventando número e data quando
+      perguntam sobre notícia do RSS: a Story 1 guarda o registro, mas **ninguém o lê
+      ainda** (a ferramenta `get_sent_news` é da Story 2).
+- [ ] 🟡 Achados do revisor deixados para depois (nenhum trava a entrega): prompt de
+      commodities pode preencher número quando o scraping cai inteiro; `BRAPI_TOKEN` vai
+      na URL e a máscara não cobre `token=` (hoje não vaza, `stocks.py` engole o erro);
+      `build_fact_corpus` descarta a entrada inteira se ela tiver dado bom E `"erro"`
+      juntos — decidir a regra na Story 3; `score = result.get("score", 0)` devolve
+      `None` se o classificador mandar `null`.
 - [ ] **Conferir o volume em 16/08** com o comando acima (esperado ~18/dia). É a
       primeira medição depois do freio de `9c62ae0`.
 - [ ] Testes que batem em API externa (`test_crypto.py`, `test_indicators_br.py`) falham

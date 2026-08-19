@@ -1,9 +1,11 @@
 import os
+import re
 import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote
+from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException
 import httpx
 from dotenv import load_dotenv
@@ -250,6 +252,25 @@ def _parse_rss_date(date_str: str | None) -> str | None:
             return None
 
 
+def _limpa_resumo(description: str | None) -> str | None:
+    """Limpa o `<description>` cru do RSS antes de guardar em `resumo`.
+
+    Medido contra os 20 feeds reais (18/08/2026): 10 devolvem HTML, 3 vazio, 7 texto
+    limpo — nos 6 feeds do Google Notícias o valor é literalmente o `<a href=...>`
+    de volta para a mesma página, ilegível. `resumo` é a âncora factual do agente
+    (Story 2): markup no lugar de texto é ruído que o modelo parafraseia como fato.
+    Se sobrar só um link ou nada, devolve None — campo ausente é honesto, o agente
+    vê e diz "não tenho o texto"; markup faz ele inventar (achado A2, revisão 18/08/2026).
+    """
+    if not description:
+        return None
+    texto = BeautifulSoup(description, "html.parser").get_text(separator=" ").strip()
+    texto = re.sub(r"\s+", " ", texto).strip()
+    if not texto or texto.startswith(("http://", "https://")):
+        return None
+    return texto[:300]
+
+
 def _collect_rss(client: httpx.Client, feeds: list[tuple[str, str]], vistos: set) -> list[dict]:
     artigos = []
     for source_name, url in feeds:
@@ -272,13 +293,23 @@ def _collect_rss(client: httpx.Client, feeds: list[tuple[str, str]], vistos: set
                 if not _is_fresh(pub_date):
                     continue
                 description = item.findtext("description") or ""
+                # O Google Notícias carimba o veículo real em <source url="...">Nome</source>.
+                # Sem isso, `fonte` era o apelido da BUSCA ("GN USDA/WASDE") — atribuição
+                # de autoria falsa (achado A6) — e o <link> é uma página JS de ~592 KB que
+                # `read_article` não consegue ler (achado A2, incidente USDA de 18/08/2026).
+                # Não decodificar o CBMi... do link: é protobuf não documentado do Google.
+                source_el = item.find("source")
+                publisher_nome = (source_el.text or "").strip() if source_el is not None and source_el.text else ""
+                publisher_url = source_el.get("url") if source_el is not None else None
                 vistos.add(link)
                 artigos.append({
                     "titulo": title.strip(),
-                    "fonte": source_name,
+                    "fonte": publisher_nome or source_name,
+                    "feed": source_name,
                     "url": link,
+                    "url_publisher": publisher_url,
                     "publicado_em": pub_date,
-                    "resumo": description[:300].strip() if description else None,
+                    "resumo": _limpa_resumo(description),
                 })
         except Exception:
             continue
@@ -375,7 +406,12 @@ def source_health() -> dict:
             artigos = _collect_rss(client, feeds, set())
     except Exception as e:
         return {"total": len(feeds), "vivas": 0, "mortas": [], "erro": str(e)[:120]}
-    vivas = {a.get("fonte") for a in artigos}
+    # `feed` é o apelido do feed/busca ("GN USDA/WASDE"); `fonte` virou o publicador
+    # REAL desde o conserto do achado A6 (ex.: "Farm Progress"). Comparar `mortas`
+    # contra `fonte` faz os 6 feeds do Google Notícias nunca baterem, mesmo vivos
+    # — o boletim reportava "6 mortas" para fontes que entregaram item o tempo todo
+    # (achado A1, revisão 18/08/2026).
+    vivas = {a.get("feed") or a.get("fonte") for a in artigos}
     mortas = [nome for nome, _ in feeds if nome not in vivas]
     return {"total": len(feeds), "vivas": len(feeds) - len(mortas), "mortas": mortas, "erro": None}
 

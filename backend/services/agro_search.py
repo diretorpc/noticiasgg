@@ -1,6 +1,7 @@
 import os
 import httpx
 
+from backend.services.secrets_mask import sanitize_error
 
 SCRAPER_API_URL = "https://api.scraperapi.com/structured/google/search"
 
@@ -28,4 +29,4 @@ def search(query: str) -> dict:
     except httpx.TimeoutException:
         return {"erro": "timeout na busca", "resultados": []}
     except Exception as e:
-        return {"erro": str(e), "resultados": []}
+        return {"erro": sanitize_error(e), "resultados": []}

@@ -14,6 +14,7 @@ def test_fetch_returns_parseable_calendar():
     assert isinstance(events, list)
 
 
+@pytest.mark.unit
 def test_fetch_without_key_raises(monkeypatch):
     monkeypatch.delenv("SCRAPER_API_KEY", raising=False)
     with pytest.raises(ValueError):
@@ -55,6 +56,7 @@ def no_sleep(monkeypatch):
     monkeypatch.setattr(investing_calendar.time, "sleep", lambda _: None)
 
 
+@pytest.mark.unit
 def test_fetch_retries_once_after_timeout(monkeypatch, no_sleep):
     monkeypatch.setenv("SCRAPER_API_KEY", "k")
     calls: list = []
@@ -65,6 +67,7 @@ def test_fetch_retries_once_after_timeout(monkeypatch, no_sleep):
     assert len(calls) == 2
 
 
+@pytest.mark.unit
 def test_fetch_raises_after_second_timeout(monkeypatch, no_sleep):
     monkeypatch.setenv("SCRAPER_API_KEY", "k")
     calls: list = []
@@ -76,18 +79,25 @@ def test_fetch_raises_after_second_timeout(monkeypatch, no_sleep):
     assert len(calls) == 2
 
 
+@pytest.mark.unit
 def test_fetch_does_not_retry_on_http_error(monkeypatch, no_sleep):
-    """403/500 do ScraperAPI não é lentidão — repetir só gasta crédito."""
+    """403/500 do ScraperAPI não é lentidão — repetir só gasta crédito.
+
+    fetch() reembrulha httpx.HTTPStatusError em RuntimeError (ver
+    test_investing_calendar_leak.py): str(HTTPStatusError) carrega a URL
+    completa da requisição, com a SCRAPER_API_KEY no query string — precisa
+    passar por sanitize_error antes de subir para quem loga ou notifica."""
     monkeypatch.setenv("SCRAPER_API_KEY", "k")
     calls: list = []
     monkeypatch.setattr(investing_calendar.httpx, "Client", _fake_client_factory(
         [httpx.HTTPStatusError("403", request=None, response=None)], calls))
 
-    with pytest.raises(httpx.HTTPStatusError):
+    with pytest.raises(RuntimeError):
         investing_calendar.fetch()
     assert len(calls) == 1
 
 
+@pytest.mark.unit
 def test_fetch_waits_at_least_70s(monkeypatch, no_sleep):
     """ScraperAPI pede até 70s para devolver a página; 60s ficava abaixo disso."""
     monkeypatch.setenv("SCRAPER_API_KEY", "k")

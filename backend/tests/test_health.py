@@ -2,6 +2,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.services import health
@@ -15,6 +16,7 @@ def test_collect_status_tudo_ok():
             "backend.services.health.supabase",
             get_recent_sent_titles=lambda *a, **k: ["a", "b"],
             count_recent_broadcasts=lambda *a, **k: 9,
+            get_news_log=lambda *a, **k: {"itens": [{"news_id": "x"}]},
             get_polls=lambda *a, **k: [{"instituto": "X"}],
          ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
         st = health.collect_status()
@@ -22,6 +24,7 @@ def test_collect_status_tudo_ok():
     assert st["checks"]["dedup"]["status"] == "ok"
     assert st["checks"]["dedup"]["titulos_24h"] == 2
     assert st["checks"]["broadcasts"]["enviados_24h"] == 9
+    assert st["checks"]["news_log"]["status"] == "ok"
     assert st["checks"]["evolution"]["status"] == "ok"
     assert "checked_at" in st
 
@@ -32,6 +35,7 @@ def test_collect_status_dedup_quebrado_vira_error():
             "backend.services.health.supabase",
             get_recent_sent_titles=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("400 Bad Request")),
             count_recent_broadcasts=lambda *a, **k: 9,
+            get_news_log=lambda *a, **k: {"itens": [{"news_id": "x"}]},
             get_polls=lambda *a, **k: [{"instituto": "X"}],
          ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
         st = health.collect_status()
@@ -45,6 +49,7 @@ def test_collect_status_evolution_desconectada_vira_warn():
             "backend.services.health.supabase",
             get_recent_sent_titles=lambda *a, **k: ["a"],
             count_recent_broadcasts=lambda *a, **k: 1,
+            get_news_log=lambda *a, **k: {"itens": [{"news_id": "x"}]},
             get_polls=lambda *a, **k: [{"instituto": "X"}],
          ), patch("backend.services.health.whatsapp.connection_state", return_value="close"):
         st = health.collect_status()
@@ -59,11 +64,106 @@ def test_collect_status_evolution_excecao_degrada_para_warn():
             "backend.services.health.supabase",
             get_recent_sent_titles=lambda *a, **k: ["a"],
             count_recent_broadcasts=lambda *a, **k: 1,
+            get_news_log=lambda *a, **k: {"itens": [{"news_id": "x"}]},
             get_polls=lambda *a, **k: [{"instituto": "X"}],
          ), patch("backend.services.health.whatsapp.connection_state",
                   side_effect=RuntimeError("timeout")):
         st = health.collect_status()
     assert st["checks"]["evolution"]["status"] == "warn"
+
+
+@pytest.mark.unit
+def test_collect_status_broadcast_sem_registro_no_log_vira_error():
+    """A4: alerta SAIU (broadcast>0) mas o registro legível não acompanhou — sintoma
+    de migration não executada ou log_sent_news falhando calado. Dia calmo (os dois
+    zerados) NÃO é isto — ver o teste seguinte."""
+    with patch("backend.services.health._check_keys", return_value=_KEYS_OK), \
+         patch.multiple(
+            "backend.services.health.supabase",
+            get_recent_sent_titles=lambda *a, **k: ["a"],
+            count_recent_broadcasts=lambda *a, **k: 3,
+            get_news_log=lambda *a, **k: {"itens": []},
+            get_polls=lambda *a, **k: [{"instituto": "X"}],
+         ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
+        st = health.collect_status()
+    assert st["checks"]["news_log"]["status"] == "error"
+    assert st["checks"]["news_log"]["broadcasts_24h"] == 3
+    assert st["status"] == "error"
+
+
+@pytest.mark.unit
+def test_collect_status_registro_indisponivel_vira_warn_nao_escrita_silenciosa():
+    """A3: get_news_log devolve {'itens': [], 'aviso': ...} quando a LEITURA falha —
+    isso não prova nada sobre a ESCRITA. Antes o check só olhava `.get('itens')` e
+    descartava o aviso, então uma leitura soluçada com 3 broadcasts na janela virava
+    'escrita silenciosa' (error) — bug que não existe, o dono caçaria à toa."""
+    with patch("backend.services.health._check_keys", return_value=_KEYS_OK), \
+         patch.multiple(
+            "backend.services.health.supabase",
+            get_recent_sent_titles=lambda *a, **k: ["a"],
+            count_recent_broadcasts=lambda *a, **k: 3,
+            get_news_log=lambda *a, **k: {"itens": [], "aviso": "registro indisponível"},
+            get_polls=lambda *a, **k: [{"instituto": "X"}],
+         ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
+        st = health.collect_status()
+    assert st["checks"]["news_log"]["status"] == "warn"
+    assert "registro indisponível" in st["checks"]["news_log"]["message"]
+    assert st["status"] == "warn"  # não pode virar error global por uma leitura soluçada
+
+
+@pytest.mark.unit
+def test_collect_status_news_log_nao_chama_count_recent_broadcasts_duas_vezes():
+    """O check `broadcasts` já calcula `enviados_24h` — reaproveitar evita uma
+    consulta extra por visita a /api/health, que é público e sem senha."""
+    chamadas = {"n": 0}
+
+    def _contar(*a, **k):
+        chamadas["n"] += 1
+        return 5
+
+    with patch("backend.services.health._check_keys", return_value=_KEYS_OK), \
+         patch.multiple(
+            "backend.services.health.supabase",
+            get_recent_sent_titles=lambda *a, **k: ["a"],
+            count_recent_broadcasts=_contar,
+            get_news_log=lambda *a, **k: {"itens": [{"news_id": "x"}]},
+            get_polls=lambda *a, **k: [{"instituto": "X"}],
+         ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
+        health.collect_status()
+    assert chamadas["n"] == 1
+
+
+@pytest.mark.unit
+def test_collect_status_news_log_excecao_vira_warn_nao_error():
+    """Um check que não conseguiu LER o registro não prova que a escrita falhou —
+    escalar para 'error' global por uma exceção de leitura era severidade errada."""
+    with patch("backend.services.health._check_keys", return_value=_KEYS_OK), \
+         patch.multiple(
+            "backend.services.health.supabase",
+            get_recent_sent_titles=lambda *a, **k: ["a"],
+            count_recent_broadcasts=lambda *a, **k: 1,
+            get_news_log=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("timeout")),
+            get_polls=lambda *a, **k: [{"instituto": "X"}],
+         ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
+        st = health.collect_status()
+    assert st["checks"]["news_log"]["status"] == "warn"
+
+
+@pytest.mark.unit
+def test_collect_status_dia_calmo_sem_broadcast_nem_log_fica_ok():
+    """Zero alertas e zero registros no mesmo dia é o caso COMUM (dia sem notícia
+    relevante) — não pode acender erro."""
+    with patch("backend.services.health._check_keys", return_value=_KEYS_OK), \
+         patch.multiple(
+            "backend.services.health.supabase",
+            get_recent_sent_titles=lambda *a, **k: [],
+            count_recent_broadcasts=lambda *a, **k: 0,
+            get_news_log=lambda *a, **k: {"itens": []},
+            get_polls=lambda *a, **k: [{"instituto": "X"}],
+         ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
+        st = health.collect_status()
+    assert st["checks"]["news_log"]["status"] == "ok"
+    assert st["status"] == "ok"
 
 
 _STATUS_OK = {
@@ -72,6 +172,7 @@ _STATUS_OK = {
         "keys": {"status": "ok", "faltando": []},
         "dedup": {"status": "ok", "titulos_24h": 12},
         "broadcasts": {"status": "ok", "enviados_24h": 9},
+        "news_log": {"status": "ok", "broadcasts_24h": 9, "registrado": True},
         "evolution": {"status": "ok", "estado": "open"},
         "polls": {"status": "ok", "institutos": 3},
     },
@@ -84,6 +185,7 @@ _STATUS_PROBLEMA = {
         "keys": {"status": "ok", "faltando": []},
         "dedup": {"status": "error", "message": "400 Bad Request"},
         "broadcasts": {"status": "ok", "enviados_24h": 9},
+        "news_log": {"status": "ok", "broadcasts_24h": 9, "registrado": True},
         "evolution": {"status": "ok", "estado": "open"},
         "polls": {"status": "ok", "institutos": 3},
     },
@@ -97,6 +199,7 @@ def test_format_digest_verde():
     assert "✅ Tudo OK" in msg
     assert "Dedup: ativo (12 títulos/24h)" in msg
     assert "Alertas enviados (24h): 9" in msg
+    assert "Registro de notícias: OK (9 alertas/24h)" in msg
 
 
 def test_format_digest_problema_lidera_e_marca():
@@ -104,6 +207,35 @@ def test_format_digest_problema_lidera_e_marca():
     assert "⚠️ 1 problema" in msg
     assert "❌" in msg
     assert "Dedup" in msg
+
+
+@pytest.mark.unit
+def test_format_digest_news_log_silencioso_aparece_no_boletim():
+    """A4: broadcast saiu, registro não acompanhou — precisa aparecer no boletim
+    que já roda em produção, não só no JSON de /api/health."""
+    status = {**_STATUS_PROBLEMA, "checks": {
+        **_STATUS_PROBLEMA["checks"],
+        "dedup": {"status": "ok", "titulos_24h": 12},
+        "news_log": {"status": "error", "broadcasts_24h": 3, "registrado": False},
+    }}
+    msg = health.format_digest(status)
+    assert "Registro de notícias" in msg
+    assert "escrita silenciosa" in msg
+
+
+@pytest.mark.unit
+def test_format_digest_news_log_registro_indisponivel_mostra_warn_nao_escrita_silenciosa():
+    """A3: a linha do boletim tinha o ícone de erro cravado ('❌') para QUALQUER
+    status com 'message', mesmo quando o status real era 'warn' (leitura falhou).
+    O texto 'escrita silenciosa' é reservado para o caso confirmado (achado A4)."""
+    status = {**_STATUS_OK, "checks": {
+        **_STATUS_OK["checks"],
+        "news_log": {"status": "warn", "message": "registro indisponível"},
+    }}
+    msg = health.format_digest(status)
+    assert "⚠️" in msg
+    assert "registro indisponível" in msg
+    assert "escrita silenciosa" not in msg
 
 
 _ADMIN_ENV = {"REPLY_TO_NUMBER": "5534999945010"}
@@ -181,6 +313,7 @@ def test_collect_status_nao_toca_a_rede_de_noticias():
     with patch("backend.collectors.news.source_health") as espiao, \
          patch("backend.services.health.supabase.get_recent_sent_titles", return_value=[]), \
          patch("backend.services.health.supabase.count_recent_broadcasts", return_value=0), \
+         patch("backend.services.health.supabase.get_news_log", return_value={"itens": []}), \
          patch("backend.services.health.supabase.get_polls", return_value=[{"i": 1}]), \
          patch("backend.services.health.whatsapp.connection_state", return_value="open"):
         st = health.collect_status()

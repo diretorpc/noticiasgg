@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -12,6 +13,26 @@ from backend.services import alert_checker
 # get_recent_sent_titles — o resultado dependia dos dados do dia. Corrigido, o
 # arquivo é determinístico (medido: zero conexões) e entra no portão.
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _sem_news_log():
+    """`log_sent_news` entrou no caminho de entrega de _check_news em 18/08/2026.
+    Nenhum teste DESTE arquivo é sobre o registro legível — o comportamento dele
+    mora em test_news_log.py, inclusive a garantia de que ele é chamado. Sem este
+    stub, todo teste que chega a entregar tentaria o Supabase de produção: é
+    exatamente a falha que o comentário do topo descreve.
+
+    `_capture_conteudo` e `log_alert_messages` entraram no mesmo caminho em
+    18/08/2026 (sessão 'noticias-ancoradas', Partes A e B): sem stub, todo
+    teste que chega a entregar tentaria o ScraperAPI (real, até 75s de
+    timeout) e o Supabase de novo — o comportamento deles mora em
+    test_news_log.py."""
+    with patch("backend.services.alert_checker.supabase.log_sent_news"), \
+         patch("backend.services.alert_checker._capture_conteudo", return_value=(None, None)), \
+         patch("backend.services.alert_checker.supabase.log_alert_messages"):
+        yield
+
 
 _ADMIN = "5534999945010"
 _RECIPIENTS = [{"phone": "5534999000001", "name": "A"}]
@@ -170,6 +191,27 @@ def test_check_news_respeita_teto_de_classificacoes():
         alert_checker._check_news(_RECIPIENTS, test_mode=False)
 
     assert mock_anthropic.return_value.messages.create.call_count == 5
+
+
+def test_source_rule_id_normaliza_caracteres_especiais():
+    """A4: fonte publicadora real (conjunto ABERTO desde o conserto do A6) pode
+    trazer '&', '.', '(' — normaliza para caracteres seguros de URL/rule_id, senão
+    corta a query string do PostgREST em get_alert_last_triggered."""
+    rid = alert_checker._source_rule_id("S&P Global")
+    assert re.fullmatch(r"news_source_[a-z0-9_]+", rid), rid
+    assert "&" not in rid
+
+
+def test_source_rule_id_wicker_gov():
+    """Medido pelo Apolo contra uma coleta real: 'U.S. Senator Roger Wicker (.gov)'
+    é um publicador de verdade que aparece no <source> do Google Notícias."""
+    rid = alert_checker._source_rule_id("U.S. Senator Roger Wicker (.gov)")
+    assert re.fullmatch(r"news_source_[a-z0-9_]+", rid), rid
+
+
+def test_source_rule_id_mantem_compatibilidade_com_fontes_simples():
+    """Guarda de regressão: fonte sem caractere especial continua igual a antes."""
+    assert alert_checker._source_rule_id("Le Monde") == "news_source_le_monde"
 
 
 def test_check_news_cooldown_por_fonte():
@@ -548,7 +590,7 @@ def test_nota_abaixo_do_corte_nao_envia():
          patch("backend.services.alert_checker._mark_sent"), \
          patch("backend.collectors.news.collect", return_value=[_ARTIGO]), \
          patch("backend.services.alert_checker.Anthropic") as mock_cli, \
-         patch("backend.services.alert_checker._broadcast", return_value=1) as mock_bc:
+         patch("backend.services.alert_checker._broadcast_com_ids", return_value=[("x", "y")]) as mock_bc:
         mock_cli.return_value.messages.create.return_value = _fake_resp(resp)
         enviados = alert_checker._check_news(_RECIPIENTS)
     assert enviados == 0
@@ -634,10 +676,10 @@ def test_empate_de_nota_ganha_a_mais_recente():
 
 
 def test_nao_queima_a_noticia_quando_a_entrega_falha():
-    """Evolution fora do ar: _broadcast devolve 0. Marcar como enviada mataria a
-    notícia para sempre (is_news_sent não tem prazo) e ainda entraria no
-    get_recent_sent_titles, fazendo as próximas sobre o mesmo fato virarem
-    'duplicada' de algo que o dono nunca viu."""
+    """Evolution fora do ar: _broadcast_com_ids devolve lista vazia. Marcar
+    como enviada mataria a notícia para sempre (is_news_sent não tem prazo) e
+    ainda entraria no get_recent_sent_titles, fazendo as próximas sobre o
+    mesmo fato virarem 'duplicada' de algo que o dono nunca viu."""
     with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
          patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
          patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
@@ -645,8 +687,38 @@ def test_nao_queima_a_noticia_quando_a_entrega_falha():
          patch("backend.services.alert_checker._mark_sent") as mock_mark, \
          patch("backend.collectors.news.collect", return_value=[dict(_TRES_CANDIDATAS[0])]), \
          patch("backend.services.alert_checker.Anthropic") as mock_cli, \
-         patch("backend.services.alert_checker._broadcast", return_value=0):
+         patch("backend.services.alert_checker._broadcast_com_ids", return_value=[]):
         mock_cli.return_value.messages.create.return_value = _resp_nota(8, "forte")
         enviados = alert_checker._check_news(_RECIPIENTS)
     assert enviados == 0
     mock_mark.assert_not_called(), "sem entrega, a notícia continua disponível"
+
+
+# ── _broadcast_com_ids executada de verdade (achado 4, revisão do Apolo, 18/08/2026) ──
+#
+# As 6 referências anteriores a `_broadcast_com_ids` no arquivo de testes eram
+# todas patch/monkeypatch — a função real nunca rodava sob `-k broadcast_com_ids`.
+# É a peça que sustenta a Parte B (ancoragem por message_id) inteira, e o modo de
+# falha é silencioso por construção: `send_message` mudando de forma (a v2 já
+# mudou o payload uma vez) faz `log_alert_messages` gravar zero linhas sem que
+# o alerta pare de chegar. Os dois testes abaixo chamam a função real.
+
+def test_broadcast_com_ids_extrai_message_id_do_retorno_da_evolution():
+    """Formato real medido: `send_message` devolve o corpo da resposta da
+    Evolution, que carrega o id da mensagem em `key.id`."""
+    with patch("backend.services.alert_checker.whatsapp.send_message",
+               return_value={"key": {"id": "3EB0C767D26A1D712E"}}) as mock_send:
+        entregues = alert_checker._broadcast_com_ids("msg", _RECIPIENTS)
+    mock_send.assert_called_once_with("5534999000001", "msg")
+    assert entregues == [("5534999000001", "3EB0C767D26A1D712E")]
+
+
+def test_broadcast_com_ids_sem_message_id_no_retorno_avisa_e_devolve_none():
+    """Se a Evolution mudar de forma e `key.id` sumir, a entrega não pode
+    quebrar (a mensagem JÁ FOI enviada) — mas o id vem None e um warning é
+    logado, para o silêncio não ser total."""
+    with patch("backend.services.alert_checker.whatsapp.send_message", return_value={}), \
+         patch("backend.services.alert_checker.logger") as mock_logger:
+        entregues = alert_checker._broadcast_com_ids("msg", _RECIPIENTS)
+    assert entregues == [("5534999000001", None)]
+    assert mock_logger.warning.called
