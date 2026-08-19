@@ -22,6 +22,55 @@ Agente de IA multi-domínio, backend em Python/FastAPI:
 
 Fonte viva do que existe hoje: `README.md` e `CLAUDE.md` na raiz do projeto.
 
+## Estado em 18/08/2026, 23h — PRIMEIRA VALIDAÇÃO EM PRODUÇÃO: a âncora funciona, 3 defeitos abertos
+
+Merge feito (`755b991`, deploy READY). Às 22:47 saiu o primeiro alerta com o código novo, e
+às 23:04 o Matheus respondeu CITANDO a mensagem. **A ancoragem funcionou de ponta a ponta**:
+o webhook casou o `stanzaId`, o bot leu o `conteudo` guardado e respondeu com a matéria na
+mão. Notícia: *"Produção de Petróleo dos EAU Aproxima-se do Recorde Após Saída da OPEC"*
+(fonte real EnergyNow, feed `GN OPEP`).
+
+**Grounding medido, afirmação por afirmação, contra o `conteudo` guardado — 7 de 8 ancoradas:**
+`3.8 million` ✅ · `June` ✅ · `May 1` ✅ · `ADNOC` ✅ · `126` ✅ · `72` ✅ · `OPEC exit` ✅ ·
+**`April 2020` ✗ não está no texto capturado.**
+
+Refazer a medição em qualquer notícia:
+```bash
+python -X utf8 -c "import os,pathlib;[os.environ.setdefault(k.strip(),v.strip().strip(chr(34))) for k,v in (l.split('=',1) for l in pathlib.Path('.env').read_text(encoding='utf-8').splitlines() if '=' in l and not l.strip().startswith('#'))];from backend.services import supabase as s;r=s._client().get('/news_log?select=titulo_pt,url,url_publisher,conteudo_fonte,conteudo&order=sent_at.desc&limit=1').json()[0];print(r['titulo_pt']);print(r['url'][:90]);print('conteudo:',len(r['conteudo'] or ''),'chars')"
+```
+
+### Os 3 defeitos, na ordem acertada com o Matheus (consertar ANTES da Story 2)
+
+**1. O 🔗 da mensagem dá 403.** Mandamos o link do Google Notícias
+(`news.google.com/rss/articles/CBMi...`), que o navegador recusa. A ironia: a captura
+**funcionou** (`conteudo_fonte = read_article`, 4000 chars do EnergyNow) e sabemos o veículo
+(`url_publisher = https://energynow.ca`) — só que `url_publisher` é o **domínio**, não o
+artigo. **Conserto:** capturar o endereço canônico que o render resolveu (`<link rel=canonical>`
+/ `og:url` da página lida) e mandar ESSE no 🔗. O link do Google continua no banco para dedup.
+
+**2. Sigla em inglês dentro de título em português.** `titulo_pt` saiu *"...Após Saída da
+OPEC"*. O bot respondeu "OPEP" — **o bot está certo**, o classificador é que traduziu a
+manchete e deixou a sigla. **Conserto:** uma frase em `_NEWS_CLASSIFIER_SYSTEM` mandando
+traduzir também sigla de organização (OPEC→OPEP, UN→ONU...).
+
+**3. O `conteudo` capturado é majoritariamente ENTULHO do site.** Dos 4000 chars guardados, o
+começo é menu, "Sign Up for FREE Daily Energy News" e **manchetes de OUTRAS notícias**
+("Data Center Gas Plants...", "Venezuela Oil Output..."). `read_article` remove
+`script/style/nav/footer/header/aside`, e o boilerplate deste site não está nessas tags.
+Dois estragos: gasta o teto de 4000 chars com lixo (provavelmente foi o que cortou o miolo
+onde estaria o `April 2020`), e enfia manchete de outro assunto dentro da âncora daquela
+notícia. **Conserto:** extrair o corpo do artigo (heurística de densidade de texto, `<article>`,
+ou similar) antes de truncar.
+
+⚠️ **A leitura do Google Notícias é INSTÁVEL em tamanho.** A captura de produção trouxe 4000
+chars; refazendo a mesma leitura 20 min depois vieram **520 chars**. Por isso **não dá para
+afirmar que o bot inventou o "abril de 2020"** — pode ter sido truncado. Fica em aberto até
+o defeito 3 estar consertado.
+
+**Depois dos 3: Story 2** (ferramenta `get_sent_news` no chat).
+
+---
+
 ## Estado em 18/08/2026 — alucinação em conversa: Story 1 ENTREGUE, faltam 2, 3 e 4
 
 **O incidente.** Às 12:00–12:11 de 18/08 o agente respondeu cinco vezes sobre o mesmo
@@ -323,17 +372,15 @@ python -c "from backend.collectors import news; print(news.source_health())"
 
 ## Aberto
 
-- [ ] 🔴 **Rodar a migration `008_news_log_conteudo_e_mensagens.sql` no SQL Editor do
-      Supabase — ANTES de mergear/deployar esta branch, não depois.** (A 007 já rodou e
-      foi conferida — ver seção "Story 1" acima; este item ficou desatualizado apontando
-      pra ela.) **Risco medido, não só teórico:** `log_sent_news` manda `conteudo`/
-      `conteudo_fonte` no MESMO POST que título/score/url. Se a coluna não existir ainda,
-      o PostgREST rejeita o INSERT INTEIRO com 400 — não perde só os dois campos novos,
-      perde a LINHA TODA, sempre que a captura de conteúdo tiver sucesso (14 dos 20 feeds
-      capturam de cara — não é caso raro). Isso ressuscitaria calado o mesmo buraco que
-      a Story 1 existe pra fechar. `news_log_messages` já era tabela nova, então
-      `log_alert_messages`/`get_news_by_message_id` degradam sozinhos (warning, sem
-      travar o webhook) — só o ponto acima é agudo.
+- [x] ~~Rodar as migrations 007 e 008~~ — **FEITO em 18/08 e conferido na fonte viva**
+      (tabelas e as 17 colunas juntas respondem 200). Merge feito e deploy READY (`755b991`).
+- [ ] 🔴 **Os 3 defeitos achados na primeira validação em produção (18/08 23h)** — decisão do
+      Matheus: consertar os TRÊS **antes** de começar a Story 2. Detalhe, evidência e conserto
+      proposto na seção de 18/08 23h, no topo deste arquivo.
+      1. o 🔗 da mensagem dá 403 (mandamos o link do Google, não o do jornal)
+      2. sigla em inglês dentro de título em português ("Saída da OPEC")
+      3. o `conteudo` capturado é majoritariamente entulho do site — menu e manchete de
+         OUTRAS notícias ocupando o teto de 4000 chars da âncora
 - [ ] 🔴 **Stories 2, 3 e 4 do plano anti-alucinação** —
       `docs/superpowers/plans/2026-08-18-noticias-ancoradas-e-antialucinacao.md`.
       Enquanto não forem feitas, o agente segue inventando número e data quando
