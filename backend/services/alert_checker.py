@@ -325,12 +325,14 @@ def _mark_sent(news_id: str, url_id: str | None, title: str | None = None) -> No
 
 
 # render=true no ScraperAPI (necessário para os 6 feeds "GN *" — ver
-# web_search.read_article) mediu até 48,9s por link real em 18/08/2026; 75s dá
-# folga de ~1,5x sobre o pior caso visto sem deixar a captura correr solta.
-# Fetch simples (14 dos 20 feeds) termina em poucos segundos — o teto largo
-# não pune quem não precisa dele. Roda DEPOIS do broadcast (alerta já
+# web_search.read_article) mediu até 56,6s por link real na remedição da
+# revisão do Apolo (achado 5, 18/08/2026 — a medição original, 48,9s, também
+# estava abaixo do real); 75s dá folga de ~1,3x sobre o pior caso visto, não
+# ~1,5x. Fetch simples (14 dos 20 feeds) termina em poucos segundos — o teto
+# largo não pune quem não precisa dele. Roda DEPOIS do broadcast (alerta já
 # entregue), então o tempo aqui não atrasa quem recebe a mensagem — só a
-# escrita do registro, que já é best-effort.
+# escrita do registro, que já é best-effort. `web_search._RENDER_TIMEOUT_FLOOR`
+# usa o mesmo valor como piso para o caminho de chat (achado 2).
 _CONTEUDO_TIMEOUT = 75.0
 
 

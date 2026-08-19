@@ -113,3 +113,47 @@ def test_read_article_timeout_default_preservado(monkeypatch):
     with patch("backend.services.web_search.httpx.get", return_value=_resp_html("<p>artigo</p>")) as mock_get:
         web_search.read_article("https://www.farmprogress.com/artigo")
     assert mock_get.call_args.kwargs["timeout"] == 30.0
+
+
+@pytest.mark.unit
+def test_read_article_render_eleva_piso_do_timeout(monkeypatch):
+    """Achado 2, revisão do Apolo (18/08/2026): 4 renders reais mediram
+    37,4-56,6s — todos acima do timeout default de 30s do caminho de chat.
+    Sem piso, o chat paga os créditos do render e ainda volta com erro de
+    timeout. `read_article` tem que elevar o timeout sozinho quando liga o
+    render, mesmo que o chamador não passe nada."""
+    monkeypatch.setenv("SCRAPER_API_KEY", "chave-de-teste")
+    with patch("backend.services.web_search.httpx.get", return_value=_resp_html("<p>artigo</p>")) as mock_get:
+        web_search.read_article("https://news.google.com/rss/articles/abc")
+    assert mock_get.call_args.kwargs["timeout"] == 75.0
+
+
+@pytest.mark.unit
+def test_read_article_render_respeita_timeout_maior_que_o_piso(monkeypatch):
+    """O piso é um MÍNIMO, não um teto: alert_checker já passa 75s — não pode
+    virar exatamente 75 se o chamador pedir mais."""
+    monkeypatch.setenv("SCRAPER_API_KEY", "chave-de-teste")
+    with patch("backend.services.web_search.httpx.get", return_value=_resp_html("<p>artigo</p>")) as mock_get:
+        web_search.read_article("https://news.google.com/rss/articles/abc", timeout=120.0)
+    assert mock_get.call_args.kwargs["timeout"] == 120.0
+
+
+@pytest.mark.unit
+def test_is_google_news_link_compara_host_nao_substring(monkeypatch):
+    """Achado 3, revisão do Apolo (18/08/2026): substring `"news.google.com"
+    in url` casava um domínio hostil que só CONTÉM o texto na query string —
+    ligando render=true (35 créditos, ~50s) para um link que não é do
+    Google Notícias."""
+    assert web_search._is_google_news_link("https://evil.com/?x=news.google.com") is False
+    assert web_search._is_google_news_link("https://news.google.com/rss/articles/abc") is True
+    assert web_search._is_google_news_link("") is False
+    assert web_search._is_google_news_link(None) is False
+
+
+@pytest.mark.unit
+def test_read_article_nao_usa_render_para_dominio_hostil_parecido(monkeypatch):
+    monkeypatch.setenv("SCRAPER_API_KEY", "chave-de-teste")
+    with patch("backend.services.web_search.httpx.get", return_value=_resp_html("<p>artigo</p>")) as mock_get:
+        web_search.read_article("https://evil.com/?x=news.google.com")
+    assert "render" not in mock_get.call_args.kwargs["params"]
+    assert mock_get.call_args.kwargs["timeout"] == 30.0
