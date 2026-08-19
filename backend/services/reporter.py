@@ -370,7 +370,10 @@ def _format_anchored_news(noticia: dict) -> str:
         f"titulo: {_escape_untrusted_text(titulo)}\n"
         f"fonte: {_escape_untrusted_text(noticia.get('fonte') or '')}\n"
         f"publicado_em: {_escape_untrusted_text(noticia.get('publicado_em') or '')}\n"
-        f"url: {_escape_untrusted_text(noticia.get('url') or '')}\n"
+        # `url_final` (endereço real da matéria, achado na captura) vem na frente
+        # de `url` (link do Google Notícias, chave de dedup): o do Google devolve
+        # 403 no clique e o agente repetia ele na conversa — defeito 1, 19/08/2026.
+        f"url: {_escape_untrusted_text(noticia.get('url_final') or noticia.get('url') or '')}\n"
         f"conteudo: {_escape_untrusted_text(conteudo)}\n"
         "</noticia_citada>"
     )

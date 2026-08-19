@@ -342,7 +342,7 @@ def get_recent_sent_titles(hours: int = 24, limit: int = 20) -> list[str]:
 
 _NEWS_LOG_FIELDS = (
     "news_id", "titulo_pt", "titulo_original", "fonte", "feed", "url",
-    "url_publisher", "categoria", "resumo", "resumo_fonte", "direcao",
+    "url_publisher", "url_final", "categoria", "resumo", "resumo_fonte", "direcao",
     "score", "ativos", "publicado_em", "conteudo", "conteudo_fonte",
 )
 
@@ -389,6 +389,47 @@ def log_sent_news(entry: dict) -> int | None:
         # falhando ficava invisível para sempre (achado A4, revisão 18/08/2026).
         logger.warning("news_log write failed: %s", e)
         return None
+
+
+def update_news_log_conteudo(news_log_id: int, conteudo: str | None,
+                             conteudo_fonte: str | None, url_final: str | None) -> None:
+    """Preenche DEPOIS o texto da matéria (Conserto 1, 19/08/2026).
+
+    `_check_news` grava a linha em `log_sent_news` ANTES de rodar a captura —
+    a captura não tem teto REAL de tempo (`httpx.Timeout` é por OPERAÇÃO, não
+    prazo absoluto: medido um servidor gotejando devolver em 15,25s reais para
+    um pedido de 1,0s) e pode levar até 75s no caminho de render. Se a função
+    da Vercel morrer nesse meio-tempo, a notícia já foi ENTREGUE — sem esta
+    separação ela ficava sem marca de dedup, e o cron de 15 min reclassificava
+    e reenviava a MESMA notícia ao usuário. Este UPDATE só acontece depois que
+    o dedup já está garantido; se ele falhar, o pior caso é a notícia sem
+    âncora de texto, nunca um reenvio.
+
+    Só manda os campos não-None: `conteudo`/`conteudo_fonte`/`url_final` ausentes
+    juntos (captura vazia) não fazem requisição nenhuma — nem tocam em `_client()`,
+    que exigiria SUPABASE_URL/SUPABASE_KEY à toa. `id` vai CRU na query string
+    (não passa por `_f()`): vem sempre do próprio `log_sent_news`, nunca de
+    texto externo, mas `int()` é defesa contra um chamador futuro que passe
+    outra coisa (mesmo cuidado de `_clamp_int`).
+
+    Nunca estoura para o chamador: a notícia já foi entregue e logada quando
+    isto roda — mesma garantia do irmão `log_sent_news`.
+    """
+    payload: dict = {}
+    if conteudo is not None:
+        payload["conteudo"] = conteudo
+    if conteudo_fonte is not None:
+        payload["conteudo_fonte"] = conteudo_fonte
+    if url_final is not None:
+        payload["url_final"] = url_final
+    if not payload:
+        return
+    try:
+        with _client() as c:
+            r = c.patch(f"/news_log?id=eq.{int(news_log_id)}", json=payload)
+            r.raise_for_status()
+    except Exception as e:
+        logger.warning("news_log conteudo update failed: %s", e)
 
 
 def log_alert_messages(news_log_id: int, pares: list[tuple[str, str | None]]) -> None:
@@ -446,7 +487,7 @@ def get_news_by_message_id(message_id: str) -> dict | None:
             news_log_id = rows[0]["news_log_id"]
             r2 = c.get(
                 f"/news_log?id=eq.{_f(news_log_id)}"
-                f"&select=titulo_pt,titulo_original,fonte,url,url_publisher,"
+                f"&select=titulo_pt,titulo_original,fonte,url,url_publisher,url_final,"
                 f"categoria,resumo,resumo_fonte,direcao,score,ativos,"
                 f"publicado_em,conteudo,conteudo_fonte,sent_at&limit=1"
             )
@@ -489,7 +530,7 @@ def get_news_log(hours: int = 72, limit: int = 20) -> dict:
         with _client() as c:
             r = c.get(
                 f"/news_log?select=news_id,titulo_pt,titulo_original,fonte,feed,url,"
-                f"url_publisher,categoria,resumo,resumo_fonte,direcao,score,ativos,"
+                f"url_publisher,url_final,categoria,resumo,resumo_fonte,direcao,score,ativos,"
                 f"publicado_em,sent_at"
                 f"&sent_at=gte.{_f(cutoff)}&order=sent_at.desc&limit={limit}"
             )

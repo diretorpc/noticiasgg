@@ -4,6 +4,7 @@ import logging
 import os
 import re
 from datetime import datetime, timedelta, timezone
+from typing import NamedTuple
 
 from anthropic import Anthropic
 
@@ -50,6 +51,11 @@ Scores:
 - 6-10: urgente — decisão de juros anunciada, corte/aumento OPEC+ confirmado, escalada militar, quebra de safra confirmada, dado oficial divulgado (CPI, PPI, WASDE, estoques EIA/USDA)
 - 3-5: relevante — notícia de qualquer uma das 5 categorias com potencial de influenciar preços futuramente: projeções, previsões climáticas, negociações comerciais, sinais de demanda, declarações de autoridades monetárias
 - 1-2: fora do escopo — esportes, cultura, entretenimento, política sem impacto econômico, especulação sem fonte, tecnologia/IA sem ligação com commodities, notícias APENAS sobre a cotação diária do dólar (já coberta por alerta automático de câmbio), cobertura contínua/ao vivo ("AO VIVO", "EN DIRECT", "LIVE") de evento já em andamento sem fato novo concreto — escalada já noticiada continuar acontecendo NÃO é novidade; só desenvolvimento novo e específico (ex: fechamento de rota, sanção anunciada, produção interrompida) pontua alto
+
+TÍTULO EM PORTUGUÊS: traduza também a SIGLA de organização quando ela tem forma
+consagrada em português — OPEC→OPEP, UN→ONU, WTO→OMC, IMF→FMI, EU→UE, NATO→OTAN. Sigla sem
+forma em português fica como está (Fed, USDA, WASDE, EIA, PMI, CPI). "OPEC+" vira "OPEP+".
+Nunca invente tradução de sigla.
 
 DUPLICATAS: se a notícia relata o MESMO fato/evento de algum título em <ja_enviadas> — mesmo em
 outro idioma ou com palavras diferentes — marque "duplicada": true. Desdobramento NOVO e concreto
@@ -331,35 +337,103 @@ def _mark_sent(news_id: str, url_id: str | None, title: str | None = None) -> No
 # ~1,5x. Fetch simples (14 dos 20 feeds) termina em poucos segundos — o teto
 # largo não pune quem não precisa dele. Roda DEPOIS do broadcast (alerta já
 # entregue), então o tempo aqui não atrasa quem recebe a mensagem — só a
-# escrita do registro, que já é best-effort. `web_search._RENDER_TIMEOUT_FLOOR`
-# usa o mesmo valor como piso para o caminho de chat (achado 2).
+# escrita do registro, que já é best-effort; o 🔗 da mensagem não depende mais
+# desta leitura desde 19/08/2026 (ver `_link_para_mensagem`).
+# `web_search._RENDER_TIMEOUT_FLOOR` usa o mesmo valor como piso para o caminho
+# de chat (achado 2).
 _CONTEUDO_TIMEOUT = 75.0
 
 
-def _capture_conteudo(url: str) -> tuple[str | None, str | None]:
+class Captura(NamedTuple):
+    """O que a leitura da matéria devolve ao alerta.
+
+    `url_final` é a URL canônica declarada pela página lida — rede de segurança
+    do defeito 1 (18/08/2026: o 🔗 do alerta levava o link do Google Notícias,
+    que devolve 403 no clique) para quando `_link_para_mensagem` não conseguiu
+    resolver o endereço. `fonte` diz QUAL extrator leu a matéria
+    (`read_article:trafilatura` ou `read_article:html_bruto`): sem isso não dá
+    para medir se o entulho do defeito 3 voltou.
+
+    NamedTuple e não dict: um campo com nome diz o que é sem obrigar quem lê a
+    contar posições.
+    """
+    conteudo: str | None
+    fonte: str | None
+    url_final: str | None
+
+
+_CAPTURA_VAZIA = Captura(None, None, None)
+
+
+# Orçamento da resolução do link no caminho do ALERTA, em segundos. Isto roda
+# ANTES do broadcast, então segurar demais = alerta não sai. `resolve_google_news`
+# trata este valor como prazo ABSOLUTO (thread com join), não como o timeout por
+# operação do httpx — a diferença é medida: um servidor gotejando segurou a
+# resolução por 40,7s com timeout de 10s (2ª revisão do Apolo, 19/08/2026). 3s é
+# a cauda é mais gorda do que a primeira medição sugeria: 40 links reais deram
+# mediana 0,98s, p90 1,53s e UM estouro com o teto em 3,0s (2,5% — cada estouro
+# custa o 🔗 com 403 e 35 créditos de render na captura, que perde o link
+# resolvido). 5,0s cobre a cauda e no pior caso atrasa o alerta em 2s.
+_LINK_PRAZO = 5.0
+
+
+def _link_para_mensagem(url: str, url_publisher: str = "") -> str:
+    """Endereço que vai no 🔗 do alerta.
+
+    Link do Google Notícias devolve 403 no clique; perguntar o destino ao
+    próprio Google custa ~0,5s e ZERO crédito de ScraperAPI (medido em 5 links
+    reais, 19/08/2026). Falha, demora ou destino de outro veículo mantêm o link
+    original — o comportamento anterior, não uma quebra.
+
+    O teto REAL de tempo mora dentro de `resolve_google_news` (prazo absoluto,
+    não por operação) — aqui só passamos o orçamento do caminho de alerta. A
+    validação de `_url_exibivel` fica AQUI de propósito: um endereço resolvido
+    gigante (o teto é 1000 chars) reprovaria lá na frente e a mensagem sairia
+    sem link nenhum, que é pior que o 403.
+    """
+    try:
+        resolvido = web_search.resolve_google_news(
+            url, timeout=_LINK_PRAZO, host_esperado=url_publisher)
+    except Exception as e:
+        # `Thread.start()` levanta `RuntimeError` quando o SO recusa a thread, e
+        # isso sobe na thread CHAMADORA — fora de qualquer try. Aqui roda ANTES
+        # do broadcast: sem esta defesa, a rodada inteira sairia sem alerta por
+        # causa do enfeite do link (5ª revisão do Apolo, 19/08/2026). `except
+        # Exception` NÃO pega a `RedeProibida` dos testes, que é BaseException —
+        # os dois consertos não se anulam.
+        logger.warning("resolução do link falhou (%s), mandando o link original",
+                       sanitize_error(e))
+        return url
+    return resolvido if _url_exibivel(resolvido) else url
+
+
+def _capture_conteudo(url: str, url_publisher: str = "") -> Captura:
     """Tenta capturar o texto da matéria para ancorar respostas futuras do
     agente. Nunca pode derrubar nem atrasar o alerta — ele já foi ENTREGUE
     quando isto roda (mesma garantia de `log_sent_news`).
 
-    Falha (sem URL, erro do ScraperAPI, timeout, texto vazio) devolve
-    (None, None): campo ausente é honesto — o agente vê e diz que não tem o
-    texto. NUNCA grava markup nem a página de erro do Google Notícias; quem
-    decide o que é "útil" é `web_search.read_article` (só `conteudo`
-    preenchido conta), não uma verificação de tamanho aqui.
+    Falha (sem URL, erro do ScraperAPI, timeout, texto curto demais) devolve
+    `_CAPTURA_VAZIA`: campo ausente é honesto — o agente vê e diz que não tem o
+    texto. Quem decide o que é "útil" é `web_search.read_article` (só
+    `conteudo` preenchido conta), não uma verificação aqui: é lá que mora o
+    piso de `_MIN_ARTICLE_CHARS`, que impede a página não renderizada do Google
+    Notícias virar a âncora `"Google News"` (11 chars).
     """
     if not url:
-        return None, None
+        return _CAPTURA_VAZIA
     try:
-        resultado = web_search.read_article(url, timeout=_CONTEUDO_TIMEOUT)
+        resultado = web_search.read_article(url, timeout=_CONTEUDO_TIMEOUT,
+                                            url_publisher=url_publisher)
     except Exception as e:
         logger.warning("captura de conteúdo: exceção não tratada para %s: %s", url, sanitize_error(e))
-        return None, None
+        return _CAPTURA_VAZIA
     conteudo = resultado.get("conteudo")
     if not conteudo:
         if resultado.get("erro"):
             logger.warning("captura de conteúdo falhou para %s: %s", url, resultado["erro"])
-        return None, None
-    return conteudo, "read_article"
+        return _CAPTURA_VAZIA
+    extrator = resultado.get("extrator") or "desconhecido"
+    return Captura(conteudo, f"read_article:{extrator}", resultado.get("url_final"))
 
 
 def _market_snapshot(market: dict | None) -> str:
@@ -612,8 +686,17 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
     melhor = max(candidatas, key=lambda c: c["score"])
     score, result, source = melhor["score"], melhor["result"], melhor["source"]
     titulo_pt = result.get("titulo_pt") or melhor["title"]
+
+    # Duas coisas diferentes, e a ordem entre elas é o conserto do defeito 1
+    # (19/08/2026): DESCOBRIR o link é barato (0,4-0,8s, 0 crédito) e vem antes
+    # da mensagem; LER a matéria é caro (até 75s, 35 créditos no render) e vem
+    # depois da entrega. Juntar as duas colocaria a leitura na frente do envio —
+    # e um estouro dos 300s da função na Vercel deixaria de sair alerta nenhum.
+    url_original = melhor.get("url", "")
+    url_publisher = melhor.get("url_publisher") or ""
+    url_alerta = _link_para_mensagem(url_original, url_publisher)
     msg = _format_news_alert(result, source, titulo_pt, score, test_mode,
-                             url=melhor.get("url", ""))
+                             url=url_alerta)
 
     logger.info("news check: %d candidatas, enviando a de score=%d ('%s')",
                 len(candidatas), score, titulo_pt[:60])
@@ -623,18 +706,21 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
     if sent > 0:
         total += sent
         if not test_mode:
-            # Captura o texto da matéria DEPOIS do broadcast — o alerta já saiu,
-            # então o tempo daqui (até 75s para link de Google Notícias, ver
-            # _CONTEUDO_TIMEOUT) não atrasa quem recebe. Nunca estoura: falha vira
-            # (None, None), campo ausente e honesto.
-            conteudo, conteudo_fonte = _capture_conteudo(melhor.get("url", ""))
-            # Registro legível ANTES de marcar o dedup: `_mark_sent` → mark_news_sent
-            # faz `raise_for_status()` sem try. Se o Supabase soluçar bem aqui, a
-            # ordem antiga perdia o registro E a marca de dedup juntos; nesta ordem,
-            # um Supabase instável perde só o dedup (a notícia arrisca ser
-            # reclassificada — tolerável), nunca o vestígio que o agente de chat usa
-            # para responder "me fale mais sobre essa notícia" (achado A9).
-            # `log_sent_news` não estoura por construção — reordenar é custo zero.
+            # Registro legível ANTES de capturar o texto — conserto do defeito
+            # medido em 19/08/2026: a captura NÃO tem teto real de tempo
+            # (`httpx.Timeout` é por OPERAÇÃO, não prazo absoluto — um servidor
+            # gotejando devolveu em 15,25s reais para um pedido de 1,0s) e pode
+            # levar até 75s no caminho de render. Na ordem antiga, um estouro
+            # dos 300s da Vercel DURANTE a captura deixava a notícia ENTREGUE
+            # mas sem marca de dedup — o cron de 15 min reclassificava e
+            # reenviava a MESMA notícia. Nesta ordem, o pior caso de estourar
+            # durante a captura é perder só o texto (o UPDATE de
+            # `update_news_log_conteudo` não roda); o dedup já está gravado.
+            # `conteudo`/`conteudo_fonte` NÃO entram aqui — a captura ainda não
+            # rodou. `url_final` só carrega o que já se sabe ANTES de ler a
+            # matéria (o link resolvido para a mensagem); a canônica que a
+            # captura descobre (quando a resolução de antes falhou) entra pelo
+            # UPDATE, mais abaixo. `log_sent_news` não estoura por construção.
             news_log_id = supabase.log_sent_news({
                 "news_id": melhor["news_id"],
                 "titulo_pt": titulo_pt,
@@ -642,7 +728,7 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
                 "fonte": source,
                 "feed": melhor.get("feed"),
                 "url": melhor.get("url"),
-                "url_publisher": melhor.get("url_publisher"),
+                "url_publisher": url_publisher or None,
                 "categoria": result.get("categoria"),
                 "resumo": result.get("resumo"),
                 "resumo_fonte": melhor.get("resumo_fonte"),
@@ -650,8 +736,9 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
                 "score": score,
                 "ativos": _extrai_ativos(result),
                 "publicado_em": melhor.get("publicado_em"),
-                "conteudo": conteudo,
-                "conteudo_fonte": conteudo_fonte,
+                # endereço real da matéria (o `url` acima é o do Google, chave de
+                # dedup): sem ele o bloco <noticia_citada> repete o 403 na conversa.
+                "url_final": url_alerta if url_alerta != url_original else None,
             })
             # id da mensagem por destinatário — permite o webhook casar uma resposta
             # citada com esta notícia exata (Parte C). news_log_id None (o insert
@@ -665,6 +752,24 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
             supabase.set_alert_triggered("news_alert_global")
             if source:
                 supabase.set_alert_triggered(_source_rule_id(source))
+            # Captura o texto por ÚLTIMO — dedup e registro já garantidos, então o
+            # tempo daqui (até 75s no caminho de render) não arrisca reenvio.
+            # Nunca estoura: falha vira _CAPTURA_VAZIA, campo ausente e honesto.
+            # Lê o link JÁ RESOLVIDO: com o endereço real na mão o ScraperAPI
+            # dispensa o render (1 crédito e ~6s em vez de 35 créditos e ~57s).
+            # Sem `news_log_id` não há linha para atualizar — pular a captura
+            # aqui evita gastar crédito de ScraperAPI sem ter onde gravar.
+            if news_log_id:
+                captura = _capture_conteudo(url_alerta, url_publisher)
+                # A canônica da página só entra quando a resolução falhou. Ela
+                # confere HOST, não profundidade de caminho: uma página que
+                # declara `canonical` genérica (a home do veículo) sobrescrevia
+                # o deep link que o Google já tinha confirmado, e o
+                # <noticia_citada> passava a mostrar a home (5ª revisão do
+                # Apolo, 19/08/2026).
+                canonica = captura.url_final if url_alerta == url_original else None
+                supabase.update_news_log_conteudo(
+                    news_log_id, captura.conteudo, captura.fonte, canonica)
         logger.info("news alert sent: '%s' (score=%d)", melhor["title"][:60], score)
 
     return total

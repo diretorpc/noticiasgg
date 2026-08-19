@@ -27,10 +27,18 @@ def _sem_news_log():
     18/08/2026 (sessão 'noticias-ancoradas', Partes A e B): sem stub, todo
     teste que chega a entregar tentaria o ScraperAPI (real, até 75s de
     timeout) e o Supabase de novo — o comportamento deles mora em
-    test_news_log.py."""
+    test_news_log.py.
+
+    `update_news_log_conteudo` entrou no mesmo caminho no Conserto 1
+    (19/08/2026, captura movida para depois do dedup): como `log_sent_news`
+    aqui devolve um MagicMock (truthy, mas não um id real), o guard `if
+    news_log_id:` deixaria passar a chamada — sem este stub ela tentaria o
+    Supabase de produção assim que algum teste capturasse conteúdo não-None."""
     with patch("backend.services.alert_checker.supabase.log_sent_news"), \
-         patch("backend.services.alert_checker._capture_conteudo", return_value=(None, None)), \
-         patch("backend.services.alert_checker.supabase.log_alert_messages"):
+         patch("backend.services.alert_checker._capture_conteudo",
+               return_value=alert_checker._CAPTURA_VAZIA), \
+         patch("backend.services.alert_checker.supabase.log_alert_messages"), \
+         patch("backend.services.alert_checker.supabase.update_news_log_conteudo"):
         yield
 
 
@@ -722,3 +730,18 @@ def test_broadcast_com_ids_sem_message_id_no_retorno_avisa_e_devolve_none():
         entregues = alert_checker._broadcast_com_ids("msg", _RECIPIENTS)
     assert entregues == [("5534999000001", None)]
     assert mock_logger.warning.called
+
+
+def test_classifier_prompt_manda_traduzir_sigla_de_organizacao():
+    """Defeito 2 da validação em produção (18/08/2026): `titulo_pt` saiu como
+    "Produção de Petróleo dos EAU Aproxima-se do Recorde Após Saída da OPEC" —
+    frase em português com a sigla em inglês. O bot respondeu "OPEP" e ficou
+    parecendo que ele tinha trocado o fato; quem errou foi o classificador.
+
+    O prompt precisa mandar traduzir sigla COM forma consagrada em português e
+    citar exemplo, e precisa dizer explicitamente para NÃO inventar tradução
+    das que não têm (Fed, USDA) — senão a regra vira "traduza tudo" e aparece
+    "DAEU" no lugar de "USDA"."""
+    p = alert_checker._NEWS_CLASSIFIER_SYSTEM
+    assert "OPEC" in p and "OPEP" in p
+    assert "USDA" in p and "Fed" in p

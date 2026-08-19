@@ -1,0 +1,20 @@
+-- Migration 009: endereço REAL da matéria (o link que o leitor consegue abrir)
+-- Executar no Supabase SQL Editor. Só ALTER TABLE na news_log (007/008 já em
+-- produção, não são alteradas).
+--
+-- Por que existe (defeito 1 da primeira validação em produção, 18/08/2026):
+-- o 🔗 do alerta levava `news.google.com/rss/articles/CBMi...` — o link que
+-- vem do RSS e que o navegador recusa com 403. As colunas que já existiam não
+-- resolvem: `url` é essa mesma página do Google (e é a chave de dedup, tem que
+-- continuar como está), e `url_publisher` é só o DOMÍNIO do veículo
+-- (`https://energynow.ca`), não a matéria.
+--
+-- `url_final` é o endereço real da matéria. Na maioria esmagadora dos casos ele
+-- vem do próprio Google: `web_search.resolve_google_news` pergunta o destino ao
+-- endpoint `batchexecute` (~0,5s, zero crédito de ScraperAPI) e confere o host
+-- contra o `<source url>` do RSS. Quando essa resolução falha, entra a rede de
+-- segurança: a canônica declarada pela página lida (`<link rel=canonical>` /
+-- `og:url` — ver `web_search._url_canonica`). NULL quando as duas falharam:
+-- nesse caso a mensagem e o bloco <noticia_citada> caem no `url` original —
+-- link ruim é melhor que link nenhum.
+ALTER TABLE news_log ADD COLUMN IF NOT EXISTS url_final TEXT;

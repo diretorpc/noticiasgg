@@ -189,3 +189,23 @@ def test_generate_report_sem_noticia_ancorada_nao_injeta_tag():
     enviado = mock_client.messages.create.call_args.kwargs["messages"]
     texto = enviado[-1]["content"]
     assert "<noticia_citada>" not in texto
+
+
+def test_format_anchored_news_mostra_a_url_do_publicador_e_nao_a_do_google():
+    """Defeito 1 (19/08/2026): com o link do Google Notícias no bloco, o agente
+    repete na conversa o endereço que devolve 403 no clique. `url_final` é o
+    endereço real da matéria, descoberto na captura; `url` continua no banco
+    como chave de dedup."""
+    noticia = dict(_NOTICIA_ANCORADA,
+                   url="https://news.google.com/rss/articles/CBMiabc",
+                   url_final="https://energynow.ca/materia")
+    bloco = reporter._format_anchored_news(noticia)
+    assert "https://energynow.ca/materia" in bloco
+    assert "news.google.com" not in bloco
+
+
+def test_format_anchored_news_sem_url_final_usa_a_url_original():
+    """Notícia anterior a 19/08/2026 (coluna vazia) ou captura que não achou a
+    canônica: link ruim é melhor que nenhum."""
+    bloco = reporter._format_anchored_news(_NOTICIA_ANCORADA)
+    assert "https://www.farmprogress.com/x" in bloco

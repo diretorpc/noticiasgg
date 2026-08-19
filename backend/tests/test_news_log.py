@@ -12,6 +12,7 @@ def _fake_client(response):
     client.__exit__ = MagicMock(return_value=False)
     client.post = MagicMock(return_value=response)
     client.get = MagicMock(return_value=response)
+    client.patch = MagicMock(return_value=response)
     return client
 
 
@@ -266,6 +267,71 @@ def test_log_sent_news_conteudo_ausente_nao_entra_no_payload():
 
 
 @pytest.mark.unit
+def test_update_news_log_conteudo_envia_patch_com_id():
+    """Conserto 1 (19/08/2026): o texto da matéria chega DEPOIS, pelo UPDATE —
+    a linha já existe (criada por log_sent_news antes da captura)."""
+    resp = MagicMock(status_code=204)
+    resp.raise_for_status = MagicMock()
+    client = _fake_client(resp)
+    with patch.object(supabase, "_client", return_value=client):
+        supabase.update_news_log_conteudo(42, "Texto.", "read_article:trafilatura",
+                                          "https://energynow.ca/materia")
+    path = client.patch.call_args[0][0]
+    enviado = client.patch.call_args[1]["json"]
+    assert path == "/news_log?id=eq.42"
+    assert enviado == {"conteudo": "Texto.", "conteudo_fonte": "read_article:trafilatura",
+                       "url_final": "https://energynow.ca/materia"}
+
+
+@pytest.mark.unit
+def test_update_news_log_conteudo_so_envia_campos_nao_none():
+    resp = MagicMock(status_code=204)
+    resp.raise_for_status = MagicMock()
+    client = _fake_client(resp)
+    with patch.object(supabase, "_client", return_value=client):
+        supabase.update_news_log_conteudo(42, "Texto.", None, None)
+    enviado = client.patch.call_args[1]["json"]
+    assert enviado == {"conteudo": "Texto."}
+
+
+@pytest.mark.unit
+def test_update_news_log_conteudo_tudo_none_nao_faz_requisicao():
+    """Captura vazia (_CAPTURA_VAZIA) não pode virar um PATCH inútil — nem
+    tocar em `_client()`, que exigiria SUPABASE_URL/SUPABASE_KEY."""
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    with patch.object(supabase, "_client", return_value=client):
+        supabase.update_news_log_conteudo(42, None, None, None)
+    client.patch.assert_not_called()
+
+
+@pytest.mark.unit
+def test_update_news_log_conteudo_forca_id_inteiro():
+    """`id` vai CRU na query string (não passa por `_f()`). Vem sempre do
+    próprio `log_sent_news` — nunca de texto externo — mas `int()` é defesa
+    contra um chamador futuro que passe outra coisa (mesmo cuidado de
+    `_clamp_int`)."""
+    resp = MagicMock(status_code=204)
+    resp.raise_for_status = MagicMock()
+    client = _fake_client(resp)
+    with patch.object(supabase, "_client", return_value=client):
+        supabase.update_news_log_conteudo("42", "Texto.", None, None)
+    assert client.patch.call_args[0][0] == "/news_log?id=eq.42"
+
+
+@pytest.mark.unit
+def test_update_news_log_conteudo_falha_registra_warning_sem_estourar(caplog):
+    client = MagicMock()
+    client.__enter__ = MagicMock(return_value=client)
+    client.__exit__ = MagicMock(return_value=False)
+    client.patch = MagicMock(side_effect=RuntimeError("banco fora do ar"))
+    with patch.object(supabase, "_client", return_value=client):
+        with caplog.at_level("WARNING", logger="noticiasgg.supabase"):
+            supabase.update_news_log_conteudo(42, "Texto.", None, None)  # não deve levantar
+    assert any("news_log conteudo update failed" in r.message for r in caplog.records)
+
+
+@pytest.mark.unit
 def test_log_alert_messages_grava_um_por_destinatario():
     resp = MagicMock(status_code=201)
     resp.raise_for_status = MagicMock()
@@ -468,20 +534,26 @@ def test_format_news_alert_aceita_link_longo_de_google_noticias():
 
 
 def _prepara_check_news(monkeypatch, artigo, classificacao, sent: int = 1,
-                        conteudo: tuple[str | None, str | None] = (None, None)):
-    """Isola _check_news de rede, banco e IA. Devolve (gravado, enviadas, mensagens):
-    o dict onde o log cai, a lista de mensagens que teriam ido ao WhatsApp e a
-    lista de (news_log_id, pares) que log_alert_messages teria recebido.
+                        conteudo: tuple = (None, None, None)):
+    """Isola _check_news de rede, banco e IA. Devolve (gravado, enviadas,
+    mensagens, atualizacoes): o dict onde o INSERT cai, a lista de mensagens
+    que teriam ido ao WhatsApp, a lista de (news_log_id, pares) que
+    log_alert_messages teria recebido, e a lista de (news_log_id, conteudo,
+    conteudo_fonte, url_final) que update_news_log_conteudo teria recebido —
+    desde o Conserto 1 (19/08/2026) o texto capturado chega pelo UPDATE, não
+    pelo INSERT (ver test_check_news_grava_conteudo_capturado_no_log).
 
     `sent`: quantas entregas _broadcast_com_ids finge ter feito — 0 simula a
     Evolution fora do ar (usado pelo teste irmão do A8: entrega falhou, log
     não roda). `conteudo`: o que `_capture_conteudo` finge ter capturado —
-    (None, None) por padrão (nenhum teste deste bloco é sobre a Parte A, que
-    tem arquivo próprio)."""
+    (None, None, None) por padrão (nenhum teste deste bloco é sobre a Parte A,
+    que tem arquivo próprio) — o terceiro campo é a URL canônica do publicador
+    (defeito 1, 19/08/2026)."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "chave-de-teste")
     gravado: dict = {}
     enviadas: list[str] = []
     mensagens: list[tuple] = []
+    atualizacoes: list[tuple] = []
 
     def fake_log_sent_news(entry):
         gravado.update(entry)
@@ -492,7 +564,18 @@ def _prepara_check_news(monkeypatch, artigo, classificacao, sent: int = 1,
         alert_checker.supabase, "log_alert_messages",
         lambda news_log_id, pares: mensagens.append((news_log_id, pares)),
     )
-    monkeypatch.setattr(alert_checker, "_capture_conteudo", lambda url: conteudo)
+    monkeypatch.setattr(
+        alert_checker.supabase, "update_news_log_conteudo",
+        lambda news_log_id, conteudo_, conteudo_fonte_, url_final_:
+            atualizacoes.append((news_log_id, conteudo_, conteudo_fonte_, url_final_)),
+    )
+    monkeypatch.setattr(alert_checker, "_capture_conteudo",
+                        lambda url, url_publisher="": alert_checker.Captura(*conteudo))
+    # Sem resolução por padrão: a maioria dos testes não é sobre o link, e sem
+    # este stub `_link_para_mensagem` abriria conexão real com o Google (a trava
+    # de rede reprova). Quem testa a resolução sobrescreve.
+    monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
+                        lambda url, **k: "")
     monkeypatch.setattr(alert_checker.supabase, "mark_news_sent", lambda *a, **k: None)
     monkeypatch.setattr(alert_checker.supabase, "set_alert_triggered", lambda *a, **k: None)
     monkeypatch.setattr(alert_checker.supabase, "is_news_sent", lambda *a, **k: False)
@@ -513,7 +596,7 @@ def _prepara_check_news(monkeypatch, artigo, classificacao, sent: int = 1,
     fake_client = MagicMock()
     fake_client.messages.create = MagicMock(return_value=fake_msg)
     monkeypatch.setattr(alert_checker, "Anthropic", lambda *a, **k: fake_client)
-    return gravado, enviadas, mensagens
+    return gravado, enviadas, mensagens, atualizacoes
 
 
 _ARTIGO = {
@@ -539,7 +622,7 @@ _CLASSIFICACAO = {
 
 @pytest.mark.unit
 def test_check_news_grava_no_log_apos_entregar(monkeypatch):
-    gravado, _, _ = _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
+    gravado, _, _, _ = _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
 
     alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
 
@@ -567,7 +650,7 @@ def test_check_news_nao_grava_no_log_quando_entrega_falha(monkeypatch):
     aplicado a log_sent_news: sem isto, mover a chamada para fora do `if sent > 0`
     passaria nos 267 testes e criaria registro de notícia que ninguém recebeu
     (achado A8)."""
-    gravado, enviadas, _ = _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO, sent=0)
+    gravado, enviadas, _, _ = _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO, sent=0)
 
     total = alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
 
@@ -578,7 +661,7 @@ def test_check_news_nao_grava_no_log_quando_entrega_falha(monkeypatch):
 
 @pytest.mark.unit
 def test_check_news_manda_o_link_na_mensagem(monkeypatch):
-    _, enviadas, _ = _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
+    _, enviadas, _, _ = _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
 
     alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
 
@@ -606,7 +689,10 @@ def test_check_news_grava_log_antes_de_marcar_dedup(monkeypatch):
     monkeypatch.setattr(alert_checker, "_cooldown_ok", lambda *a, **k: True)
     monkeypatch.setattr(alert_checker, "_broadcast_com_ids",
                         lambda msg, recipients, errors=None: [("5534999945010", "MSG_ID_TESTE")])
-    monkeypatch.setattr(alert_checker, "_capture_conteudo", lambda url: (None, None))
+    monkeypatch.setattr(alert_checker, "_capture_conteudo",
+                        lambda url, url_publisher="": alert_checker._CAPTURA_VAZIA)
+    monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
+                        lambda url, **k: "")
     monkeypatch.setattr("backend.collectors.news.collect", lambda *a, **k: [_ARTIGO])
 
     fake_msg = MagicMock()
@@ -622,10 +708,61 @@ def test_check_news_grava_log_antes_de_marcar_dedup(monkeypatch):
 
 
 @pytest.mark.unit
+def test_check_news_captura_roda_por_ultimo(monkeypatch):
+    """Conserto 1 (19/08/2026): a captura da matéria (até 75s no caminho de
+    render, e SEM teto real de tempo — `httpx.Timeout` é por OPERAÇÃO, medido
+    1,0s pedido virando 15,25s reais) tem que rodar DEPOIS de tudo que marca a
+    notícia como entregue (log, log_alert_messages, dedup, cooldown). Se a
+    função da Vercel morrer durante a captura, a pior perda é só o texto — o
+    cron de 15 min não pode reclassificar e reenviar a mesma notícia."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "chave-de-teste")
+    ordem: list[str] = []
+    monkeypatch.setattr(alert_checker.supabase, "log_sent_news",
+                        lambda entry: ordem.append("log") or 999)
+    monkeypatch.setattr(alert_checker.supabase, "log_alert_messages",
+                        lambda *a, **k: ordem.append("log_alert_messages"))
+    monkeypatch.setattr(alert_checker.supabase, "mark_news_sent",
+                        lambda *a, **k: ordem.append("mark"))
+    monkeypatch.setattr(alert_checker.supabase, "set_alert_triggered",
+                        lambda *a, **k: ordem.append("set_alert_triggered"))
+    monkeypatch.setattr(alert_checker.supabase, "update_news_log_conteudo",
+                        lambda *a, **k: ordem.append("update_conteudo"))
+    monkeypatch.setattr(alert_checker, "_capture_conteudo",
+                        lambda url, url_publisher="": ordem.append("captura")
+                        or alert_checker._CAPTURA_VAZIA)
+    monkeypatch.setattr(alert_checker.supabase, "is_news_sent", lambda *a, **k: False)
+    monkeypatch.setattr(alert_checker.supabase, "get_recent_sent_titles", lambda *a, **k: [])
+    monkeypatch.setattr(alert_checker, "_cooldown_ok", lambda *a, **k: True)
+    monkeypatch.setattr(alert_checker, "_broadcast_com_ids",
+                        lambda msg, recipients, errors=None: ordem.append("broadcast")
+                        or [("5534999945010", "MSG_ID_TESTE")])
+    monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
+                        lambda url, **k: "")
+    monkeypatch.setattr("backend.collectors.news.collect", lambda *a, **k: [_ARTIGO])
+
+    fake_msg = MagicMock()
+    fake_msg.content = [MagicMock(text=json.dumps(_CLASSIFICACAO))]
+    fake_client = MagicMock()
+    fake_client.messages.create = MagicMock(return_value=fake_msg)
+    monkeypatch.setattr(alert_checker, "Anthropic", lambda *a, **k: fake_client)
+
+    alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
+
+    # `set_alert_triggered("newsapi_fetch")` roda ANTES do broadcast (fora do
+    # bloco de entrega) e `source` de _ARTIGO é truthy, então
+    # set_alert_triggered aparece de novo entre "mark" e "captura" — checar a
+    # partir de "broadcast" e só as duas últimas posições evita depender de
+    # quantas vezes ele roda no meio.
+    i = ordem.index("broadcast")
+    assert ordem[i:i + 4] == ["broadcast", "log", "log_alert_messages", "mark"]
+    assert ordem[-2:] == ["captura", "update_conteudo"]
+
+
+@pytest.mark.unit
 def test_check_news_em_test_mode_nao_grava_no_log(monkeypatch):
     """test_mode existe para conferência visual sem sujar o estado — o log
     não pode virar a exceção que suja."""
-    gravado, _, _ = _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
+    gravado, _, _, _ = _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
 
     alert_checker._check_news(
         [{"phone": "5534999945010", "name": "Matheus"}], test_mode=True
@@ -638,19 +775,20 @@ def test_check_news_em_test_mode_nao_grava_no_log(monkeypatch):
 
 @pytest.mark.unit
 def test_capture_conteudo_sem_url_devolve_none():
-    assert alert_checker._capture_conteudo("") == (None, None)
-    assert alert_checker._capture_conteudo(None) == (None, None)
+    assert alert_checker._capture_conteudo("") == (None, None, None)
+    assert alert_checker._capture_conteudo(None) == (None, None, None)
 
 
 @pytest.mark.unit
 def test_capture_conteudo_sucesso_marca_a_fonte(monkeypatch):
     monkeypatch.setattr(
         alert_checker.web_search, "read_article",
-        lambda url, timeout=30.0: {"url": url, "conteudo": "Texto completo do artigo."},
+        lambda url, timeout=30.0, url_publisher="": {"url": url, "conteudo": "Texto completo do artigo.",
+                                   "extrator": "trafilatura"},
     )
-    conteudo, fonte = alert_checker._capture_conteudo("https://www.farmprogress.com/x")
+    conteudo, fonte, _ = alert_checker._capture_conteudo("https://www.farmprogress.com/x")
     assert conteudo == "Texto completo do artigo."
-    assert fonte == "read_article"
+    assert fonte == "read_article:trafilatura"
 
 
 @pytest.mark.unit
@@ -660,7 +798,7 @@ def test_capture_conteudo_usa_o_teto_de_tempo_dedicado(monkeypatch):
     de read_article (pensado pro tráfego geral do chat)."""
     capturado = {}
 
-    def fake_read_article(url, timeout=30.0):
+    def fake_read_article(url, timeout=30.0, url_publisher=""):
         capturado["timeout"] = timeout
         return {"url": url, "conteudo": "x"}
 
@@ -674,59 +812,69 @@ def test_capture_conteudo_usa_o_teto_de_tempo_dedicado(monkeypatch):
 def test_capture_conteudo_erro_devolve_none_sem_estourar(monkeypatch):
     monkeypatch.setattr(
         alert_checker.web_search, "read_article",
-        lambda url, timeout=30.0: {"erro": "404 Not Found", "url": url},
+        lambda url, timeout=30.0, url_publisher="": {"erro": "404 Not Found", "url": url},
     )
-    assert alert_checker._capture_conteudo("https://news.google.com/rss/articles/abc") == (None, None)
+    assert alert_checker._capture_conteudo("https://news.google.com/rss/articles/abc") == (None, None, None)
 
 
 @pytest.mark.unit
 def test_capture_conteudo_conteudo_vazio_devolve_none(monkeypatch):
     monkeypatch.setattr(
         alert_checker.web_search, "read_article",
-        lambda url, timeout=30.0: {"url": url, "conteudo": ""},
+        lambda url, timeout=30.0, url_publisher="": {"url": url, "conteudo": ""},
     )
-    assert alert_checker._capture_conteudo("https://x.com") == (None, None)
+    assert alert_checker._capture_conteudo("https://x.com") == (None, None, None)
 
 
 @pytest.mark.unit
 def test_capture_conteudo_excecao_nao_tratada_nao_estoura(monkeypatch):
-    def explode(url, timeout=30.0):
+    def explode(url, timeout=30.0, url_publisher=""):
         raise RuntimeError("timeout")
     monkeypatch.setattr(alert_checker.web_search, "read_article", explode)
-    assert alert_checker._capture_conteudo("https://x.com") == (None, None)
+    assert alert_checker._capture_conteudo("https://x.com") == (None, None, None)
 
 
 @pytest.mark.unit
 def test_check_news_grava_conteudo_capturado_no_log(monkeypatch):
-    gravado, _, _ = _prepara_check_news(
+    """Conserto 1 (19/08/2026): o texto chega pelo UPDATE
+    (`update_news_log_conteudo`), não pelo INSERT de `log_sent_news` — a
+    captura roda DEPOIS que a notícia já foi entregue, registrada e marcada
+    como enviada, então um estouro dos 300s da Vercel durante a leitura (até
+    75s no caminho de render, sem teto real de tempo: `httpx.Timeout` é por
+    OPERAÇÃO — 1,0s pedido virou 15,25s reais) perde só o texto, nunca o
+    dedup."""
+    gravado, _, _, atualizacoes = _prepara_check_news(
         monkeypatch, _ARTIGO, _CLASSIFICACAO,
-        conteudo=("Texto completo capturado agora.", "read_article"),
+        conteudo=("Texto completo capturado agora.", "read_article", None),
     )
 
     alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
 
-    assert gravado["conteudo"] == "Texto completo capturado agora."
-    assert gravado["conteudo_fonte"] == "read_article"
+    assert "conteudo" not in gravado
+    assert "conteudo_fonte" not in gravado
+    assert atualizacoes == [(999, "Texto completo capturado agora.", "read_article", None)]
 
 
 @pytest.mark.unit
-def test_check_news_sem_captura_grava_conteudo_ausente(monkeypatch):
-    """(None, None) é o resultado honesto de captura falha — _check_news
-    repassa None (quem descarta a chave de fato é `log_sent_news`, testado à
-    parte em test_log_sent_news_conteudo_ausente_nao_entra_no_payload)."""
-    gravado, _, _ = _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
+def test_check_news_sem_captura_atualiza_com_conteudo_ausente(monkeypatch):
+    """(None, None, None) é o resultado honesto de captura falha — _check_news
+    repassa isso ao UPDATE tal como veio (quem decide não fazer requisição
+    nenhuma é `update_news_log_conteudo`, testado à parte em
+    test_update_news_log_conteudo_tudo_none_nao_faz_requisicao)."""
+    gravado, _, _, atualizacoes = _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
 
     alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
 
-    assert gravado["conteudo"] is None
-    assert gravado["conteudo_fonte"] is None
+    assert "conteudo" not in gravado
+    assert "conteudo_fonte" not in gravado
+    assert atualizacoes == [(999, None, None, None)]
 
 
 # ── Parte B: id da mensagem por destinatário ─────────────────────────────
 
 @pytest.mark.unit
 def test_check_news_grava_id_da_mensagem_por_destinatario(monkeypatch):
-    gravado, _, mensagens = _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
+    gravado, _, mensagens, _ = _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
 
     alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
 
@@ -739,13 +887,24 @@ def test_check_news_grava_id_da_mensagem_por_destinatario(monkeypatch):
 @pytest.mark.unit
 def test_check_news_sem_id_de_log_nao_grava_mensagens(monkeypatch):
     """log_sent_news falhou (devolveu None) — log_alert_messages não pode
-    rodar com news_log_id inválido; a FK nem aceitaria."""
+    rodar com news_log_id inválido; a FK nem aceitaria. update_news_log_conteudo
+    também não: não haveria linha para atualizar. E a captura em si (até 75s,
+    35 créditos de ScraperAPI no caminho de render) nem roda — gastaria custo
+    sem ter onde gravar o resultado (Conserto 1, 19/08/2026)."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "chave-de-teste")
     mensagens: list = []
+    atualizacoes: list = []
+    capturas: list = []
     monkeypatch.setattr(alert_checker.supabase, "log_sent_news", lambda entry: None)
     monkeypatch.setattr(alert_checker.supabase, "log_alert_messages",
                         lambda *a, **k: mensagens.append((a, k)))
-    monkeypatch.setattr(alert_checker, "_capture_conteudo", lambda url: (None, None))
+    monkeypatch.setattr(alert_checker.supabase, "update_news_log_conteudo",
+                        lambda *a, **k: atualizacoes.append((a, k)))
+    monkeypatch.setattr(alert_checker, "_capture_conteudo",
+                        lambda url, url_publisher="": capturas.append(url)
+                        or alert_checker._CAPTURA_VAZIA)
+    monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
+                        lambda url, **k: "")
     monkeypatch.setattr(alert_checker.supabase, "mark_news_sent", lambda *a, **k: None)
     monkeypatch.setattr(alert_checker.supabase, "set_alert_triggered", lambda *a, **k: None)
     monkeypatch.setattr(alert_checker.supabase, "is_news_sent", lambda *a, **k: False)
@@ -762,4 +921,277 @@ def test_check_news_sem_id_de_log_nao_grava_mensagens(monkeypatch):
 
     alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
 
+    assert atualizacoes == []
+    assert capturas == []
+
     assert mensagens == []
+
+
+# ── Defeito 1: o 🔗 do alerta levava o link do Google (403) — 19/08/2026 ──
+
+_URL_GN = "https://news.google.com/rss/articles/abc"
+_URL_REAL = "https://www.wisfarmer.com/story/news/2026/08/19/usda-boosts-corn"
+_CAPTURA_OK = ("Texto da matéria.", "read_article:trafilatura", None)
+
+
+@pytest.mark.unit
+def test_capture_conteudo_devolve_a_url_canonica_do_publicador(monkeypatch):
+    monkeypatch.setattr(
+        alert_checker.web_search, "read_article",
+        lambda url, timeout=30.0, url_publisher="": {"url": url, "conteudo": "Texto.",
+                                   "url_final": "https://energynow.ca/materia"},
+    )
+    captura = alert_checker._capture_conteudo(_URL_GN)
+    assert captura.url_final == "https://energynow.ca/materia"
+
+
+@pytest.mark.unit
+def test_capture_conteudo_sem_canonica_devolve_url_final_none(monkeypatch):
+    monkeypatch.setattr(
+        alert_checker.web_search, "read_article",
+        lambda url, timeout=30.0, url_publisher="": {"url": url, "conteudo": "Texto."},
+    )
+    assert alert_checker._capture_conteudo("https://x.com/a").url_final is None
+
+
+@pytest.mark.unit
+def test_capture_conteudo_registra_qual_extrator_leu_a_materia(monkeypatch):
+    """Sem rótulo, `conteudo_fonte` diz "read_article" tanto para o extrator
+    novo quanto para o caminho bruto — que é justamente o que produziu o
+    defeito 3 (entulho do site no lugar da matéria). Sem distinguir os dois,
+    a próxima regressão volta calada (achado do Apolo, 19/08/2026)."""
+    monkeypatch.setattr(
+        alert_checker.web_search, "read_article",
+        lambda url, timeout=30.0, url_publisher="": {"url": url, "conteudo": "Texto.", "extrator": "html_bruto"},
+    )
+    assert alert_checker._capture_conteudo("https://x.com/a").fonte == "read_article:html_bruto"
+
+
+@pytest.mark.unit
+def test_check_news_manda_o_link_do_publicador_na_mensagem(monkeypatch):
+    """O link do Google Notícias continua no banco (é a chave de dedup), mas
+    quem vai para o WhatsApp é o endereço do publicador — o do Google devolve
+    403 no clique (medido na primeira validação em produção, 18/08/2026).
+    Resolvido pelo próprio Google em 0,4-0,8s, sem crédito de ScraperAPI."""
+    _, enviadas, _, _ = _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
+    monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
+                        lambda url, **k: _URL_REAL)
+
+    alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
+
+    assert _URL_REAL in enviadas[0]
+    assert "news.google.com" not in enviadas[0]
+
+
+@pytest.mark.unit
+def test_check_news_sem_resolver_mantem_o_link_original(monkeypatch):
+    """A resolução usa endpoint interno do Google: pode mudar sem aviso, e o IP
+    de datacenter da Vercel pode receber outra coisa. Falhar volta ao
+    comportamento anterior — link ruim é melhor que mensagem sem link."""
+    _, enviadas, _, _ = _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
+    monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
+                        lambda url, **k: "")
+
+    alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
+
+    assert _URL_GN in enviadas[0]
+
+
+@pytest.mark.unit
+def test_check_news_envia_antes_de_capturar_o_texto(monkeypatch):
+    """A leitura da matéria (até 75s no caminho de render) NÃO pode ficar na
+    frente do envio: se a função da Vercel estourar os 300s ali, o alerta não
+    sai. Descobrir o link é barato e vem antes; ler a matéria é caro e vem
+    depois (revisão do Apolo, 19/08/2026)."""
+    ordem = []
+    _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
+    monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
+                        lambda url, **k: _URL_REAL)
+    monkeypatch.setattr(alert_checker, "_capture_conteudo",
+                        lambda url, url_publisher="": ordem.append("captura") or alert_checker.Captura(*_CAPTURA_OK))
+    monkeypatch.setattr(alert_checker, "_broadcast_com_ids",
+                        lambda msg, recipients, errors=None: ordem.append("broadcast")
+                        or [("5534999945010", "MSG_ID")])
+
+    alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
+
+    assert ordem == ["broadcast", "captura"]
+
+
+@pytest.mark.unit
+def test_check_news_entrega_falha_nao_gasta_credito_de_captura(monkeypatch):
+    """Evolution fora do ar: `sent == 0`, nada é gravado nem marcado. Capturar
+    aí queimaria 35 créditos do ScraperAPI a cada 15 minutos sem entregar
+    mensagem nenhuma (achado do Apolo, 19/08/2026)."""
+    capturas = []
+    _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO, sent=0)
+    monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
+                        lambda url, **k: _URL_REAL)
+    monkeypatch.setattr(alert_checker, "_capture_conteudo",
+                        lambda url, url_publisher="": capturas.append(url) or alert_checker._CAPTURA_VAZIA)
+
+    alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
+
+    assert capturas == []
+
+
+@pytest.mark.unit
+def test_check_news_captura_le_o_link_ja_resolvido(monkeypatch):
+    """Resolver uma vez e reaproveitar: com o endereço real na mão a leitura
+    dispensa o render (1 crédito e ~6s em vez de 35 créditos e ~57s)."""
+    lidos = []
+    _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
+    monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
+                        lambda url, **k: _URL_REAL)
+    monkeypatch.setattr(alert_checker, "_capture_conteudo",
+                        lambda url, url_publisher="": lidos.append(url) or alert_checker.Captura(*_CAPTURA_OK))
+
+    alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
+
+    assert lidos == [_URL_REAL]
+
+
+@pytest.mark.unit
+def test_check_news_grava_url_final_no_log(monkeypatch):
+    """O bloco <noticia_citada> mostra a URL ao modelo quando o usuário responde
+    citando o alerta — com o link do Google ali, o agente repete o 403 na
+    conversa."""
+    gravado, _, _, _ = _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
+    monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
+                        lambda url, **k: _URL_REAL)
+
+    alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
+
+    assert gravado["url_final"] == _URL_REAL
+    assert gravado["url"] == _URL_GN
+
+
+@pytest.mark.unit
+def test_check_news_url_final_absurda_nao_apaga_o_link(monkeypatch):
+    """`_url_exibivel` reprova link gigante — se a escolha ignorasse isso, a
+    mensagem sairia SEM 🔗, pior que o 403 que esta mudança veio consertar."""
+    _, enviadas, _, _ = _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
+    monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
+                        lambda url, **k: "https://x.com/" + "a" * 1200)
+
+    alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
+
+    assert _URL_GN in enviadas[0]
+
+
+# ── 2ª revisão do Apolo (19/08/2026): prazo duro e cruzamento com o publicador ──
+
+@pytest.mark.unit
+def test_link_para_mensagem_passa_o_prazo_do_alerta(monkeypatch):
+    """Achado 2 (2ª revisão): isto roda ANTES do broadcast, então segurar demais
+    = alerta não sai — um servidor gotejando segurou a resolução por 40,7s com
+    timeout de 10s. O teto ABSOLUTO mora dentro de `resolve_google_news` (3ª
+    revisão, achado 2: o caminho do chat precisava dele também); o que este lado
+    tem que garantir é PASSAR o orçamento do alerta, senão o teto vira o default
+    e ninguém percebe."""
+    vistos = {}
+    monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
+                        lambda url, **k: vistos.update(k) or "")
+
+    assert alert_checker._link_para_mensagem(_URL_GN) == _URL_GN
+    assert vistos["timeout"] == alert_checker._LINK_PRAZO
+
+
+@pytest.mark.unit
+def test_check_news_leva_o_publicador_ate_a_captura(monkeypatch):
+    """Achado 7 (3ª revisão): os dois lados do elo estavam testados, o MEIO não
+    — trocar `url_publisher` por outra variável aqui passava nos 520 testes. Sem
+    ele, a canônica da página perde a única contraprova de host que tem."""
+    vistos = {}
+    _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
+    monkeypatch.setattr(alert_checker, "_capture_conteudo",
+                        lambda url, url_publisher="": vistos.update(pub=url_publisher)
+                        or alert_checker._CAPTURA_VAZIA)
+
+    alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
+
+    assert vistos["pub"] == _ARTIGO["url_publisher"]
+
+
+@pytest.mark.unit
+def test_link_para_mensagem_confere_o_destino_com_o_publicador(monkeypatch):
+    """Achado 4: o `<source url>` do RSS (100 de 100 itens medidos) é o
+    contraprova de que o endereço devolvido pelo Google é mesmo daquele
+    veículo. Sem passar isso adiante, o cruzamento não acontece."""
+    vistos = {}
+
+    def espia(url, **k):
+        vistos.update(k)
+        return _URL_REAL
+
+    monkeypatch.setattr(alert_checker.web_search, "resolve_google_news", espia)
+    alert_checker._link_para_mensagem(_URL_GN, "https://www.wisfarmer.com")
+    assert vistos.get("host_esperado") == "https://www.wisfarmer.com"
+
+
+@pytest.mark.unit
+def test_capture_conteudo_passa_o_publicador_para_a_leitura(monkeypatch):
+    """A canônica da página só é aceita se bater com o host do publicador
+    (achado 1) — o dado precisa chegar lá."""
+    vistos = {}
+
+    def fake_read_article(url, timeout=30.0, url_publisher=""):
+        vistos["url_publisher"] = url_publisher
+        return {"url": url, "conteudo": "x" * 300, "extrator": "trafilatura"}
+
+    monkeypatch.setattr(alert_checker.web_search, "read_article", fake_read_article)
+    alert_checker._capture_conteudo(_URL_GN, "https://www.wisfarmer.com")
+    assert vistos["url_publisher"] == "https://www.wisfarmer.com"
+
+
+@pytest.mark.unit
+def test_check_news_leva_o_publicador_do_feed_ate_a_resolucao(monkeypatch):
+    """Ponta a ponta: o `url_publisher` que veio do RSS tem que chegar em quem
+    confere o destino."""
+    vistos = {}
+    _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
+    monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
+                        lambda url, **k: vistos.update(k) or _URL_REAL)
+
+    alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
+
+    assert vistos.get("host_esperado") == _ARTIGO["url_publisher"]
+
+
+# ── 5ª revisão do Apolo (19/08/2026) ──────────────────────────────────────
+
+@pytest.mark.unit
+def test_check_news_nao_sobrescreve_o_link_resolvido_pela_canonica(monkeypatch):
+    """A canônica confere HOST, não profundidade de caminho: uma página que
+    declara `canonical` genérica (a home do veículo) fazia o UPDATE gravar a
+    home por cima do deep link que o Google já tinha confirmado. O comentário
+    do código sempre disse que a canônica só entra quando a resolução falhou —
+    o código é que passava `captura.url_final` SEMPRE."""
+    atualizacoes = []
+    _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
+    monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
+                        lambda url, **k: _URL_REAL)
+    monkeypatch.setattr(
+        alert_checker, "_capture_conteudo",
+        lambda url, url_publisher="": alert_checker.Captura(
+            "Texto.", "read_article:trafilatura", "https://www.wisfarmer.com/"),
+    )
+    monkeypatch.setattr(alert_checker.supabase, "update_news_log_conteudo",
+                        lambda *a: atualizacoes.append(a))
+
+    alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
+
+    assert atualizacoes[0][3] is None
+
+
+@pytest.mark.unit
+def test_link_para_mensagem_sobrevive_a_thread_recusada(monkeypatch):
+    """O invólucro com prazo criou um caminho de exceção que não existia:
+    `Thread.start()` levanta `RuntimeError` quando o SO recusa a thread, e isso
+    sobe na thread CHAMADORA. Aqui roda antes do broadcast — sem defesa, a
+    rodada inteira sai sem alerta nenhum por causa do enfeite do link."""
+    def recusa(self):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(alert_checker.web_search.threading.Thread, "start", recusa)
+    assert alert_checker._link_para_mensagem(_URL_GN) == _URL_GN

@@ -22,7 +22,89 @@ Agente de IA multi-domínio, backend em Python/FastAPI:
 
 Fonte viva do que existe hoje: `README.md` e `CLAUDE.md` na raiz do projeto.
 
-## Estado em 18/08/2026, 23h — PRIMEIRA VALIDAÇÃO EM PRODUÇÃO: a âncora funciona, 3 defeitos abertos
+## Estado em 19/08/2026 — os 3 defeitos da validação CONSERTADOS (falta subir)
+
+Código pronto na árvore de trabalho, suíte verde (`pytest backend/tests/ -q` conta quantos).
+**Ainda NÃO está em produção** — a
+migration 009 tem que rodar ANTES do push (ver "Ordem de deploy" abaixo).
+
+### O que mudou, defeito por defeito
+
+**1. O 🔗 dava 403** — a mensagem levava o link do Google Notícias. O conserto que estava
+planejado (ler a canônica da página que o `render=true` resolve) foi TROCADO por um caminho
+mais simples achado na revisão: **o próprio Google responde o endereço real da matéria** pelo
+endpoint `batchexecute` (`web_search.resolve_google_news`). Custa ~0,5s e ZERO crédito de
+ScraperAPI, contra 35 créditos e ~57s do render. Efeitos em cadeia:
+
+- O 🔗 sai com o link do publicador (`alert_checker._link_para_mensagem`).
+- Com o endereço real na mão, a leitura da matéria **dispensa o render** — 1 crédito, ~3s.
+- A captura do texto **continua DEPOIS do envio** — e agora depois também da marca de dedup (a
+  inversão chegou a ser implementada e foi desfeita: ler a matéria antes de enviar põe o alerta
+  atrás de uma chamada SEM teto real de tempo, e um estouro dos 300s da Vercel deixaria de sair
+  alerta nenhum). ⚠️ O `timeout` do httpx é por OPERAÇÃO, não prazo absoluto: medido, 1,0s pedido
+  virou 15,25s reais num servidor gotejando. Por isso a leitura ficou por último e o texto entra
+  por um UPDATE (`supabase.update_news_log_conteudo`) — estourar ali custa o texto, nunca um
+  reenvio da mesma notícia.
+- A canônica (`_url_canonica`) ficou como **rede de segurança**, e só vale quando o host bate
+  com o da página lida **ou** com o do publicador do feed (`<source url>` do RSS) — sem essa
+  conferência, quem entrasse no índice do Google escolheria o destino do link que o bot entrega.
+- A resolução tem prazo ABSOLUTO (`web_search._GN_PRAZO`), não o timeout por operação do httpx:
+  medido, um servidor gotejando segura 40s com timeout de 10s.
+
+⚠️ `resolve_google_news` usa endpoint INTERNO do Google, não documentado: pode mudar sem aviso,
+e o IP de datacenter da Vercel pode receber uma página de consentimento em vez do artigo (medi
+do IP daqui, não do de lá). Falhar devolve `""` e tudo volta ao comportamento anterior.
+
+**2. Sigla em inglês no título em português** — parágrafo novo em `_NEWS_CLASSIFIER_SYSTEM`
+mandando traduzir sigla de organização com forma consagrada (OPEC→OPEP, UN→ONU, WTO→OMC,
+IMF→FMI, NATO→OTAN) e proibindo inventar tradução das que não têm (Fed, USDA, WASDE, EIA).
+
+**3. O `conteudo` era entulho do site** — `trafilatura` extrai o corpo antes do truncamento
+(`web_search._extrai_corpo`), com o caminho antigo (bs4 + remoção de tags) como rede. Duas
+travas nasceram junto: piso de `_MIN_ARTICLE_CHARS` (a página não renderizada do Google devolve
+a string `"Google News"`, 11 chars, e isso virava âncora) e rótulo do extrator em
+`conteudo_fonte` (`read_article:trafilatura` × `read_article:html_bruto`), sem o qual não dá
+para medir se o entulho voltou.
+
+### Medir de novo (não confie no número escrito, rode o comando)
+
+Ponta a ponta no último link do Google Notícias registrado — resolve, lê, e mostra de onde veio:
+
+```bash
+PYTHONPATH=. python -X utf8 -c "import os,pathlib,time;[os.environ.setdefault(k.strip(),v.strip().strip(chr(34))) for k,v in (l.split('=',1) for l in pathlib.Path('.env').read_text(encoding='utf-8').splitlines() if '=' in l and not l.strip().startswith('#'))];from backend.services import alert_checker as a, supabase as s;r=s._client().get('/news_log?select=titulo_pt,url&url=like.*news.google.com*&order=sent_at.desc&limit=1').json()[0];t=time.monotonic();L=a._link_para_mensagem(r['url']);print(f'{time.monotonic()-t:.1f}s',L);c=a._capture_conteudo(L);print(len(c.conteudo or ''),'chars ·',c.fonte);print((c.conteudo or '')[:300])"
+```
+
+Quantos alertas da semana caíram na rede de segurança do extrator (deve ser perto de zero):
+
+```bash
+PYTHONPATH=. python -X utf8 -c "import os,pathlib,collections;[os.environ.setdefault(k.strip(),v.strip().strip(chr(34))) for k,v in (l.split('=',1) for l in pathlib.Path('.env').read_text(encoding='utf-8').splitlines() if '=' in l and not l.strip().startswith('#'))];from backend.services import supabase as s;rows=s._client().get('/news_log?select=conteudo_fonte&order=sent_at.desc&limit=100').json();print(collections.Counter(r['conteudo_fonte'] for r in rows))"
+```
+
+### Ordem de deploy — a migration vem ANTES do push
+
+Fora de ordem, o estrago é silencioso: com o código novo em produção e a coluna `url_final`
+ausente, o PostgREST devolve 400, `log_sent_news` perde a linha INTEIRA e
+`get_news_by_message_id` para de achar a notícia citada — a Story 1b morre calada. E
+`get_news_log` (painel/Story 2) passa a devolver lista vazia com aviso, que é negativa
+autoritária sobre notícia que EXISTIU.
+
+Quando isso dispara: sempre que a RESOLUÇÃO do link der certo — não a captura. O `url_final`
+do INSERT vem de `_link_para_mensagem`, que roda antes do envio; campo preenchido = payload
+com coluna inexistente = 400. Medido em 19/08/2026: **39 de 40** links reais do Google
+Notícias resolveram. Ou seja, ~97% dos alertas perderiam o registro, e o alerta continuaria
+saindo normalmente — só um `logger.warning` denuncia.
+
+1. Rodar `backend/migrations/009_news_log_url_final.sql` no SQL Editor do Supabase.
+2. Conferir: `/news_log?select=url_final&limit=1` devolve 200.
+3. `git push origin master`.
+4. No primeiro alerta: o 🔗 abre no navegador? `conteudo` começa no corpo da matéria?
+
+Rollback: `web_search.py` e a migration são compatíveis para trás; se algo der errado, reverter
+só `alert_checker.py`.
+
+---
+
+## Estado em 18/08/2026, 23h — PRIMEIRA VALIDAÇÃO EM PRODUÇÃO: a âncora funciona, 3 defeitos (CONSERTADOS em 19/08 — ver acima)
 
 Merge feito (`755b991`, deploy READY). Às 22:47 saiu o primeiro alerta com o código novo, e
 às 23:04 o Matheus respondeu CITANDO a mensagem. **A ancoragem funcionou de ponta a ponta**:
