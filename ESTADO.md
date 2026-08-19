@@ -29,10 +29,23 @@ pushado às 16h08, **build READY nos dois projetos Vercel** — o `trafilatura` 
 que era o único risco não mensurável antes do deploy. `/api/health` respondeu 200 com tudo
 `ok` e a Evolution `open`. Suíte verde (`pytest backend/tests/ -q` conta quantos).
 
-⏳ **Falta a prova de campo**: no primeiro alerta que sair, conferir três coisas —
-`url_final` com o endereço do jornal (não o do Google), `conteudo_fonte` =
-`read_article:trafilatura`, e o `conteudo` começando no corpo da matéria. Comando que mede:
+✅ **PROVA DE CAMPO FEITA em 19/08, dois alertas reais:**
 
+| | 16h16 · Backwardação de Cobre (oilprice, link direto) | 17h32 · CBOT Semanal (feed `GN USDA/WASDE`, Grainews) |
+|---|---|---|
+| `url_final` | URL completa do artigo (veio da canônica) | `grainews.ca/daily/cbot-weekly-crop-tour-usda-data-lift-prices/` — **resolvido pelo Google, do IP da Vercel** |
+| `conteudo_fonte` | `read_article:trafilatura` | `read_article:trafilatura` |
+| texto | 3149 chars, começa no 1º parágrafo | 3163 chars, começa na manchete + 1º parágrafo |
+
+O segundo é o que importa: o link do Google (`news.google.com/rss/articles/CBMif0...`) foi
+trocado pelo do jornal **em produção**. A hipótese de o `batchexecute` recusar IP de
+datacenter — a única que não dava para testar da máquina local — caiu.
+
+⚠️ **Defeito 2 (sigla) ainda NÃO foi exercitado**: nenhum dos dois títulos tinha sigla com
+forma em português. `USDA` e `CBOT` ficaram como estão, que é o comportamento certo, mas
+`OPEC→OPEP` só se confirma quando sair notícia de petróleo. Fica em observação.
+
+Conferir de novo (o comando serve para qualquer alerta):
 ```bash
 python -X utf8 -c "import os,pathlib;[os.environ.setdefault(k.strip(),v.strip().strip(chr(34))) for k,v in (l.split('=',1) for l in pathlib.Path('.env').read_text(encoding='utf-8').splitlines() if '=' in l and not l.strip().startswith('#'))];from backend.services import supabase as s;r=s._client().get('/news_log?select=sent_at,titulo_pt,url,url_final,conteudo_fonte,conteudo&order=sent_at.desc&limit=1').json()[0];print(r['sent_at'],r['titulo_pt']);print('url_final:',r['url_final']);print('fonte:',r['conteudo_fonte'],'|',len(r['conteudo'] or ''),'chars');print((r['conteudo'] or '')[:400])"
 ```
