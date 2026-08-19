@@ -692,3 +692,33 @@ def test_nao_queima_a_noticia_quando_a_entrega_falha():
         enviados = alert_checker._check_news(_RECIPIENTS)
     assert enviados == 0
     mock_mark.assert_not_called(), "sem entrega, a notícia continua disponível"
+
+
+# ── _broadcast_com_ids executada de verdade (achado 4, revisão do Apolo, 18/08/2026) ──
+#
+# As 6 referências anteriores a `_broadcast_com_ids` no arquivo de testes eram
+# todas patch/monkeypatch — a função real nunca rodava sob `-k broadcast_com_ids`.
+# É a peça que sustenta a Parte B (ancoragem por message_id) inteira, e o modo de
+# falha é silencioso por construção: `send_message` mudando de forma (a v2 já
+# mudou o payload uma vez) faz `log_alert_messages` gravar zero linhas sem que
+# o alerta pare de chegar. Os dois testes abaixo chamam a função real.
+
+def test_broadcast_com_ids_extrai_message_id_do_retorno_da_evolution():
+    """Formato real medido: `send_message` devolve o corpo da resposta da
+    Evolution, que carrega o id da mensagem em `key.id`."""
+    with patch("backend.services.alert_checker.whatsapp.send_message",
+               return_value={"key": {"id": "3EB0C767D26A1D712E"}}) as mock_send:
+        entregues = alert_checker._broadcast_com_ids("msg", _RECIPIENTS)
+    mock_send.assert_called_once_with("5534999000001", "msg")
+    assert entregues == [("5534999000001", "3EB0C767D26A1D712E")]
+
+
+def test_broadcast_com_ids_sem_message_id_no_retorno_avisa_e_devolve_none():
+    """Se a Evolution mudar de forma e `key.id` sumir, a entrega não pode
+    quebrar (a mensagem JÁ FOI enviada) — mas o id vem None e um warning é
+    logado, para o silêncio não ser total."""
+    with patch("backend.services.alert_checker.whatsapp.send_message", return_value={}), \
+         patch("backend.services.alert_checker.logger") as mock_logger:
+        entregues = alert_checker._broadcast_com_ids("msg", _RECIPIENTS)
+    assert entregues == [("5534999000001", None)]
+    assert mock_logger.warning.called
