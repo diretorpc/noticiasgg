@@ -260,6 +260,25 @@ def test_prompts_mandam_consultar_o_log_antes_de_buscar():
         assert "essa notícia" in prompt.lower(), f"{chave} nao cobre o gatilho"
 
 
+def test_prompt_manda_dizer_a_cobertura_e_nao_a_janela_pedida():
+    """Prova de campo de 20/08: com a lista cortada, o agente anunciou "os
+    ultimos ~90 dias" — o TETO do parametro — tendo enxergado ~28 horas. Nao era
+    mentira (ele ressalvou o corte na frase seguinte), mas e numero grande e
+    falso primeiro, ressalva vaga depois. `cobertura_desde` existe justamente
+    para ele dar a data real."""
+    cfg = reporter.describe_config()
+    for chave in ("system_chat", "system_market"):
+        prompt = cfg[chave]
+        assert "janela_horas` é o que você PEDIU" in prompt, f"{chave}: falta a distincao"
+        assert "90 dias" in prompt, f"{chave}: falta o exemplo concreto do erro"
+    # e a descricao da ferramenta nao pode mais entregar o teto como se fosse cobertura
+    desc = next(t for t in cfg["tools"] if t["name"] == "get_sent_news")["description"]
+    ferramenta = reporter._SENT_NEWS_TOOL["input_schema"]["properties"]["horas"]["description"]
+    assert "90 dias" not in ferramenta, "o teto voltou a ser anunciado como janela"
+    assert "cobertura_desde" in ferramenta
+    assert desc
+
+
 def test_prompts_cobrem_os_limites_do_registro():
     """As tres bordas onde o agente afirmaria o que nao conferiu: consulta que
     falhou, lista cortada, e a noticia que veio pelo relatorio diario (que nao
