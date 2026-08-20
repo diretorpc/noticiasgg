@@ -46,9 +46,15 @@ def test_com_telefone_filtra_pelo_que_chegou_naquele_numero():
     assert saida == {"itens": [{"news_id": "b"}]}
     primeira, segunda = (ch[0][0] for ch in c.get.call_args_list)
     assert primeira.startswith("/news_log_messages?phone=eq.5534999945010")
+    assert "sent_at=gte." in primeira, "a janela tem que ser cortada na tabela de mensagens"
     # ids deduplicados e ordenados: a mesma noticia aparece uma vez por
     # destinatario, e o telefone filtrado pode ter mais de uma linha por engano.
     assert "id=in.(3,7)" in segunda
+    # A janela NAO se repete na segunda consulta: `news_log_messages.sent_at`
+    # (hora em que chegou no telefone) e `news_log.sent_at` (hora do registro)
+    # sao colunas diferentes. Cortar duas vezes derruba a linha da borda e apaga
+    # o sinal `truncado` exatamente quando ele importa.
+    assert "sent_at=gte." not in segunda
 
 
 def test_telefone_sem_nenhum_alerta_nao_dispara_a_segunda_consulta():

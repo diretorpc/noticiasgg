@@ -553,12 +553,18 @@ def get_news_log(hours: int = 72, limit: int = 20, phone: str | None = None) -> 
                     return {"itens": []}
                 lista = ",".join(str(int(i)) for i in sorted(ids))
                 filtro_destinatario = f"&id=in.({lista})"
+            # A janela de tempo só entra aqui quando NÃO houve filtro por
+            # destinatário: com ele, `news_log_messages.sent_at` já cortou a
+            # janela, e repetir o corte sobre `news_log.sent_at` compara duas
+            # colunas de data diferentes — uma linha na borda sumiria da lista e
+            # apagaria o sinal `truncado` justamente quando ele importa.
+            janela = "" if phone is not None else f"&sent_at=gte.{_f(cutoff)}"
             r = c.get(
                 f"/news_log?select=news_id,titulo_pt,titulo_original,fonte,feed,url,"
                 f"url_publisher,url_final,categoria,resumo,resumo_fonte,direcao,score,ativos,"
                 f"publicado_em,sent_at"
-                f"{filtro_destinatario}"
-                f"&sent_at=gte.{_f(cutoff)}&order=sent_at.desc&limit={limit}"
+                f"{filtro_destinatario}{janela}"
+                f"&order=sent_at.desc&limit={limit}"
             )
             r.raise_for_status()
             return {"itens": r.json()}
