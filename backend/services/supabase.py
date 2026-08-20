@@ -410,7 +410,7 @@ def update_news_log_conteudo(news_log_id: int, conteudo: str | None,
     que exigiria SUPABASE_URL/SUPABASE_KEY à toa. `id` vai CRU na query string
     (não passa por `_f()`): vem sempre do próprio `log_sent_news`, nunca de
     texto externo, mas `int()` é defesa contra um chamador futuro que passe
-    outra coisa (mesmo cuidado de `_clamp_int`).
+    outra coisa (mesmo cuidado de `clamp_int`).
 
     Nunca estoura para o chamador: a notícia já foi entregue e logada quando
     isto roda — mesma garantia do irmão `log_sent_news`.
@@ -499,7 +499,7 @@ def get_news_by_message_id(message_id: str) -> dict | None:
         return None
 
 
-def _clamp_int(value, minimo: int, maximo: int, default: int) -> int:
+def clamp_int(value, minimo: int, maximo: int, default: int) -> int:
     """Trava genérica para inteiros que entram CRUS numa query PostgREST
     (`limit=`/`hours=` não passam por `_f()`, ao contrário de `cutoff`). Na
     Story 2 esses valores vêm de texto de WhatsApp interpretado pelo modelo —
@@ -521,8 +521,8 @@ def get_news_log(hours: int = 72, limit: int = 20) -> dict:
     negativa autoritária e errada — pior que o incidente que esta tabela existe
     para corrigir (achado A5, revisão 18/08/2026).
     """
-    hours = _clamp_int(hours, 1, 24 * 90, 72)  # 90 dias = janela de retenção sugerida na migration
-    limit = _clamp_int(limit, 1, 100, 20)
+    hours = clamp_int(hours, 1, 24 * 90, 72)  # 90 dias = janela de retenção sugerida na migration
+    limit = clamp_int(limit, 1, 100, 20)
     cutoff = (
         datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
     ).isoformat()
