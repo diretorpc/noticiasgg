@@ -529,9 +529,15 @@ def get_news_log(hours: int = 72, limit: int = 20, phone: str | None = None) -> 
     """
     hours = clamp_int(hours, 1, 24 * 90, 72)  # 90 dias = janela de retenção sugerida na migration
     limit = clamp_int(limit, 1, 100, 20)
+    # Telefone vazio não é "escopar por ninguém", é "sem escopo". Sem esta linha
+    # o supabase escopava (devolvendo lista vazia) enquanto o reporter rotulava a
+    # saída como lista geral — o rótulo descrevia uma consulta que não foi feita
+    # (achado 13 do Apolo, 20/08/2026).
+    phone = (phone or "").strip() or None
     cutoff = (
         datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
     ).isoformat()
+    truncado = False
     try:
         with _client() as c:
             filtro_destinatario = ""
@@ -548,9 +554,18 @@ def get_news_log(hours: int = 72, limit: int = 20, phone: str | None = None) -> 
                     f"&order=sent_at.desc&limit={limit}"
                 )
                 r0.raise_for_status()
-                ids = {row["news_log_id"] for row in r0.json()}
+                mensagens = r0.json()
+                # `truncado` sai DAQUI, não de `len(itens)` lá no reporter: é esta
+                # consulta que bate no teto. Entre ela e a próxima a contagem pode
+                # encolher (`ids` é um `set`, e `_RetryTransport` repete POST sem
+                # que a 008 tenha UNIQUE em (news_log_id, phone)) — deduzir o corte
+                # depois do encolhimento devolve `truncado: false` para uma lista
+                # cortada, e a regra 7 volta a autorizar a negativa. É a terceira
+                # porta da mesma classe de defeito (achado 11 do Apolo, 20/08/2026).
+                truncado = len(mensagens) >= limit
+                ids = {row["news_log_id"] for row in mensagens}
                 if not ids:
-                    return {"itens": []}
+                    return {"itens": [], "truncado": False}
                 lista = ",".join(str(int(i)) for i in sorted(ids))
                 filtro_destinatario = f"&id=in.({lista})"
             # A janela de tempo só entra aqui quando NÃO houve filtro por
@@ -567,13 +582,43 @@ def get_news_log(hours: int = 72, limit: int = 20, phone: str | None = None) -> 
                 f"&order=sent_at.desc&limit={limit}"
             )
             r.raise_for_status()
-            return {"itens": r.json()}
+            linhas = r.json()
+            if phone is None:
+                truncado = len(linhas) >= limit
+            return {"itens": linhas, "truncado": truncado}
     except Exception as e:
         # sem isto, uma leitura falhando ficava invisível para sempre — o irmão
         # `log_sent_news` já loga a própria falha; este ficava mudo (achado A6,
         # revisão 18/08/2026).
         logger.warning("get_news_log failed: %s", e)
-        return {"itens": [], "aviso": "registro indisponível"}
+        return {"itens": [], "truncado": False, "aviso": "registro indisponível"}
+
+
+def count_recent_alert_messages(hours: int = 24) -> int:
+    """Nº de ENTREGAS de alerta registradas (uma linha por destinatário).
+
+    Existe para o `/api/health` vigiar `news_log_messages`, que virou a fonte da
+    verdade da ferramenta `get_sent_news` quando ela filtra por destinatário. A
+    escrita dessa tabela é best-effort por construção: `log_alert_messages`
+    engole a própria exceção (o alerta já foi entregue quando ela roda) e
+    descarta a entrega cujo `message_id` a Evolution não devolveu. Se ela secar,
+    o agente passa a dizer "não te mandei nada" para quem recebeu — falha
+    silenciosa da mesma família do achado A4, agora com autoridade pessoal
+    (achado 12 do Apolo, 20/08/2026)."""
+    cutoff = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
+    ).isoformat()
+    with _client() as c:
+        r = c.get(
+            f"/news_log_messages?select=id&sent_at=gte.{_f(cutoff)}&limit=1",
+            headers={"Prefer": "count=exact"},
+        )
+        r.raise_for_status()
+        content_range = r.headers.get("content-range", "*/0")
+        try:
+            return int(content_range.split("/")[1])
+        except (IndexError, ValueError):
+            return 0
 
 
 def count_recent_broadcasts(hours: int = 24) -> int:

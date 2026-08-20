@@ -94,7 +94,9 @@ def test_url_publisher_e_dominio_pelado_e_nunca_vira_link_da_materia():
     assert reporter._link_da_materia(linha) == ""
     with patch.object(reporter.supabase, "get_news_log", return_value={"itens": [linha]}):
         resultado = reporter._get_sent_news()
-    assert resultado["noticias"][0]["url"] == ""
+    # AUSENTE, nao `""` (achado 14): todo o resto do payload ensina ao modelo que
+    # campo que falta e "nao tenho", e uma chave vazia no meio contradiz a licao.
+    assert "url" not in resultado["noticias"][0]
     assert "energynow" not in str(resultado)
 
 
@@ -103,6 +105,17 @@ def test_url_bruta_de_feed_normal_continua_valendo():
     e perder isso seria pior que o defeito que estamos consertando."""
     linha = _linha(url_final=None, url="https://reuters.com/markets/corn-usda")
     assert reporter._link_da_materia(linha) == "https://reuters.com/markets/corn-usda"
+
+
+def test_lista_cheia_sem_o_sinal_do_supabase_nao_inventa_o_corte():
+    """O reporter REPASSA o sinal, nao deduz por `len(itens)` — quem sabe que
+    cortou e quem aplicou o teto (achado 11 do Apolo)."""
+    itens = [_linha(news_id=f"n{i}") for i in range(reporter._LIMITE_NOTICIAS)]
+    with patch.object(
+        reporter.supabase, "get_news_log", return_value={"itens": itens, "truncado": False}
+    ):
+        resultado = reporter._get_sent_news()
+    assert "truncado" not in resultado
 
 
 def test_os_dois_caminhos_de_link_concordam():
@@ -152,7 +165,9 @@ def test_lista_cheia_declara_o_corte_e_ate_onde_enxergou():
     truncamento, agora com carimbo de consulta bem-sucedida."""
     itens = [_linha(news_id=f"n{i}", sent_at=f"2026-08-20T{23 - i:02d}:00:00+00:00")
              for i in range(reporter._LIMITE_NOTICIAS)]
-    with patch.object(reporter.supabase, "get_news_log", return_value={"itens": itens}):
+    with patch.object(
+        reporter.supabase, "get_news_log", return_value={"itens": itens, "truncado": True}
+    ):
         resultado = reporter._get_sent_news(horas=720)
     assert resultado["truncado"] is True
     assert resultado["cobertura_desde"] == itens[-1]["sent_at"]

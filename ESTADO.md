@@ -61,6 +61,32 @@ Todas fecham com um campo na saída da ferramenta + uma regra de prompt, não s�
 2. **O corte em 20 itens já esconde notícia hoje.** Medição do Apolo em 20/08: 25 alertas nas
    últimas 72 h. Sem declarar o corte, o modelo lia "consulta ok + não está na lista" e negava.
 
+### Uma capacidade que eu ACEITEI perder — dito em voz alta
+
+`_link_da_materia` devolve vazio para link do Google Notícias. Certo para o humano
+(403 no clique), mas o link do Google **não é inútil para a máquina**:
+`web_search.read_article` sabe tratá-lo (`resolve_google_news`, ~1 s, zero crédito;
+falhando, `render=true`, ~35 créditos e 37–57 s). O caminho ancorado, portanto,
+tinha como recuperar a matéria a partir dele — e não tem mais.
+
+Tamanho da perda, medido: 5 de 25 linhas ficam sem link; **4 dessas têm `conteudo`
+capturado** (o bloco `<noticia_citada>` já traz o texto e não precisa de link).
+Sobra **1 linha em 25 (4%)** sem texto e sem link, onde o agente agora não tem por
+onde recuperar a matéria. Aceito: 24 de 25 têm `conteudo`, a captura está saudável.
+Se um dia isso incomodar, o caminho é um campo separado (`url_para_ferramenta`, com
+ordem explícita de não exibir), **nunca** o fallback antigo no campo `url` — isso
+reabriria o 403 na cara do usuário.
+
+### Duas coisas latentes, medidas com ZERO ocorrências hoje
+
+- **Sem `UNIQUE (news_log_id, phone)` em `news_log_messages`**, e o `_RetryTransport`
+  repete POST. Duplicata encolheria a lista entre as duas consultas. O sinal
+  `truncado` já saiu de `len(itens)` e passou para quem aplica o teto, então o
+  defeito não morde mais o agente — mas o índice ainda é barato e correto.
+- **`log_alert_messages` é best-effort** (engole exceção; descarta entrega sem
+  `message_id`). Se secar, o agente nega para quem recebeu. `/api/health` passou a
+  vigiar com `entregas_registradas`.
+
 ### ⛔ O que FALTA — prova de campo pelo WhatsApp real
 
 Suíte verde não prova nada disto. Rodar depois do deploy, nesta ordem:

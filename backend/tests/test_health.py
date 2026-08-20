@@ -15,6 +15,7 @@ def test_collect_status_tudo_ok():
          patch.multiple(
             "backend.services.health.supabase",
             get_recent_sent_titles=lambda *a, **k: ["a", "b"],
+            count_recent_alert_messages=lambda *a, **k: 5,
             count_recent_broadcasts=lambda *a, **k: 9,
             get_news_log=lambda *a, **k: {"itens": [{"news_id": "x"}]},
             get_polls=lambda *a, **k: [{"instituto": "X"}],
@@ -34,6 +35,7 @@ def test_collect_status_dedup_quebrado_vira_error():
          patch.multiple(
             "backend.services.health.supabase",
             get_recent_sent_titles=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("400 Bad Request")),
+            count_recent_alert_messages=lambda *a, **k: 5,
             count_recent_broadcasts=lambda *a, **k: 9,
             get_news_log=lambda *a, **k: {"itens": [{"news_id": "x"}]},
             get_polls=lambda *a, **k: [{"instituto": "X"}],
@@ -48,6 +50,7 @@ def test_collect_status_evolution_desconectada_vira_warn():
          patch.multiple(
             "backend.services.health.supabase",
             get_recent_sent_titles=lambda *a, **k: ["a"],
+            count_recent_alert_messages=lambda *a, **k: 5,
             count_recent_broadcasts=lambda *a, **k: 1,
             get_news_log=lambda *a, **k: {"itens": [{"news_id": "x"}]},
             get_polls=lambda *a, **k: [{"instituto": "X"}],
@@ -63,6 +66,7 @@ def test_collect_status_evolution_excecao_degrada_para_warn():
          patch.multiple(
             "backend.services.health.supabase",
             get_recent_sent_titles=lambda *a, **k: ["a"],
+            count_recent_alert_messages=lambda *a, **k: 5,
             count_recent_broadcasts=lambda *a, **k: 1,
             get_news_log=lambda *a, **k: {"itens": [{"news_id": "x"}]},
             get_polls=lambda *a, **k: [{"instituto": "X"}],
@@ -81,6 +85,7 @@ def test_collect_status_broadcast_sem_registro_no_log_vira_error():
          patch.multiple(
             "backend.services.health.supabase",
             get_recent_sent_titles=lambda *a, **k: ["a"],
+            count_recent_alert_messages=lambda *a, **k: 5,
             count_recent_broadcasts=lambda *a, **k: 3,
             get_news_log=lambda *a, **k: {"itens": []},
             get_polls=lambda *a, **k: [{"instituto": "X"}],
@@ -101,6 +106,7 @@ def test_collect_status_registro_indisponivel_vira_warn_nao_escrita_silenciosa()
          patch.multiple(
             "backend.services.health.supabase",
             get_recent_sent_titles=lambda *a, **k: ["a"],
+            count_recent_alert_messages=lambda *a, **k: 5,
             count_recent_broadcasts=lambda *a, **k: 3,
             get_news_log=lambda *a, **k: {"itens": [], "aviso": "registro indisponível"},
             get_polls=lambda *a, **k: [{"instituto": "X"}],
@@ -125,6 +131,7 @@ def test_collect_status_news_log_nao_chama_count_recent_broadcasts_duas_vezes():
          patch.multiple(
             "backend.services.health.supabase",
             get_recent_sent_titles=lambda *a, **k: ["a"],
+            count_recent_alert_messages=lambda *a, **k: 5,
             count_recent_broadcasts=_contar,
             get_news_log=lambda *a, **k: {"itens": [{"news_id": "x"}]},
             get_polls=lambda *a, **k: [{"instituto": "X"}],
@@ -141,6 +148,7 @@ def test_collect_status_news_log_excecao_vira_warn_nao_error():
          patch.multiple(
             "backend.services.health.supabase",
             get_recent_sent_titles=lambda *a, **k: ["a"],
+            count_recent_alert_messages=lambda *a, **k: 5,
             count_recent_broadcasts=lambda *a, **k: 1,
             get_news_log=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("timeout")),
             get_polls=lambda *a, **k: [{"instituto": "X"}],
@@ -157,6 +165,7 @@ def test_collect_status_dia_calmo_sem_broadcast_nem_log_fica_ok():
          patch.multiple(
             "backend.services.health.supabase",
             get_recent_sent_titles=lambda *a, **k: [],
+            count_recent_alert_messages=lambda *a, **k: 5,
             count_recent_broadcasts=lambda *a, **k: 0,
             get_news_log=lambda *a, **k: {"itens": []},
             get_polls=lambda *a, **k: [{"instituto": "X"}],
