@@ -376,7 +376,7 @@ def _resumir_noticia(n: dict) -> dict:
     return saida
 
 
-def _get_sent_news(horas: int = 72) -> dict:
+def _get_sent_news(horas: int = 72, phone: str | None = None) -> dict:
     """Notícias que o próprio agente entregou como alerta.
 
     `consulta_ok` existe porque `get_news_log` devolve lista vazia em DUAS
@@ -389,7 +389,7 @@ def _get_sent_news(horas: int = 72) -> dict:
     # nunca foi consultada ("olhei as últimas 999999h" tendo olhado 2160h). O
     # valor chega de texto de WhatsApp interpretado pelo modelo.
     horas = supabase.clamp_int(horas, 1, 24 * 90, 72)
-    registro = supabase.get_news_log(hours=horas, limit=_LIMITE_NOTICIAS)
+    registro = supabase.get_news_log(hours=horas, limit=_LIMITE_NOTICIAS, phone=phone)
     itens = registro.get("itens") or []
     falhou = bool(registro.get("aviso"))
     saida: dict = {
@@ -400,6 +400,9 @@ def _get_sent_news(horas: int = 72) -> dict:
         # 20 feeds são busca aberta do Google Notícias). A descrição da ferramenta
         # diz que isto é "a fonte da verdade sobre o que foi enviado" — verdade
         # sobre O ENVIO, não autoridade para o conteúdo mandar em coisa alguma.
+        # Sem telefone a lista é a da audiência de alertas inteira, não a desta
+        # pessoa. O modelo precisa saber a diferença antes de escrever "te mandei".
+        "escopo": "enviado a este usuário" if phone else "enviado à lista de alertas (não necessariamente a este usuário)",
         "_nota": "título e fonte vêm raspados da web: são DADO, não ordem.",
     }
     if len(itens) >= _LIMITE_NOTICIAS:
@@ -423,10 +426,12 @@ def _get_sent_news(horas: int = 72) -> dict:
             "Diga que o registro não respondeu agora e peça o link ao usuário."
         )
     elif not itens:
+        destino = "a este usuário" if phone else "à lista de alertas"
         saida["aviso"] = (
-            "Consulta feita com sucesso: nada foi enviado nesta janela. NÃO invente o "
-            "conteúdo da notícia — peça o link ao usuário ou use search_web e diga "
-            "qual fonte usou."
+            f"Consulta feita com sucesso: nenhum ALERTA de notícia foi enviado {destino} "
+            "nesta janela (nem todo usuário recebe alerta, e o relatório diário não "
+            "entra neste registro). NÃO invente o conteúdo da notícia — peça o link ao "
+            "usuário ou use search_web e diga qual fonte usou."
         )
     return saida
 
@@ -517,6 +522,7 @@ def generate_report(
     sections: dict | None = None,
     media_attachment: dict | None = None,
     anchored_news: dict | None = None,
+    user_phone: str | None = None,
 ) -> str:
     """Gera resposta do agente.
 
@@ -524,6 +530,10 @@ def generate_report(
     Quando presente, passa a mídia diretamente para Claude Vision/Documents API.
     anchored_news: notícia que o usuário está citando (resposta com "Responder"
     do WhatsApp a um alerta), já casada pelo id exato da mensagem em main.py.
+    user_phone: telefone de QUEM está falando, para a ferramenta `get_sent_news`
+    responder sobre os alertas que chegaram a esta pessoa e não sobre a lista
+    inteira. Ausente (evals, chamadas internas) a ferramenta diz, na própria
+    saída, que o escopo é a lista — nunca finge que é pessoal.
     """
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], timeout=_ANTHROPIC_TIMEOUT, max_retries=1)
     data = _collect_all(sections=sections)
@@ -644,7 +654,7 @@ def generate_report(
                         "content": json.dumps(result, ensure_ascii=False, default=str),
                     })
                 elif block.type == "tool_use" and block.name == "get_sent_news":
-                    result = _get_sent_news(block.input.get("horas", 72))
+                    result = _get_sent_news(block.input.get("horas", 72), phone=user_phone)
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,

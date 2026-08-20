@@ -511,15 +511,21 @@ def clamp_int(value, minimo: int, maximo: int, default: int) -> int:
     return max(minimo, min(v, maximo))
 
 
-def get_news_log(hours: int = 72, limit: int = 20) -> dict:
+def get_news_log(hours: int = 72, limit: int = 20, phone: str | None = None) -> dict:
     """Notícias entregues na janela, mais recentes primeiro.
+
+    `phone` restringe ao que foi entregue ÀQUELE destinatário. Sem ele a
+    resposta é a lista de alertas inteira, que não é a mesma coisa: só parte
+    dos usuários autorizados tem `alerts_enabled`, e dizer "te mandei isto em
+    19/08 às 13h05" para quem nunca recebeu é falso positivo autoritário — o
+    espelho exato do A5 (achado 3 do Apolo, 20/08/2026).
 
     Devolve {"itens": [...]}; em falha, {"itens": [], "aviso": "..."} — a lista
     vazia sozinha não distingue "não houve notícia" de "o registro não
-    respondeu", e a Story 2 vai usar isto como ferramenta do Claude: lista
-    vazia lida como fato confirmado ("conferi, não enviei nada sobre X") é
-    negativa autoritária e errada — pior que o incidente que esta tabela existe
-    para corrigir (achado A5, revisão 18/08/2026).
+    respondeu", e a Story 2 usa isto como ferramenta do Claude: lista vazia
+    lida como fato confirmado ("conferi, não enviei nada sobre X") é negativa
+    autoritária e errada — pior que o incidente que esta tabela existe para
+    corrigir (achado A5, revisão 18/08/2026).
     """
     hours = clamp_int(hours, 1, 24 * 90, 72)  # 90 dias = janela de retenção sugerida na migration
     limit = clamp_int(limit, 1, 100, 20)
@@ -528,10 +534,30 @@ def get_news_log(hours: int = 72, limit: int = 20) -> dict:
     ).isoformat()
     try:
         with _client() as c:
+            filtro_destinatario = ""
+            if phone is not None:
+                # Quem recebeu o quê mora em `news_log_messages` (uma linha por
+                # destinatário); `news_log` não tem essa coluna. DUAS consultas
+                # simples em vez de um embed PostgREST: é a mesma forma que
+                # `get_news_by_message_id` já roda em produção, sem sintaxe nova
+                # para falhar calada e derrubar a ferramenta inteira para todo
+                # mundo de uma vez.
+                r0 = c.get(
+                    f"/news_log_messages?phone=eq.{_f(phone)}"
+                    f"&sent_at=gte.{_f(cutoff)}&select=news_log_id"
+                    f"&order=sent_at.desc&limit={limit}"
+                )
+                r0.raise_for_status()
+                ids = {row["news_log_id"] for row in r0.json()}
+                if not ids:
+                    return {"itens": []}
+                lista = ",".join(str(int(i)) for i in sorted(ids))
+                filtro_destinatario = f"&id=in.({lista})"
             r = c.get(
                 f"/news_log?select=news_id,titulo_pt,titulo_original,fonte,feed,url,"
                 f"url_publisher,url_final,categoria,resumo,resumo_fonte,direcao,score,ativos,"
                 f"publicado_em,sent_at"
+                f"{filtro_destinatario}"
                 f"&sent_at=gte.{_f(cutoff)}&order=sent_at.desc&limit={limit}"
             )
             r.raise_for_status()

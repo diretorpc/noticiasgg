@@ -59,7 +59,7 @@ def test_get_sent_news_devolve_o_log():
         reporter.supabase, "get_news_log", return_value={"itens": [_linha()]}
     ) as m:
         resultado = reporter._get_sent_news(horas=48)
-    m.assert_called_once_with(hours=48, limit=20)
+    m.assert_called_once_with(hours=48, limit=20, phone=None)
     assert resultado["janela_horas"] == 48
     assert resultado["consulta_ok"] is True
     assert "aviso" not in resultado
@@ -201,9 +201,10 @@ def test_o_laco_despacha_a_ferramenta_de_verdade():
          patch.object(
              reporter.supabase, "get_news_log", return_value={"itens": [_linha()]}
          ) as consulta:
-        saida = reporter.generate_report("me fala dessa noticia que voce mandou", sections={})
+        saida = reporter.generate_report("me fala dessa noticia que voce mandou", sections={},
+                                        user_phone="5534999945010")
 
-    consulta.assert_called_once_with(hours=24, limit=20)
+    consulta.assert_called_once_with(hours=24, limit=20, phone="5534999945010")
     assert saida == "segundo o registro, mandei isso ontem."
     devolvido = cliente.messages.create.call_args_list[1].kwargs["messages"][-1]["content"][0]
     assert devolvido["tool_use_id"] == "tu_1"
