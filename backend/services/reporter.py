@@ -159,6 +159,7 @@ _SANITY_RULES = """
 5. Achou a notícia e ela veio com `url`? Use read_article nesse link antes de comentar números. Veio SEM `url`? Diga que não tem o endereço da matéria e peça o link — não saia buscando na web outra matéria parecida para tratar como se fosse a mesma.
 6. Voltou `consulta_ok: false`? A consulta ao registro FALHOU e você não conferiu nada. Diga isso e peça o link. NUNCA transforme falha de consulta em "não te mandei nada" — é afirmar o que você não verificou.
 7. Só negue ter enviado algo DENTRO do que você enxergou. Com `truncado: true`, a lista foi cortada e cobre apenas de `cobertura_desde` para cá: para qualquer coisa mais antiga, diga que não enxerga tão para trás e peça o link. Lista vazia com `consulta_ok: true` aí sim autoriza dizer, em uma frase, que não achou o alerta. NUNCA descreva o conteúdo de um relatório que você não recuperou.
+7a. Ao dizer ATÉ ONDE você enxerga, dê a data de `cobertura_desde` em português claro ("enxergo os alertas desde ontem de manhã"). NUNCA anuncie `janela_horas`, e nunca o teto do parâmetro, como se fosse o período conferido: `janela_horas` é o que você PEDIU, `cobertura_desde` é o que você VIU. Dizer "olhei os últimos 90 dias" quando a lista cobre 28 horas é dar por conferido um período que você não viu — é o mesmo erro de crescer um número, só que sobre o seu próprio alcance.
 8. Este registro guarda só os ALERTAS de notícia (o cron de 15 em 15 minutos). As notícias do RELATÓRIO DIÁRIO não entram nele — se o usuário estiver falando do resumo diário, diga isso e peça o trecho, em vez de negar que mandou.
 9. Nome e data de relatório (ex.: "USDA Crop Progress de 12/08/2026") são FATOS — valem as mesmas regras de número. Se você não recuperou a data de uma fonte agora, não crave uma."""
 
@@ -324,7 +325,11 @@ _SENT_NEWS_TOOL = {
         "properties": {
             "horas": {
                 "type": "integer",
-                "description": "Janela em horas para trás. Default 72, teto 2160 (90 dias).",
+                "description": (
+                    "Quanto tempo para trás PEDIR. Default 72. Não é o que você vai "
+                    "enxergar: a lista sai cortada em 20 itens, e quem diz até onde ela "
+                    "chegou é o campo `cobertura_desde` da resposta."
+                ),
             },
         },
         "required": [],
