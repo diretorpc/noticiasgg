@@ -22,17 +22,29 @@ Agente de IA multi-domínio, backend em Python/FastAPI:
 
 Fonte viva do que existe hoje: `README.md` e `CLAUDE.md` na raiz do projeto.
 
-## Estado em 20/08/2026 — Story 2 (`get_sent_news`) PRONTA no código, NÃO validada em campo
+## Estado em 20/08/2026 — Story 2 (`get_sent_news`) NO AR, ainda SEM prova de campo
 
-Branch `feat/get-sent-news-tool`, três commits, **não mergeada e não deployada**. O agente
-de chat ganhou a ferramenta para consultar os alertas de notícia que ele mesmo enviou —
-"essa notícia que você mandou" deixa de ser adivinhação a partir do título.
+PR #13 mergeada (`ebe6268`), branch apagada, **deploy confirmado em produção**: o
+`/api/health` respondeu com o campo `entregas_registradas`, que só existe no código novo.
+O agente de chat ganhou a ferramenta para consultar os alertas de notícia que ele mesmo
+enviou — "essa notícia que você mandou" deixa de ser adivinhação a partir do título.
 
 | Commit | O que é |
 |---|---|
 | `2938494` | a ferramenta, o despacho, a regra de prompt |
 | `6a7942b` | consertos dos achados 1, 2, 4, 5, 6, 7, 8, 9, 10 do Apolo |
 | `c356d8e` | achado 3 — escopo por destinatário |
+| `6c532a0` | janela de tempo cortada duas vezes apagava o sinal `truncado` |
+| `100035f` | achados 11–14 da segunda passada |
+
+**O corte de 20 itens NÃO é caso raro.** O `/api/health` do deploy respondeu
+`broadcasts_24h: 17` — na janela padrão de 72 h a lista estoura o teto quase sempre, e
+`truncado`/`cobertura_desde` viram o caminho normal, não a exceção. Conferir o número de
+novo (nunca acreditar no que está escrito aqui):
+
+```bash
+curl -s https://noticiasgg.vercel.app/api/health | python -c "import sys,json;print(json.load(sys.stdin)['checks']['news_log'])"
+```
 
 **O plano escrito estava desatualizado em dois pontos** e seguir ele ao pé da letra teria
 embutido bug: `supabase.get_news_log` devolve `{"itens": [...]}` e não uma lista, e o plano
