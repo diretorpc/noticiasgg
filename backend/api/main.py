@@ -689,7 +689,8 @@ async def whatsapp_webhook(request: Request):
 
             supabase.save_message(target_phone, "user", f"[áudio transcrito] {text}")
             _t = time.monotonic()
-            reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"), sections={})
+            reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"),
+                                             sections={}, user_phone=target_phone)
             logger.info("audio: report %.1fs", time.monotonic() - _t)
             supabase.save_message(target_phone, "assistant", reply)
             _maybe_summarize(target_phone)
@@ -728,6 +729,7 @@ async def whatsapp_webhook(request: Request):
                 user_name=authorized.get("name"),
                 sections={},
                 media_attachment={"type": msg_info["type"], "b64": media["base64"], "mime": mime},
+                user_phone=target_phone,
             )
             supabase.save_message(target_phone, "assistant", reply)
             _maybe_summarize(target_phone)
@@ -751,7 +753,8 @@ async def whatsapp_webhook(request: Request):
 
         supabase.save_message(target_phone, "user", text)
         reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"),
-                                         sections={}, anchored_news=anchored_news)
+                                         sections={}, anchored_news=anchored_news,
+                                         user_phone=target_phone)
         supabase.save_message(target_phone, "assistant", reply)
         _maybe_summarize(target_phone)
         if audio_for_text:

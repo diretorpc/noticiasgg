@@ -410,7 +410,7 @@ def update_news_log_conteudo(news_log_id: int, conteudo: str | None,
     que exigiria SUPABASE_URL/SUPABASE_KEY à toa. `id` vai CRU na query string
     (não passa por `_f()`): vem sempre do próprio `log_sent_news`, nunca de
     texto externo, mas `int()` é defesa contra um chamador futuro que passe
-    outra coisa (mesmo cuidado de `_clamp_int`).
+    outra coisa (mesmo cuidado de `clamp_int`).
 
     Nunca estoura para o chamador: a notícia já foi entregue e logada quando
     isto roda — mesma garantia do irmão `log_sent_news`.
@@ -499,7 +499,7 @@ def get_news_by_message_id(message_id: str) -> dict | None:
         return None
 
 
-def _clamp_int(value, minimo: int, maximo: int, default: int) -> int:
+def clamp_int(value, minimo: int, maximo: int, default: int) -> int:
     """Trava genérica para inteiros que entram CRUS numa query PostgREST
     (`limit=`/`hours=` não passam por `_f()`, ao contrário de `cutoff`). Na
     Story 2 esses valores vêm de texto de WhatsApp interpretado pelo modelo —
@@ -511,37 +511,114 @@ def _clamp_int(value, minimo: int, maximo: int, default: int) -> int:
     return max(minimo, min(v, maximo))
 
 
-def get_news_log(hours: int = 72, limit: int = 20) -> dict:
+def get_news_log(hours: int = 72, limit: int = 20, phone: str | None = None) -> dict:
     """Notícias entregues na janela, mais recentes primeiro.
+
+    `phone` restringe ao que foi entregue ÀQUELE destinatário. Sem ele a
+    resposta é a lista de alertas inteira, que não é a mesma coisa: só parte
+    dos usuários autorizados tem `alerts_enabled`, e dizer "te mandei isto em
+    19/08 às 13h05" para quem nunca recebeu é falso positivo autoritário — o
+    espelho exato do A5 (achado 3 do Apolo, 20/08/2026).
 
     Devolve {"itens": [...]}; em falha, {"itens": [], "aviso": "..."} — a lista
     vazia sozinha não distingue "não houve notícia" de "o registro não
-    respondeu", e a Story 2 vai usar isto como ferramenta do Claude: lista
-    vazia lida como fato confirmado ("conferi, não enviei nada sobre X") é
-    negativa autoritária e errada — pior que o incidente que esta tabela existe
-    para corrigir (achado A5, revisão 18/08/2026).
+    respondeu", e a Story 2 usa isto como ferramenta do Claude: lista vazia
+    lida como fato confirmado ("conferi, não enviei nada sobre X") é negativa
+    autoritária e errada — pior que o incidente que esta tabela existe para
+    corrigir (achado A5, revisão 18/08/2026).
     """
-    hours = _clamp_int(hours, 1, 24 * 90, 72)  # 90 dias = janela de retenção sugerida na migration
-    limit = _clamp_int(limit, 1, 100, 20)
+    hours = clamp_int(hours, 1, 24 * 90, 72)  # 90 dias = janela de retenção sugerida na migration
+    limit = clamp_int(limit, 1, 100, 20)
+    # Telefone vazio não é "escopar por ninguém", é "sem escopo". Sem esta linha
+    # o supabase escopava (devolvendo lista vazia) enquanto o reporter rotulava a
+    # saída como lista geral — o rótulo descrevia uma consulta que não foi feita
+    # (achado 13 do Apolo, 20/08/2026).
+    phone = (phone or "").strip() or None
     cutoff = (
         datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
     ).isoformat()
+    truncado = False
     try:
         with _client() as c:
+            filtro_destinatario = ""
+            if phone is not None:
+                # Quem recebeu o quê mora em `news_log_messages` (uma linha por
+                # destinatário); `news_log` não tem essa coluna. DUAS consultas
+                # simples em vez de um embed PostgREST: é a mesma forma que
+                # `get_news_by_message_id` já roda em produção, sem sintaxe nova
+                # para falhar calada e derrubar a ferramenta inteira para todo
+                # mundo de uma vez.
+                r0 = c.get(
+                    f"/news_log_messages?phone=eq.{_f(phone)}"
+                    f"&sent_at=gte.{_f(cutoff)}&select=news_log_id"
+                    f"&order=sent_at.desc&limit={limit}"
+                )
+                r0.raise_for_status()
+                mensagens = r0.json()
+                # `truncado` sai DAQUI, não de `len(itens)` lá no reporter: é esta
+                # consulta que bate no teto. Entre ela e a próxima a contagem pode
+                # encolher (`ids` é um `set`, e `_RetryTransport` repete POST sem
+                # que a 008 tenha UNIQUE em (news_log_id, phone)) — deduzir o corte
+                # depois do encolhimento devolve `truncado: false` para uma lista
+                # cortada, e a regra 7 volta a autorizar a negativa. É a terceira
+                # porta da mesma classe de defeito (achado 11 do Apolo, 20/08/2026).
+                truncado = len(mensagens) >= limit
+                ids = {row["news_log_id"] for row in mensagens}
+                if not ids:
+                    return {"itens": [], "truncado": False}
+                lista = ",".join(str(int(i)) for i in sorted(ids))
+                filtro_destinatario = f"&id=in.({lista})"
+            # A janela de tempo só entra aqui quando NÃO houve filtro por
+            # destinatário: com ele, `news_log_messages.sent_at` já cortou a
+            # janela, e repetir o corte sobre `news_log.sent_at` compara duas
+            # colunas de data diferentes — uma linha na borda sumiria da lista e
+            # apagaria o sinal `truncado` justamente quando ele importa.
+            janela = "" if phone is not None else f"&sent_at=gte.{_f(cutoff)}"
             r = c.get(
                 f"/news_log?select=news_id,titulo_pt,titulo_original,fonte,feed,url,"
                 f"url_publisher,url_final,categoria,resumo,resumo_fonte,direcao,score,ativos,"
                 f"publicado_em,sent_at"
-                f"&sent_at=gte.{_f(cutoff)}&order=sent_at.desc&limit={limit}"
+                f"{filtro_destinatario}{janela}"
+                f"&order=sent_at.desc&limit={limit}"
             )
             r.raise_for_status()
-            return {"itens": r.json()}
+            linhas = r.json()
+            if phone is None:
+                truncado = len(linhas) >= limit
+            return {"itens": linhas, "truncado": truncado}
     except Exception as e:
         # sem isto, uma leitura falhando ficava invisível para sempre — o irmão
         # `log_sent_news` já loga a própria falha; este ficava mudo (achado A6,
         # revisão 18/08/2026).
         logger.warning("get_news_log failed: %s", e)
-        return {"itens": [], "aviso": "registro indisponível"}
+        return {"itens": [], "truncado": False, "aviso": "registro indisponível"}
+
+
+def count_recent_alert_messages(hours: int = 24) -> int:
+    """Nº de ENTREGAS de alerta registradas (uma linha por destinatário).
+
+    Existe para o `/api/health` vigiar `news_log_messages`, que virou a fonte da
+    verdade da ferramenta `get_sent_news` quando ela filtra por destinatário. A
+    escrita dessa tabela é best-effort por construção: `log_alert_messages`
+    engole a própria exceção (o alerta já foi entregue quando ela roda) e
+    descarta a entrega cujo `message_id` a Evolution não devolveu. Se ela secar,
+    o agente passa a dizer "não te mandei nada" para quem recebeu — falha
+    silenciosa da mesma família do achado A4, agora com autoridade pessoal
+    (achado 12 do Apolo, 20/08/2026)."""
+    cutoff = (
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
+    ).isoformat()
+    with _client() as c:
+        r = c.get(
+            f"/news_log_messages?select=id&sent_at=gte.{_f(cutoff)}&limit=1",
+            headers={"Prefer": "count=exact"},
+        )
+        r.raise_for_status()
+        content_range = r.headers.get("content-range", "*/0")
+        try:
+            return int(content_range.split("/")[1])
+        except (IndexError, ValueError):
+            return 0
 
 
 def count_recent_broadcasts(hours: int = 24) -> int:

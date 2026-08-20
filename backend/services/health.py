@@ -60,10 +60,18 @@ def collect_status() -> dict:
             # `log_sent_news` engole a própria exceção de propósito (o alerta já foi
             # entregue quando ela roda) — este cross-check é o que torna a falha visível.
             silencioso = broadcasts_24h > 0 and not registrado
+            # `news_log_messages` virou a fonte da verdade da ferramenta
+            # `get_sent_news` quando ela filtra por destinatário — e nada vigiava
+            # essa tabela. Secando ela, o agente diz "não te mandei nada" para
+            # quem recebeu: mesma falha silenciosa do A4, agora com autoridade
+            # pessoal (achado 12 do Apolo, 20/08/2026).
+            entregas = supabase.count_recent_alert_messages(hours=24)
+            sem_destinatario = broadcasts_24h > 0 and entregas == 0
             checks["news_log"] = {
-                "status": "error" if silencioso else "ok",
+                "status": "error" if (silencioso or sem_destinatario) else "ok",
                 "broadcasts_24h": broadcasts_24h,
                 "registrado": registrado,
+                "entregas_registradas": entregas,
             }
     except Exception as e:
         # Este bloco só falha se a própria LEITURA estourar (get_news_log não

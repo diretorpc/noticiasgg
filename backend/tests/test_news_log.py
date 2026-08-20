@@ -132,7 +132,7 @@ def test_get_news_log_filtra_por_janela_e_ordena():
     assert "order=sent_at.desc" in url
     assert "limit=5" in url
     assert "sent_at=gte." in url
-    assert resultado == {"itens": [{"news_id": "abc123", "titulo_pt": "t"}]}
+    assert resultado == {"itens": [{"news_id": "abc123", "titulo_pt": "t"}], "truncado": False}
 
 
 @pytest.mark.unit
@@ -146,7 +146,7 @@ def test_get_news_log_falha_devolve_aviso_nao_lista_vazia_muda():
     client.get = MagicMock(side_effect=RuntimeError("timeout"))
     with patch.object(supabase, "_client", return_value=client):
         resultado = supabase.get_news_log()
-    assert resultado == {"itens": [], "aviso": "registro indisponível"}
+    assert resultado == {"itens": [], "truncado": False, "aviso": "registro indisponível"}
 
 
 @pytest.mark.unit
@@ -159,7 +159,7 @@ def test_get_news_log_nao_houve_noticia_e_soh_lista_vazia_sem_aviso():
     client = _fake_client(resp)
     with patch.object(supabase, "_client", return_value=client):
         resultado = supabase.get_news_log()
-    assert resultado == {"itens": []}
+    assert resultado == {"itens": [], "truncado": False}
     assert "aviso" not in resultado
 
 
@@ -175,7 +175,7 @@ def test_get_news_log_falha_registra_warning_sem_estourar(caplog):
     with patch.object(supabase, "_client", return_value=client):
         with caplog.at_level("WARNING", logger="noticiasgg.supabase"):
             resultado = supabase.get_news_log()
-    assert resultado == {"itens": [], "aviso": "registro indisponível"}
+    assert resultado == {"itens": [], "truncado": False, "aviso": "registro indisponível"}
     assert any("get_news_log failed" in r.message for r in caplog.records)
 
 

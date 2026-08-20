@@ -13,9 +13,9 @@ def test_describe_config_exposes_model_and_tools():
     assert cfg["validator_model"] == "claude-haiku-4-5-20251001"
     assert cfg["max_tool_rounds"] == 6
     assert cfg["max_tokens"] == 2000
-    assert len(cfg["tools"]) == 5
+    assert len(cfg["tools"]) == 6
     assert {"get_stock_data", "get_agro_data", "search_agro_web",
-            "search_web", "read_article"} == {t["name"] for t in cfg["tools"]}
+            "search_web", "read_article", "get_sent_news"} == {t["name"] for t in cfg["tools"]}
 
 
 def test_describe_config_exposes_prompts_no_secret():

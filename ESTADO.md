@@ -22,6 +22,95 @@ Agente de IA multi-domínio, backend em Python/FastAPI:
 
 Fonte viva do que existe hoje: `README.md` e `CLAUDE.md` na raiz do projeto.
 
+## Estado em 20/08/2026 — Story 2 (`get_sent_news`) PRONTA no código, NÃO validada em campo
+
+Branch `feat/get-sent-news-tool`, três commits, **não mergeada e não deployada**. O agente
+de chat ganhou a ferramenta para consultar os alertas de notícia que ele mesmo enviou —
+"essa notícia que você mandou" deixa de ser adivinhação a partir do título.
+
+| Commit | O que é |
+|---|---|
+| `2938494` | a ferramenta, o despacho, a regra de prompt |
+| `6a7942b` | consertos dos achados 1, 2, 4, 5, 6, 7, 8, 9, 10 do Apolo |
+| `c356d8e` | achado 3 — escopo por destinatário |
+
+**O plano escrito estava desatualizado em dois pontos** e seguir ele ao pé da letra teria
+embutido bug: `supabase.get_news_log` devolve `{"itens": [...]}` e não uma lista, e o plano
+achatava "dia calmo" e "a consulta falhou" num aviso só — que é a negativa autoritária que o
+achado A5 da revisão de 18/08 existe para impedir. Corrigido com o campo `consulta_ok`.
+
+### As quatro bordas onde o agente afirmaria o que não conferiu
+
+Todas fecham com um campo na saída da ferramenta + uma regra de prompt, não só com prompt:
+
+| Borda | Campo que a fecha |
+|---|---|
+| a consulta ao Supabase falhou | `consulta_ok: false` — "não conferi", nunca "não mandei" |
+| a lista bateu no teto de 20 itens | `truncado` + `cobertura_desde` |
+| o alerta foi para outra pessoa | filtro por `news_log_messages.phone`; sem telefone, campo `escopo` |
+| a notícia veio pelo relatório diário | regra 8 do prompt (`log_sent_news` só é chamada pelo `alert_checker`) |
+
+### Dois defeitos que a revisão do Apolo achou com medição em produção
+
+1. **`url_publisher` do RSS é o domínio pelado**, não a matéria — `web_search._url_canonica`
+   já dizia isso e a primeira versão da ferramenta o entregava mesmo assim. O `read_article`
+   nele **não dá erro**: devolve o MENU da capa como se fosse o artigo. Agora existe
+   `_link_da_materia()` como fonte única, e o link do Google Notícias (403 no clique) some
+   em vez de virar fallback — inclusive no caminho ancorado, onde o conserto de 19/08 só
+   tinha sido feito pela metade.
+2. **O corte em 20 itens já esconde notícia hoje.** Medição do Apolo em 20/08: 25 alertas nas
+   últimas 72 h. Sem declarar o corte, o modelo lia "consulta ok + não está na lista" e negava.
+
+### Uma capacidade que eu ACEITEI perder — dito em voz alta
+
+`_link_da_materia` devolve vazio para link do Google Notícias. Certo para o humano
+(403 no clique), mas o link do Google **não é inútil para a máquina**:
+`web_search.read_article` sabe tratá-lo (`resolve_google_news`, ~1 s, zero crédito;
+falhando, `render=true`, ~35 créditos e 37–57 s). O caminho ancorado, portanto,
+tinha como recuperar a matéria a partir dele — e não tem mais.
+
+Tamanho da perda, medido: 5 de 25 linhas ficam sem link; **4 dessas têm `conteudo`
+capturado** (o bloco `<noticia_citada>` já traz o texto e não precisa de link).
+Sobra **1 linha em 25 (4%)** sem texto e sem link, onde o agente agora não tem por
+onde recuperar a matéria. Aceito: 24 de 25 têm `conteudo`, a captura está saudável.
+Se um dia isso incomodar, o caminho é um campo separado (`url_para_ferramenta`, com
+ordem explícita de não exibir), **nunca** o fallback antigo no campo `url` — isso
+reabriria o 403 na cara do usuário.
+
+### Duas coisas latentes, medidas com ZERO ocorrências hoje
+
+- **Sem `UNIQUE (news_log_id, phone)` em `news_log_messages`**, e o `_RetryTransport`
+  repete POST. Duplicata encolheria a lista entre as duas consultas. O sinal
+  `truncado` já saiu de `len(itens)` e passou para quem aplica o teto, então o
+  defeito não morde mais o agente — mas o índice ainda é barato e correto.
+- **`log_alert_messages` é best-effort** (engole exceção; descarta entrega sem
+  `message_id`). Se secar, o agente nega para quem recebeu. `/api/health` passou a
+  vigiar com `entregas_registradas`.
+
+### ⛔ O que FALTA — prova de campo pelo WhatsApp real
+
+Suíte verde não prova nada disto. Rodar depois do deploy, nesta ordem:
+
+1. **Link:** pergunte sobre um alerta cujo `url_final` seja nulo e **clique no link** que ele
+   devolver. Passa = abriu a matéria, ou o agente disse que não tem o endereço.
+2. **Corte:** pergunte por uma notícia de anteontem. Passa = ele diz até onde enxerga e pede
+   o link. Falha = "não te mandei nada sobre isso".
+3. **Escopo:** um usuário SEM `alerts_enabled` pergunta "qual a última notícia que você me
+   mandou?". Falha = veio título e data de um alerta que ele nunca recebeu.
+4. **Ancorada:** responda citando um alerta e cronometre. Se aparecer
+   `reporter tool round 1/6: ['get_sent_news']` no log da Vercel, a exceção do
+   `<noticia_citada>` não pegou e o caminho determinístico está sendo roubado.
+
+Quantos alertas existem na janela (o número que decide se o corte morde):
+```bash
+python -X utf8 -c "import os,pathlib;[os.environ.setdefault(k.strip(),v.strip().strip(chr(34))) for k,v in (l.split('=',1) for l in pathlib.Path('.env').read_text(encoding='utf-8').splitlines() if '=' in l and not l.strip().startswith('#'))];import datetime;from backend.services import supabase as s;c=(datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(hours=72)).isoformat();r=s._client().get('/news_log?select=id,sent_at,url_final&sent_at=gte.'+c+'&order=sent_at.desc&limit=200').json();print(len(r),'alertas em 72h |',sum(1 for x in r if not x['url_final']),'sem url_final')"
+```
+
+**Rollback:** os três commits só tocam `reporter.py`, `supabase.py`, `main.py` e testes. Não
+há migration nova. Reverter a branch derruba a ferramenta inteira sem mexer em banco.
+
+---
+
 ## Estado em 19/08/2026 — os 3 defeitos da validação CONSERTADOS e EM PRODUÇÃO
 
 Migration 009 rodada (conferida no sistema: `select=url_final` → 200), commit `18e9cb0`
