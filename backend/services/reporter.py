@@ -14,6 +14,7 @@ from backend.services.integrity import (
     ANALYSIS_MARKERS as _ANALYSIS_MARKERS,
     SYSTEM_VALIDATOR as _SYSTEM_VALIDATOR,
 )
+from backend.services import supabase
 from backend.services.secrets_mask import sanitize_error
 
 logger = logging.getLogger("noticiasgg")
@@ -151,7 +152,14 @@ _SANITY_RULES = """
 ━━━ NÚMERO: DA FONTE, OU NADA ━━━
 1. CONFIE NO QUE RECEBEU. Todo número vindo de uma ferramenta ou fonte lida agora é sua verdade — use-o. NUNCA troque um número de fonte por um que você lembra do treinamento, e NUNCA diga que uma fonte "não existe" ou "ainda não publicou" se ela está aí na sua frente.
 2. SANIDADE. Se um número é fisicamente absurdo (produtividade subindo dezenas/centenas de %, safra que multiplica de um ano para o outro), não o afirme como fato mesmo estando na fonte — diga que parece inconsistente.
-3. NÃO INVENTE VALOR. Para uma projeção futura sem número de fonte, dê a direção (viés de alta/baixa) e a incerteza — nunca crave um valor específico com cara de precisão que você mesmo estimou."""
+3. NÃO INVENTE VALOR. Para uma projeção futura sem número de fonte, dê a direção (viés de alta/baixa) e a incerteza — nunca crave um valor específico com cara de precisão que você mesmo estimou.
+
+━━━ NOTÍCIA QUE VOCÊ MANDOU ━━━
+4. Se o usuário falar de "essa notícia", "a notícia que você mandou", "a que chegou aqui", ou colar um título com cara de alerta (linha em negrito + nome da fonte em itálico), a PRIMEIRA ferramenta que você chama é get_sent_news. Ela devolve o título, a FONTE, o LINK e a DATA reais do que foi enviado.
+5. Achou a notícia no get_sent_news? Use read_article no link dela antes de comentar números. O link é a fonte — não responda de memória sobre um relatório que você não leu agora.
+6. Voltou `consulta_ok: false`? A consulta ao registro FALHOU e você não conferiu nada. Diga isso e peça o link. NUNCA transforme falha de consulta em "não te mandei nada" — é afirmar o que você não verificou.
+7. Voltou `consulta_ok: true` com lista vazia? Aí sim diga, em uma frase, que não achou esse alerta e peça o link. NUNCA descreva o conteúdo de um relatório que você não recuperou.
+8. Nome e data de relatório (ex.: "USDA Crop Progress de 12/08/2026") são FATOS — valem as mesmas regras de número. Se você não recuperou a data de uma fonte agora, não crave uma."""
 
 _SYSTEM_MARKET += _SANITY_RULES
 _SYSTEM_CHAT += _SANITY_RULES
@@ -299,6 +307,84 @@ _READ_ARTICLE_TOOL = {
         "required": ["url"],
     },
 }
+
+
+_SENT_NEWS_TOOL = {
+    "name": "get_sent_news",
+    "description": (
+        "Lista as notícias que ESTE agente enviou como alerta no WhatsApp, com título, "
+        "fonte, LINK da matéria, data de publicação, hora do envio e resumo. "
+        "Use SEMPRE que o usuário se referir a uma notícia que 'você mandou', 'chegou "
+        "aqui', 'essa notícia', ou colar um título com cara de alerta. É a fonte da "
+        "verdade sobre o que foi enviado — chame ANTES de search_web."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "horas": {
+                "type": "integer",
+                "description": "Janela em horas para trás. Default 72, teto 2160 (90 dias).",
+            },
+        },
+        "required": [],
+    },
+}
+
+# A linha de `news_log` tem 16 colunas; o modelo só precisa destas. Repassar a linha
+# crua enche o contexto de ruído (score, ativos, feed, resumo_fonte) e — pior — põe as
+# TRÊS urls na frente do modelo, deixando ele escolher a do Google, que dá 403.
+_CAMPOS_NOTICIA = ("fonte", "categoria", "resumo", "direcao", "publicado_em", "sent_at")
+
+
+def _resumir_noticia(n: dict) -> dict:
+    saida = {
+        "titulo": n.get("titulo_pt") or n.get("titulo_original") or "",
+        # Mesma precedência de `_format_anchored_news`: o endereço real da matéria na
+        # frente do link do Google Notícias (chave de dedup, 403 no clique). É esta url
+        # que o modelo vai passar para `read_article` e repetir na conversa — defeito 1,
+        # 19/08/2026.
+        "url": n.get("url_final") or n.get("url_publisher") or n.get("url") or "",
+    }
+    for campo in _CAMPOS_NOTICIA:
+        if n.get(campo):
+            saida[campo] = n[campo]
+    return saida
+
+
+def _get_sent_news(horas: int = 72) -> dict:
+    """Notícias que o próprio agente entregou como alerta.
+
+    `consulta_ok` existe porque `get_news_log` devolve lista vazia em DUAS
+    situações que não se parecem: dia calmo (nada foi enviado) e leitura que
+    falhou (o Supabase soluçou). Achatar as duas num aviso só faz o agente
+    dizer "conferi, não te mandei nada sobre X" sem ter conferido — negativa
+    autoritária e errada, pior que a alucinação que esta tabela existe para
+    corrigir (achado A5, revisão 18/08/2026)."""
+    # Mesma trava que a consulta aplica, para o eco não anunciar uma janela que
+    # nunca foi consultada ("olhei as últimas 999999h" tendo olhado 2160h). O
+    # valor chega de texto de WhatsApp interpretado pelo modelo.
+    horas = supabase._clamp_int(horas, 1, 24 * 90, 72)
+    registro = supabase.get_news_log(hours=horas, limit=20)
+    itens = registro.get("itens") or []
+    falhou = bool(registro.get("aviso"))
+    saida: dict = {
+        "noticias": [_resumir_noticia(n) for n in itens],
+        "janela_horas": horas,
+        "consulta_ok": not falhou,
+    }
+    if falhou:
+        saida["aviso"] = (
+            "A CONSULTA AO REGISTRO FALHOU — você NÃO conferiu coisa alguma. NÃO diga "
+            "que não enviou a notícia: isso seria afirmar o que você não verificou. "
+            "Diga que o registro não respondeu agora e peça o link ao usuário."
+        )
+    elif not itens:
+        saida["aviso"] = (
+            "Consulta feita com sucesso: nada foi enviado nesta janela. NÃO invente o "
+            "conteúdo da notícia — peça o link ao usuário ou use search_web e diga "
+            "qual fonte usou."
+        )
+    return saida
 
 
 _TICKER_RE = re.compile(r"\b([A-Z]{3,5}\d{1,2})\b")
@@ -457,7 +543,7 @@ def generate_report(
             messages=messages,
         )
         if use_tools:
-            create_kwargs["tools"] = [_STOCK_TOOL, _AGRO_DATA_TOOL, _AGRO_SEARCH_TOOL, _WEB_SEARCH_TOOL, _READ_ARTICLE_TOOL]
+            create_kwargs["tools"] = [_STOCK_TOOL, _AGRO_DATA_TOOL, _AGRO_SEARCH_TOOL, _WEB_SEARCH_TOOL, _READ_ARTICLE_TOOL, _SENT_NEWS_TOOL]
         response = client.messages.create(**create_kwargs)
 
         if use_tools and response.stop_reason == "tool_use":
@@ -505,6 +591,13 @@ def generate_report(
                         "tool_use_id": block.id,
                         "content": json.dumps(result, ensure_ascii=False, default=str),
                     })
+                elif block.type == "tool_use" and block.name == "get_sent_news":
+                    result = _get_sent_news(block.input.get("horas", 72))
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": json.dumps(result, ensure_ascii=False, default=str),
+                    })
                 else:
                     if block.type == "tool_use":
                         tool_results.append({
@@ -533,7 +626,7 @@ def describe_config() -> dict:
         "tools": [
             {"name": t["name"], "description": t["description"]}
             for t in (_STOCK_TOOL, _AGRO_DATA_TOOL, _AGRO_SEARCH_TOOL,
-                      _WEB_SEARCH_TOOL, _READ_ARTICLE_TOOL)
+                      _WEB_SEARCH_TOOL, _READ_ARTICLE_TOOL, _SENT_NEWS_TOOL)
         ],
         "system_market": _SYSTEM_MARKET,
         "system_chat": _SYSTEM_CHAT,
