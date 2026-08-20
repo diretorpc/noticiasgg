@@ -579,18 +579,22 @@ python -c "from backend.collectors import news; print(news.source_health())"
 
 - [x] ~~Rodar as migrations 007 e 008~~ — **FEITO em 18/08 e conferido na fonte viva**
       (tabelas e as 17 colunas juntas respondem 200). Merge feito e deploy READY (`755b991`).
-- [ ] 🔴 **Os 3 defeitos achados na primeira validação em produção (18/08 23h)** — decisão do
-      Matheus: consertar os TRÊS **antes** de começar a Story 2. Detalhe, evidência e conserto
-      proposto na seção de 18/08 23h, no topo deste arquivo.
-      1. o 🔗 da mensagem dá 403 (mandamos o link do Google, não o do jornal)
-      2. sigla em inglês dentro de título em português ("Saída da OPEC")
-      3. o `conteudo` capturado é majoritariamente entulho do site — menu e manchete de
-         OUTRAS notícias ocupando o teto de 4000 chars da âncora
-- [ ] 🔴 **Stories 2, 3 e 4 do plano anti-alucinação** —
+- [x] ~~**Os 3 defeitos da primeira validação em produção (18/08 23h)**~~ — **FEITOS e
+      provados em alerta real em 19/08** (`18e9cb0` + `a08e12a`). O defeito 2 (sigla) segue
+      em observação: nenhum título com sigla traduzível saiu desde então.
+- [ ] 🔴 **PROVA DE CAMPO da Story 2** — o código está NO AR sem nenhum teste em WhatsApp
+      real. As cinco provas estão na seção de 20/08, no topo. **Duas mandam reverter, não
+      consertar no ar:** usuário sem `alerts_enabled` recebendo título+data, e link que abre
+      a home do jornal. Rollback: `git revert ebe6268` (não há migration para desfazer).
+- [ ] 🔴 **Stories 3 e 4 do plano anti-alucinação** —
       `docs/superpowers/plans/2026-08-18-noticias-ancoradas-e-antialucinacao.md`.
-      Enquanto não forem feitas, o agente segue inventando número e data quando
-      perguntam sobre notícia do RSS: a Story 1 guarda o registro, mas **ninguém o lê
-      ainda** (a ferramenta `get_sent_news` é da Story 2).
+      A Story 2 fechou o buraco de "essa notícia que você mandou". A **Story 3** é a rede de
+      segurança: hoje o corretor (`integrity.validate_and_fix`) **não enxerga o que as
+      ferramentas trouxeram** na conversa — ele só valida contra os dados coletados. Story 4
+      são os evals que prendem tudo isso.
+- [ ] 🟡 `CREATE UNIQUE INDEX ON news_log_messages (news_log_id, phone)` — o
+      `_RetryTransport` repete POST e a 008 não tem trava. Zero duplicatas medidas em 20/08;
+      o sinal `truncado` já não depende disso, mas o índice é barato e correto.
 - [ ] 🟡 Achados do revisor deixados para depois (nenhum trava a entrega): prompt de
       commodities pode preencher número quando o scraping cai inteiro; `BRAPI_TOKEN` vai
       na URL e a máscara não cobre `token=` (hoje não vaza, `stocks.py` engole o erro);
