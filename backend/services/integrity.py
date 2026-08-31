@@ -211,7 +211,14 @@ def validate_and_fix(report: str, data: dict, client: Anthropic,
     rodou uma vez sequer fora do relatório diário.
 
     Em caso de falha devolve o original: o validador é rede de segurança, não
-    pode virar ponto único de quebra da resposta."""
+    pode virar ponto único de quebra da resposta.
+
+    LIMITE DE DESENHO, dito em voz alta: isto é REDE, não portão. (a) O recall
+    não é 1 — em amostras idênticas o mesmo validador às vezes deixa passar uma
+    invenção que pegou na rodada anterior. (b) Uma página hostil que AFIRME o
+    número falso faz o validador CARIMBAR a alucinação como verificada, porque
+    para ele o corpus é a verdade. "Passou pelo validador" nunca quer dizer
+    "é verdade" (medido pelo Apolo, 31/08/2026)."""
     tem_marcador = any(m in report for m in ANALYSIS_MARKERS)
     tool_corpus = _com_fato(tool_corpus)
     modo_relatorio = bool(data) and tem_marcador
