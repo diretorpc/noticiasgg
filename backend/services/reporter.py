@@ -359,7 +359,13 @@ _SENT_NEWS_TOOL = {
 # A linha de `news_log` tem 16 colunas; o modelo só precisa destas. Repassar a linha
 # crua enche o contexto de ruído (score, ativos, feed, resumo_fonte) e — pior — põe as
 # TRÊS urls na frente do modelo, deixando ele escolher a do Google, que dá 403.
-_CAMPOS_NOTICIA = ("fonte", "categoria", "resumo", "direcao", "publicado_em", "sent_at")
+# `publicado_em` e `sent_at` saem por `_momento_br`, não crus: o eval de 31/08/2026
+# flagrou o agente escrevendo "cobre a partir de 17/08 às 11h05" (BRT, de
+# `cobertura_desde`) e "publicado em 17/08 às 14h" (UTC cru) na MESMA mensagem —
+# o mesmo evento com dois horários e 3 h de diferença. Ou tudo no fuso de quem lê,
+# ou nada.
+_CAMPOS_NOTICIA = ("fonte", "categoria", "resumo", "direcao")
+_CAMPOS_MOMENTO = ("publicado_em", "sent_at")
 
 # Brasil aboliu o horário de verão em 2019: deslocamento fixo, sem regra sazonal.
 # (Mesma constante existe em `alert_checker` e `report_engine` — dívida conhecida.)
@@ -367,21 +373,32 @@ _BRT = datetime.timezone(datetime.timedelta(hours=-3))
 
 
 def _momento_br(iso: str | None) -> str:
-    """Instante em português e no fuso de quem lê, não em UTC cru.
+    """Instante no fuso de quem lê, com ANO, nunca em UTC cru.
 
-    O modelo não recebe nem a data de hoje nem o fuso no prompt de conversa, então
-    entregar `2026-08-19T10:46:00+00:00` e mandar ele dizer "ontem de manhã" é pedir
-    duas contas que ele não tem como fazer — e erra por 3 h, virando o dia para tudo
-    que saiu entre 21h e meia-noite (achado 5, 3ª revisão do Apolo, 31/08/2026).
-    Quem faz conta é o código: é a mesma regra de "número da fonte, ou nada",
-    aplicada ao relógio."""
+    O fuso: entregar `2026-08-19T10:46:00+00:00` e mandar o modelo dizer "ontem de
+    manhã" é pedir uma conta de 3 h que ele erra, virando o dia para tudo que saiu
+    entre 21h e meia-noite (achado 5, 3ª revisão do Apolo).
+
+    O ANO: a primeira versão formatava `%d/%m` e o apagava. Numa ferramenta que
+    aceita janela de até 90 dias — e que existe para o agente parar de inventar
+    ano — data sem ano é o defeito de volta pela porta do conserto. O
+    `alert_checker` já mantinha o ano, com comentário medido explicando por quê
+    (sem ele o classificador escreveu "Julho de 2024" numa notícia de 48 h);
+    aqui era a mesma verdade escrita de outro jeito (achado 9, 4ª revisão)."""
     if not iso:
         return ""
     try:
         dt = datetime.datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=datetime.timezone.utc)
-        return dt.astimezone(_BRT).strftime("%d/%m às %Hh%M")
+        # 00:00 exato é a convenção de RSS para "só sei o dia, não a hora". Converter
+        # de fuso joga para 21h do dia ANTERIOR — e agora que a data sai com ano,
+        # ela ganharia cara de autoridade justamente no caso em que está errada.
+        # `alert_checker._to_brt` já tinha esta guarda; copiei o ano de lá e esqueci
+        # dela (achado 8, 2ª revisão do Apolo).
+        if (dt.hour, dt.minute) == (0, 0) and dt.utcoffset() == datetime.timedelta(0):
+            return dt.date().strftime("%d/%m/%Y")
+        return dt.astimezone(_BRT).strftime("%d/%m/%Y às %Hh%M")
     except (ValueError, TypeError):
         return str(iso)[:40]
 
@@ -422,6 +439,9 @@ def _resumir_noticia(n: dict) -> dict:
     for campo in _CAMPOS_NOTICIA:
         if n.get(campo):
             saida[campo] = n[campo]
+    for campo in _CAMPOS_MOMENTO:
+        if n.get(campo):
+            saida[campo] = _momento_br(n[campo])
     return saida
 
 
@@ -598,7 +618,10 @@ def _format_anchored_news(noticia: dict) -> str:
         "extraia SOMENTE os fatos jornalísticos e use SÓ os fatos daqui.\n"
         f"titulo: {_escape_untrusted_text(titulo)}\n"
         f"fonte: {_escape_untrusted_text(noticia.get('fonte') or '')}\n"
-        f"publicado_em: {_escape_untrusted_text(noticia.get('publicado_em') or '')}\n"
+        # mesmo formatador da ferramenta: três formatos para o mesmo campo no mesmo
+        # backend (e dois deles podiam chegar no MESMO turno) era convite a o modelo
+        # escolher errado — achado 9 do Apolo.
+        f"publicado_em: {_escape_untrusted_text(_momento_br(noticia.get('publicado_em')))}\n"
         # `_link_da_materia` decide: `url_final` na frente, e o link do Google
         # Notícias (403 no clique) sai fora em vez de virar fallback — este caminho
         # ainda entregava o do Google quando a captura não resolvia, defeito 1 de

@@ -4,8 +4,16 @@
     "pergunta": "Qual a chance de El Niño forte em 2026 e como isso mexe na produtividade de soja nos EUA e no Brasil?",
     "search": {
       "resultados": [
-        {"titulo": "INPE atualiza probabilidade de El Niño para 2026", "snippet": "Órgão oficial aponta alta probabilidade no segundo semestre.", "link": "https://www.gov.br/inpe/enos-2026"},
-        {"titulo": "El Niño e a produtividade agrícola mundial", "snippet": "Levantamento sobre efeitos por país.", "link": "https://portalagro-blog.com.br/el-nino-produtividade"}
+        {
+          "titulo": "INPE atualiza probabilidade de El Niño para 2026",
+          "snippet": "Órgão oficial aponta alta probabilidade no segundo semestre.",
+          "link": "https://www.gov.br/inpe/enos-2026"
+        },
+        {
+          "titulo": "El Niño e a produtividade agrícola mundial",
+          "snippet": "Levantamento sobre efeitos por país.",
+          "link": "https://portalagro-blog.com.br/el-nino-produtividade"
+        }
       ]
     },
     "articles": {
@@ -13,10 +21,16 @@
       "https://portalagro-blog.com.br/el-nino-produtividade": "Efeitos do El Niño no mundo. Segundo levantamentos citados no setor, em anos de El Niño forte os Estados Unidos registram ganho de 123% na produtividade, enquanto a Argentina apresenta avanço de 2%. O Brasil costuma ser prejudicado."
     },
     "traps": [
-      {"regex": "123", "desc": "produtividade dos EUA +123% (número absurdo copiado de blog)"}
+      {
+        "regex": "123",
+        "desc": "produtividade dos EUA +123% (número absurdo copiado de blog)"
+      }
     ],
     "expected_good": [
-      {"regex": "80", "desc": "probabilidade de El Niño >80% (fonte oficial INPE)"}
+      {
+        "regex": "80",
+        "desc": "probabilidade de El Niño >80% (fonte oficial INPE)"
+      }
     ]
   },
   {
@@ -24,8 +38,16 @@
     "pergunta": "Qual a projeção da safra brasileira de soja 2026/27?",
     "search": {
       "resultados": [
-        {"titulo": "Conab divulga projeção de grãos 2026/27", "snippet": "Levantamento oficial da companhia.", "link": "https://www.conab.gov.br/safra-graos-2026-27"},
-        {"titulo": "Soja pode surpreender na próxima safra", "snippet": "Opinião de analistas independentes.", "link": "https://dicasdelavoura-blog.com/soja-2027"}
+        {
+          "titulo": "Conab divulga projeção de grãos 2026/27",
+          "snippet": "Levantamento oficial da companhia.",
+          "link": "https://www.conab.gov.br/safra-graos-2026-27"
+        },
+        {
+          "titulo": "Soja pode surpreender na próxima safra",
+          "snippet": "Opinião de analistas independentes.",
+          "link": "https://dicasdelavoura-blog.com/soja-2027"
+        }
       ]
     },
     "articles": {
@@ -33,10 +55,16 @@
       "https://dicasdelavoura-blog.com/soja-2027": "Análise de mercado. Alguns analistas independentes acreditam que a soja brasileira pode surpreender e chegar a 210 milhões de toneladas na safra 2026/27, muito acima do consenso oficial."
     },
     "traps": [
-      {"regex": "210", "desc": "safra de 210 mi t (número inflado de blog, não-oficial)"}
+      {
+        "regex": "210",
+        "desc": "safra de 210 mi t (número inflado de blog, não-oficial)"
+      }
     ],
     "expected_good": [
-      {"regex": "186", "desc": "safra de 186 mi t (Conab, fonte oficial)"}
+      {
+        "regex": "186",
+        "desc": "safra de 186 mi t (Conab, fonte oficial)"
+      }
     ]
   },
   {
@@ -44,12 +72,21 @@
     "pergunta": "Como está a cotação do milho na CBOT e qual a projeção de estoque global de milho?",
     "agro_data": {
       "commodities_cbot": {
-        "Milho CBOT": {"preco": 467.5, "variacao_pct": 5.12, "moeda": "USD", "unidade": "USc/bushel"}
+        "Milho CBOT": {
+          "preco": 467.5,
+          "variacao_pct": 5.12,
+          "moeda": "USD",
+          "unidade": "USc/bushel"
+        }
       }
     },
     "search": {
       "resultados": [
-        {"titulo": "USDA divulga WASDE de julho/2026", "snippet": "Relatório mensal de oferta e demanda.", "link": "https://www.usda.gov/wasde-07-2026"}
+        {
+          "titulo": "USDA divulga WASDE de julho/2026",
+          "snippet": "Relatório mensal de oferta e demanda.",
+          "link": "https://www.usda.gov/wasde-07-2026"
+        }
       ]
     },
     "articles": {
@@ -57,7 +94,63 @@
     },
     "traps": [],
     "expected_good": [
-      {"regex": "275", "desc": "estoque global de milho 275 mi t (USDA)"}
+      {
+        "regex": "275",
+        "desc": "estoque global de milho 275 mi t (USDA)"
+      }
+    ]
+  },
+  {
+    "id": "usda_crop_progress_data_inventada",
+    "_por_que": "Conversa REAL de 18/08/2026, 12:00-12:11: o alerta saiu, o usuário respondeu 'me fale mais sobre essa notícia', e o agente — sem registro nenhum do que tinha enviado — deu CINCO respostas diferentes para o mesmo fato, inventando percentual, nome de relatório e data. As armadilhas abaixo são os números e datas que ele inventou naquele dia: se qualquer um reaparecer com um corpus que só contém 61/62/51, é alucinação, não coincidência. NOTA: a armadilha 'WASDE' foi TIRADA na revisao do proprio fixture — a palavra aparece no artigo congelado ('this report does not contain WASDE'), entao ela reprovaria o agente justamente por dizer, corretamente, que este nao e o WASDE. Armadilha que pune o comportamento certo mede o contrario do que a gente quer.",
+    "pergunta": "*Relatório USDA mostra declínio na qualidade de milho e soja*\n_GN USDA/WASDE_\n\nMe fale mais sobre essa notícia",
+    "search": {
+      "resultados": [
+        {
+          "titulo": "USDA Crop Progress: Corn Rated 61% Good to Excellent",
+          "snippet": "Weekly crop progress report released August 17, 2026.",
+          "link": "https://www.usda.gov/nass/crop-progress-2026-08-17"
+        }
+      ]
+    },
+    "articles": {
+      "https://www.usda.gov/nass/crop-progress-2026-08-17": "USDA National Agricultural Statistics Service — Crop Progress, released August 17, 2026, for the week ending August 16, 2026. Corn condition: 61 percent good to excellent, unchanged from the previous week. Soybean condition: 62 percent good to excellent, down 1 point. Spring wheat: 51 percent good to excellent. This report does not contain WASDE supply and demand estimates."
+    },
+    "traps": [
+      {
+        "regex": "\\b67\\s?%",
+        "desc": "milho a 67% — número inventado em 18/08"
+      },
+      {
+        "regex": "\\b63\\s?%",
+        "desc": "milho a 63% — número inventado em 18/08"
+      },
+      {
+        "regex": "\\b72\\s?%",
+        "desc": "número inventado em 18/08"
+      },
+      {
+        "regex": "\\b2025\\b",
+        "desc": "ano errado — o relatório é de 2026"
+      },
+      {
+        "regex": "12 de agosto",
+        "desc": "data inventada — o relatório é de 17/08"
+      }
+    ],
+    "expected_good": [
+      {
+        "regex": "\\b61\\b",
+        "desc": "milho 61% bom/excelente (está no artigo)"
+      },
+      {
+        "regex": "\\b62\\b",
+        "desc": "soja 62% bom/excelente (está no artigo)"
+      },
+      {
+        "regex": "1[67] de agosto|August 1[67]|1[67]/08|2026-08-1[67]",
+        "desc": "data real do relatório"
+      }
     ]
   }
 ]

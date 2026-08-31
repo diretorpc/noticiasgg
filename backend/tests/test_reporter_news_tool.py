@@ -67,8 +67,14 @@ def test_get_sent_news_devolve_o_log():
     noticia = resultado["noticias"][0]
     assert noticia["titulo"] == "Milho dos EUA perde qualidade"
     assert noticia["fonte"] == "Reuters"
-    assert noticia["publicado_em"] == "2026-08-18T10:00:00+00:00"
-    assert noticia["sent_at"] == "2026-08-18T13:05:00+00:00"
+    # BRT e legivel, como `cobertura_desde`: o eval de 31/08 flagrou o agente
+    # escrevendo os dois horarios do MESMO evento em fusos diferentes na mesma
+    # mensagem — 11h05 (BRT, da cobertura) e 14h (UTC cru, daqui).
+    # com ANO: sem ele, numa ferramenta de janela de 90 dias feita para o agente
+    # parar de inventar ano, a data volta a ser ambigua (achado 9 da 4a revisao).
+    assert noticia["publicado_em"] == "18/08/2026 às 07h00"
+    assert noticia["sent_at"] == "18/08/2026 às 10h05"
+    assert "+00:00" not in str(noticia)
     assert noticia["resumo"] == "Condicao boa/excelente cai para 61%."
 
 
@@ -172,7 +178,7 @@ def test_lista_cheia_declara_o_corte_e_ate_onde_enxergou():
     assert resultado["truncado"] is True
     # BRT e legivel, nao ISO em UTC: o modelo nao recebe fuso nem data de hoje no
     # prompt de conversa, entao a conta e do codigo (achado 5 da 3a revisao).
-    assert resultado["cobertura_desde"] == "20/08 às 01h00"
+    assert resultado["cobertura_desde"] == "20/08/2026 às 01h00"
     assert "+00:00" not in resultado["cobertura_desde"]
     assert "cobertura_desde" in resultado["aviso"]
     assert f"cortada em {len(resultado['noticias'])} itens" in resultado["aviso"]
@@ -299,3 +305,21 @@ def test_prompts_cobrem_os_limites_do_registro():
     assert "truncado" in prompt and "cobertura_desde" in prompt
     assert "RELATÓRIO DIÁRIO" in prompt
     assert "<noticia_citada>" in prompt, "falta a excecao do caminho ancorado"
+
+
+def test_o_bloco_ancorado_usa_o_mesmo_formatador_de_data_da_ferramenta():
+    """Mutante que sobrevivia: `_format_anchored_news` voltar ao `publicado_em`
+    cru. Tres formatos para o mesmo campo no mesmo backend — e dois deles podem
+    chegar no MESMO turno, quando o usuario responde citando um alerta."""
+    bloco = reporter._format_anchored_news(_linha())
+    assert f"publicado_em: {reporter._momento_br(_linha()['publicado_em'])}\n" in bloco
+    assert "+00:00" not in bloco
+
+
+def test_meia_noite_exata_nao_vira_o_dia_para_tras():
+    """00:00 e a convencao de RSS para 'so sei o dia'. Converter de fuso joga
+    para 21h do dia ANTERIOR — e agora que a data sai com ano, o erro ganharia
+    cara de autoridade. `alert_checker._to_brt` ja tinha essa guarda."""
+    assert reporter._momento_br("2026-08-17T00:00:00+00:00") == "17/08/2026"
+    # hora de verdade continua convertendo
+    assert reporter._momento_br("2026-08-17T14:00:00+00:00") == "17/08/2026 às 11h00"

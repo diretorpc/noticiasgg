@@ -4,23 +4,94 @@ on:
   schedule:
     - cron: "0 9 * * 1"  # segundas, 09:00 UTC
 
+# Os tres evals medem coisas DIFERENTES e nenhum substitui o outro:
+#   hallucination_eval  — relatorio diario contra dados congelados
+#   grounding_eval      — UMA resposta de conversa, com armadilha plantada na fonte
+#   news_recall_eval    — a CONVERSA inteira sobre um alerta ja enviado (o incidente
+#                         de 18/08/2026 foi cinco respostas diferentes ao longo de
+#                         uma conversa, nao um erro numa resposta isolada)
+#
+# `continue-on-error` em cada passo de propriedade: o relatorio so tem valor se os
+# tres numeros aparecerem juntos. Um eval que estoura nao pode esconder os outros
+# dois — e nenhum deles bloqueia merge, sao medicao, nao portao.
+
 jobs:
   eval:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        # `bash`, nao o `bash -e` padrao do GitHub: o padrao roda SEM pipefail, e
+        # `python ... | tee arquivo` devolve o codigo do `tee`, que e sempre 0.
+        # Com isso os tres passos NUNCA falhavam, `continue-on-error` nunca
+        # disparava, e a tabela do resumo dizia "success" para eval que estourou
+        # com 401 na chave ou traceback de import — o relatorio semanal ficava
+        # verde exatamente na hora em que parou de medir (achado 1 do Apolo,
+        # 31/08/2026). `shell: bash` liga `-o pipefail`.
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -r backend/requirements.txt
-      - name: Run hallucination eval
+
+      - name: Relatorio diario (hallucination)
+        id: diario
+        continue-on-error: true
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: python -m backend.evals.hallucination_eval | tee eval-report.txt
+        run: python -m backend.evals.hallucination_eval | tee eval-diario.txt
+
+      - name: Conversa, resposta isolada (grounding)
+        id: grounding
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python -m backend.evals.grounding_eval | tee eval-grounding.txt
+
+      - name: Conversa sobre alerta enviado (news recall)
+        id: recall
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python -m backend.evals.news_recall_eval | tee eval-recall.txt
+
+      - name: Falhar se algum eval nao executou
+        if: always()
+        run: |
+          # Sem este passo o job fica VERDE com os tres evals mortos: cada um tem
+          # `continue-on-error` e nada consolidava. Cron semanal que nunca fica
+          # vermelho nao notifica ninguem — o 401 na chave so apareceria para quem
+          # abrisse a execucao verde e lesse a tabela (achado 4, 2a revisao).
+          # Metrica RUIM continua nao derrubando; eval que nao RODOU, sim.
+          falhou=0
+          for par in "diario:${{ steps.diario.outcome }}" \
+                     "grounding:${{ steps.grounding.outcome }}" \
+                     "recall:${{ steps.recall.outcome }}"; do
+            [ "${par#*:}" = "success" ] || { echo "eval nao executou: $par"; falhou=1; }
+          done
+          exit $falhou
+
       - name: Publish summary
         if: always()
         run: |
-          echo '## Hallucination eval' >> "$GITHUB_STEP_SUMMARY"
-          echo '```json' >> "$GITHUB_STEP_SUMMARY"
-          cat eval-report.txt >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo '## Evals de alucinacao'
+            echo ''
+            echo "ATENCAO: a coluna diz se o eval EXECUTOU, nao se o numero esta bom."
+            echo "Metrica ruim nao derruba o passo — leia os blocos abaixo."
+            echo ''
+            echo "| eval | executou |"
+            echo "|---|---|"
+            echo "| relatorio diario | ${{ steps.diario.outcome }} |"
+            echo "| conversa (grounding) | ${{ steps.grounding.outcome }} |"
+            echo "| conversa sobre alerta (recall) | ${{ steps.recall.outcome }} |"
+            for f in eval-diario.txt eval-grounding.txt eval-recall.txt; do
+              [ -f "$f" ] || continue
+              echo ''
+              echo "### $f"
+              echo '```'
+              cat "$f"
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
