@@ -128,6 +128,9 @@ def test_telefone_vazio_e_tratado_como_sem_escopo_nas_duas_camadas():
     assert c.get.call_count == 1, "espaco em branco nao pode virar filtro"
     assert saida["itens"] == [{"news_id": "a"}]
 
+    # `phone="   "`, nao `""`: string vazia ja e falsa em Python, entao o `if phone` do
+    # `escopo` cairia no ramo certo COM OU SEM a normalizacao — o teste passava por
+    # acidente e nao prendia nada (achado 6 da 3a revisao, medido por mutacao).
     with patch.object(supabase, "get_news_log", return_value={"itens": [], "truncado": False}):
-        resultado = reporter._get_sent_news(phone="")
+        resultado = reporter._get_sent_news(phone="   ")
     assert "não necessariamente a este usuário" in resultado["escopo"]

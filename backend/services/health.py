@@ -1,7 +1,11 @@
 import os
 from datetime import datetime, timedelta, timezone
 
+import logging
+
 from backend.services import supabase, whatsapp
+
+logger = logging.getLogger("noticiasgg")
 
 
 def _check_keys() -> dict:
@@ -65,7 +69,16 @@ def collect_status() -> dict:
             # essa tabela. Secando ela, o agente diz "não te mandei nada" para
             # quem recebeu: mesma falha silenciosa do A4, agora com autoridade
             # pessoal (achado 12 do Apolo, 20/08/2026).
-            entregas = supabase.count_recent_alert_messages(hours=24)
+            # Blindagem própria: esta consulta é NOVA e não se protege sozinha (ao
+            # contrário de `get_news_log`). Dentro do `try` compartilhado, um 500 aqui
+            # pulava para o `except`, que degrada tudo para "warn" — e o `error` do A4,
+            # já calculado em `silencioso`, sumia. Alarme novo não pode apagar alarme
+            # velho (achado 2, 3ª revisão do Apolo, 31/08/2026).
+            try:
+                entregas = supabase.count_recent_alert_messages(hours=24)
+            except Exception as e:
+                logger.warning("count_recent_alert_messages failed: %s", e)
+                entregas = None
             sem_destinatario = broadcasts_24h > 0 and entregas == 0
             checks["news_log"] = {
                 "status": "error" if (silencioso or sem_destinatario) else "ok",
@@ -146,8 +159,17 @@ def _line_news_log(v: dict) -> str:
         # "escrita silenciosa" abaixo, e usar o ícone/texto errado manda o dono
         # caçar bug que não existe (achado A3, revisão 18/08/2026).
         return f"• {_ICON['warn']} Registro de notícias: {v.get('message', 'indisponível')}"
+    # DOIS motivos levam a `error`, e a mensagem tem que dizer QUAL: o A4 (a notícia
+    # saiu e `news_log` não registrou) e o A12 (registrou, mas nenhuma ENTREGA por
+    # destinatário). Um texto só, cravando "0 registrados", manda o dono caçar
+    # escrita silenciosa que não existe — exatamente o que o comentário do ramo
+    # `warn` acima proíbe (achado 1, 3ª revisão do Apolo, 31/08/2026).
+    if not v.get("registrado"):
+        return (f"• {_ICON['error']} Registro de notícias: {v.get('broadcasts_24h', 0)} "
+                f"alertas enviados/24h, 0 registrados — escrita silenciosa")
     return (f"• {_ICON['error']} Registro de notícias: {v.get('broadcasts_24h', 0)} "
-            f"alertas enviados/24h, 0 registrados — escrita silenciosa")
+            f"alertas registrados/24h, {v.get('entregas_registradas', 0)} entregas por "
+            f"destinatário — log_alert_messages ou o key.id da Evolution")
 
 
 def _line_evolution(v: dict) -> str:

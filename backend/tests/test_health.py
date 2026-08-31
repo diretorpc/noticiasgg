@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -338,3 +338,71 @@ def test_digest_diario_confere_as_fontes():
     assert st["checks"]["news_sources"]["status"] == "warn"
     assert st["checks"]["news_sources"]["mortas"] == ["A", "B"]
     assert "18/20" in health.format_digest(st)
+
+
+def test_entrega_por_destinatario_secando_vira_error_com_a_mensagem_certa():
+    """Achado 12 da 2a revisao: `news_log_messages` virou fonte da verdade do
+    `get_sent_news` e nada a vigiava. Achados 1 e 3 da 3a revisao: o conserto nao
+    tinha teste, e o boletim usava o texto do OUTRO alarme — cravava "0 registrados"
+    quando os alertas ESTAVAM registrados, mandando o dono cacar bug que nao existe."""
+    with patch("backend.services.health._check_keys", return_value=_KEYS_OK), \
+         patch.multiple(
+            "backend.services.health.supabase",
+            get_recent_sent_titles=lambda *a, **k: ["a"],
+            count_recent_broadcasts=lambda *a, **k: 7,
+            count_recent_alert_messages=lambda *a, **k: 0,
+            get_news_log=lambda *a, **k: {"itens": [{"news_id": "x"}]},
+            get_polls=lambda *a, **k: [{"instituto": "X"}],
+         ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
+        st = health.collect_status()
+    nl = st["checks"]["news_log"]
+    assert nl["status"] == "error"
+    assert nl["registrado"] is True
+    assert nl["entregas_registradas"] == 0
+
+    linha = health._line_news_log(nl)
+    assert "escrita silenciosa" not in linha, "texto do alarme errado"
+    assert "entregas por destinatário" in linha
+
+
+def test_falha_na_contagem_de_entregas_nao_apaga_o_alarme_de_escrita_silenciosa():
+    """Achado 2 da 3a revisao: a consulta nova ficava dentro do `try` compartilhado,
+    entao um 500 nela pulava para o `except` e transformava o `error` do A4 (ja
+    calculado) num `warn`. Alarme novo nao pode apagar alarme velho."""
+    def _explode(*a, **k):
+        raise RuntimeError("500 Supabase")
+
+    with patch("backend.services.health._check_keys", return_value=_KEYS_OK), \
+         patch.multiple(
+            "backend.services.health.supabase",
+            get_recent_sent_titles=lambda *a, **k: ["a"],
+            count_recent_broadcasts=lambda *a, **k: 7,
+            count_recent_alert_messages=_explode,
+            get_news_log=lambda *a, **k: {"itens": []},   # A4 de verdade
+            get_polls=lambda *a, **k: [{"instituto": "X"}],
+         ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
+        st = health.collect_status()
+    nl = st["checks"]["news_log"]
+    assert nl["status"] == "error", "o A4 foi rebaixado para warn pela consulta nova"
+    assert nl["registrado"] is False
+    assert "escrita silenciosa" in health._line_news_log(nl)
+
+
+def test_contagem_de_entregas_le_o_content_range():
+    """Mesma cobertura que a gemea `count_recent_broadcasts` ja tinha."""
+    from backend.services import supabase as sb
+
+    def _cliente(headers):
+        r = MagicMock(status_code=200)
+        r.raise_for_status = MagicMock()
+        r.headers = headers
+        c = MagicMock()
+        c.__enter__ = MagicMock(return_value=c)
+        c.__exit__ = MagicMock(return_value=False)
+        c.get = MagicMock(return_value=r)
+        return c
+
+    with patch.object(sb, "_client", return_value=_cliente({"content-range": "0-0/41"})):
+        assert sb.count_recent_alert_messages(hours=24) == 41
+    with patch.object(sb, "_client", return_value=_cliente({})):
+        assert sb.count_recent_alert_messages(hours=24) == 0
