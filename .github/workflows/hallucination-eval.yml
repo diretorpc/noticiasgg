@@ -2,7 +2,12 @@ name: Hallucination Eval
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 9 * * 1"  # segundas, 09:00 UTC
+    # MENSAL, nao semanal: a passada completa custa US$ 0,62 medidos (42 chamadas
+    # Sonnet + 11 Haiku, 190 s). Semanal dava ~US$ 2,70/mes por uma medicao que
+    # nao muda de uma semana para outra — o que muda e o modelo e o prompt, e
+    # esses mexem em release, nao no calendario. Rodar a mao apos mexer no
+    # prompt: aba Actions -> Run workflow.
+    - cron: "0 9 1 * *"  # dia 1o de cada mes, 09:00 UTC
 
 # Os tres evals medem coisas DIFERENTES e nenhum substitui o outro:
 #   hallucination_eval  — relatorio diario contra dados congelados

@@ -9,7 +9,7 @@ from typing import NamedTuple
 from anthropic import Anthropic
 
 from backend.collectors import eia, market
-from backend.services import supabase, web_search, whatsapp
+from backend.services import anthropic_status, supabase, web_search, whatsapp
 from backend.services.alert_rules import RULES, COPOM_DATES_2026, AlertRule
 from backend.services.secrets_mask import sanitize_error
 
@@ -636,6 +636,17 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
             logger.warning("news classify json error for '%s': %s | raw=%s", title[:60], e, raw[:200])
             continue
         except Exception as e:
+            motivo = anthropic_status.erro_permanente(e)
+            if motivo:
+                # Saldo zerado ou chave inválida cai aqui uma vez por notícia, a
+                # cada 15 minutos, para sempre — e antes disto o `continue` engolia
+                # tudo em silêncio: o agente ficava mudo e ninguém era avisado
+                # (incidente de 31/08/2026). Não adianta tentar as próximas: para
+                # o laço e manda o motivo para o WhatsApp do dono.
+                logger.error("news classify fatal: %s", motivo)
+                if errors is not None:
+                    errors.append(f"anthropic: {motivo}")
+                break
             logger.warning("news classify failed for '%s': %s", title[:60], e)
             continue
 
