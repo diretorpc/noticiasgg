@@ -3,11 +3,15 @@ from datetime import datetime, timedelta, timezone
 
 import logging
 
-from backend.services import supabase, whatsapp
+from backend.services import anthropic_status, supabase, whatsapp
 
 logger = logging.getLogger("noticiasgg")
 
 
+# `keys` só sabe se a variável EXISTE. Em 31/08/2026 o saldo da conta Anthropic
+# zerou e este check continuou dizendo "ok" — painel verde, agente mudo. Quem
+# responde "a API atende?" é `anthropic_status.sondar`, e ela mora no
+# `collect_status_completo` (com senha), não aqui.
 def _check_keys() -> dict:
     missing = [
         k for k, v in {
@@ -112,12 +116,32 @@ def collect_status() -> dict:
     return {"status": overall, "checks": checks, "checked_at": datetime.now(timezone.utc).isoformat()}
 
 
+def _reavaliar(status: dict) -> dict:
+    """Recalcula o veredito depois que um check foi acrescentado ao pacote.
+
+    `collect_status` fecha o `status` geral com o que tinha na hora. Sem isto, um
+    check acrescentado depois (a sonda da Anthropic, as fontes de notícia) aparece
+    como `error` na lista e o cabeçalho continua dizendo `ok` — que é o mesmo tipo
+    de mentira que a sonda veio consertar."""
+    vals = status["checks"].values()
+    if any(v.get("status") == "error" for v in vals):
+        status["status"] = "error"
+    elif any(v.get("status") == "warn" for v in vals):
+        status["status"] = "warn"
+    return status
+
+
 def collect_status_completo() -> dict:
     """collect_status + a medição das fontes de notícia, que custa ~9s de rede.
     Separado de propósito: `GET /api/health` é público e sem senha (main.py:59), então
     deixar a coleta lá dentro deixaria qualquer um disparar 20 buscas no seu servidor.
     Só o boletim diário chama isto — uma vez por dia, não a cada visita."""
     status = collect_status()
+    # A sonda vive AQUI e não no `collect_status`, pela mesma razão que a medição
+    # das fontes: `GET /api/health` é público e sem senha, e uma chamada PAGA num
+    # endpoint aberto é convite para esvaziarem o saldo por você. Uma vez por dia,
+    # no boletim, custa da ordem de US$ 0,000005.
+    status["checks"]["anthropic"] = anthropic_status.sondar()
     try:
         from backend.collectors import news
         h = news.source_health()
@@ -129,9 +153,11 @@ def collect_status_completo() -> dict:
     except Exception as e:
         check = {"status": "warn", "message": str(e)[:120]}
     status["checks"]["news_sources"] = check
-    if check["status"] == "warn" and status["status"] == "ok":
-        status["status"] = "warn"
-    return status
+    # `_reavaliar` no lugar do `if` antigo: ele só sabia promover "ok" -> "warn"
+    # para as FONTES. Com a sonda da Anthropic entrando aqui, saldo esgotado é
+    # `error` e o cabeçalho continuaria dizendo "ok" — a mesma mentira que a
+    # sonda veio consertar, uma linha abaixo dela.
+    return _reavaliar(status)
 
 
 _ICON = {"ok": "✅", "warn": "⚠️", "error": "❌"}
@@ -184,6 +210,15 @@ def _line_keys(v: dict) -> str:
     return f"• {_ICON['error']} Chaves faltando: {', '.join(v.get('faltando', []))}"
 
 
+def _line_anthropic(v: dict) -> str:
+    """A linha que faltava no boletim de 31/08/2026. `Chaves: OK` continua verdade
+    (a variável está lá) e é justamente por isso que ela não avisa nada."""
+    if v.get("status") == "ok":
+        return "• Anthropic: respondendo"
+    icone = _ICON["error"] if v.get("status") == "error" else _ICON["warn"]
+    return f"• {icone} Anthropic: {v.get('message', 'indisponível')}"
+
+
 def _line_polls(v: dict) -> str:
     if v.get("status") != "error":
         return f"• Pesquisas: {v.get('institutos', 0)} institutos"
@@ -211,6 +246,8 @@ def format_digest(status: dict) -> str:
              _line_news_log(checks.get("news_log", {})),
              _line_evolution(checks.get("evolution", {})),
              _line_keys(checks.get("keys", {}))]
+    if "anthropic" in checks:  # ausente no `collect_status` simples (endpoint público)
+        lines.append(_line_anthropic(checks["anthropic"]))
     if "news_sources" in checks:  # ausente quando veio do collect_status simples
         lines.append(_line_news_sources(checks["news_sources"]))
     lines.append(_line_polls(checks.get("polls", {})))
