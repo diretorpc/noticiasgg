@@ -515,6 +515,31 @@ def _extract_ticker_data(text: str) -> dict:
     return result
 
 
+def _build_system(user_name: str | None, data: dict) -> str:
+    """Prompt do turno. `data` cheio = relatório diário; vazio = conversa.
+
+    A data de hoje entra explícita e etiquetada. Sem ela o modelo ancora no corte
+    de treino e mistura anos — em 18/08/2026 deu 2025 e 2026 para o mesmo
+    relatório, na mesma conversa. Mesma técnica do `<hoje>` que o classificador
+    de notícias já usa."""
+    system = _SYSTEM_MARKET if data else _SYSTEM_CHAT
+    hoje = datetime.datetime.now(_BRT).date().isoformat()
+    system += (
+        f"\n\n<hoje>{hoje}</hoje>\n"
+        f"Esta é a data de hoje. Use-a para julgar se uma fonte é recente ou velha, "
+        f"e NUNCA cite um ano diferente do que está na fonte que você leu agora."
+    )
+    if user_name:
+        primeiro_nome = user_name.split()[0]
+        system += (
+            f"\n\nVocê está conversando com {user_name}. Trate por *{primeiro_nome}* "
+            f"(primeiro nome). Use o nome de forma natural — em saudações, ao começar "
+            f"respostas longas, ou quando quiser dar um tom pessoal — mas sem exagerar "
+            f"(não em toda frase)."
+        )
+    return system
+
+
 def _collect_all(sections: dict | None = None) -> dict:
     active = sections if sections is not None else DEFAULT_SECTIONS
     return {
@@ -601,15 +626,7 @@ def generate_report(
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], timeout=_ANTHROPIC_TIMEOUT, max_retries=1)
     data = _collect_all(sections=sections)
 
-    system = _SYSTEM_MARKET if data else _SYSTEM_CHAT
-    if user_name:
-        primeiro_nome = user_name.split()[0]
-        system += (
-            f"\n\nVocê está conversando com {user_name}. Trate por *{primeiro_nome}* "
-            f"(primeiro nome). Use o nome de forma natural — em saudações, ao começar "
-            f"respostas longas, ou quando quiser dar um tom pessoal — mas sem exagerar "
-            f"(não em toda frase)."
-        )
+    system = _build_system(user_name, data)
 
     ticker_data = _extract_ticker_data(user_message)
 
@@ -649,6 +666,10 @@ def generate_report(
     messages = list(history or [])
     messages.append({"role": "user", "content": user_content})
 
+    # Tudo que as ferramentas devolveram neste turno. É o que o validador usa para
+    # conferir a resposta em conversa: sem isto ele confere contra os dados dos
+    # coletores, que em conversa estão vazios — e passa tudo.
+    tool_corpus: list[str] = []
     rounds = 0
     while True:
         # Ao atingir o teto de rounds, omite as ferramentas para forçar uma
@@ -730,12 +751,14 @@ def generate_report(
                             "tool_use_id": block.id,
                             "content": json.dumps({"erro": f"ferramenta desconhecida: {block.name}"}),
                         })
+            # colhido de uma vez, e não em cada um dos seis ramos acima
+            tool_corpus.extend(tr["content"] for tr in tool_results)
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": tool_results})
         else:
             for block in response.content:
                 if hasattr(block, "text"):
-                    return _validate_and_fix(block.text, data, client)
+                    return _validate_and_fix(block.text, data, client, tool_corpus)
             return ""
 
 
