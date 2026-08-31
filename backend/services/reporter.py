@@ -14,6 +14,7 @@ from backend.services.integrity import (
     build_fact_corpus as _build_fact_corpus,
     ANALYSIS_MARKERS as _ANALYSIS_MARKERS,
     SYSTEM_VALIDATOR as _SYSTEM_VALIDATOR,
+    SYSTEM_VALIDATOR_CHAT as _SYSTEM_VALIDATOR_CHAT,
 )
 from backend.services import supabase
 from backend.services.secrets_mask import sanitize_error
@@ -24,6 +25,11 @@ logger = logging.getLogger("noticiasgg")
 # maxDuration (300s) da função. Cap de rounds protege contra loop de tool_use
 # infinito/caro que estouraria o orçamento de tempo da request.
 _ANTHROPIC_TIMEOUT = 90.0
+# O validador roda DEPOIS da resposta boa estar pronta. Herdando o timeout do chat
+# (90 s x 2 tentativas = 180 s de cauda), um turno pesado que já gastou boa parte dos
+# 300 s da Vercel morre com a resposta na mão e o usuário não recebe nada. Pior caso
+# medido do validador: 3,06 s — 15 s é 5x de folga (achado 7 do Apolo).
+_VALIDATOR_TIMEOUT = 15.0
 _MAX_TOOL_ROUNDS = 6
 _MAX_TOKENS = 2000
 
@@ -515,6 +521,31 @@ def _extract_ticker_data(text: str) -> dict:
     return result
 
 
+def _build_system(user_name: str | None, data: dict) -> str:
+    """Prompt do turno. `data` cheio = relatório diário; vazio = conversa.
+
+    A data de hoje entra explícita e etiquetada. Sem ela o modelo ancora no corte
+    de treino e mistura anos — em 18/08/2026 deu 2025 e 2026 para o mesmo
+    relatório, na mesma conversa. Mesma técnica do `<hoje>` que o classificador
+    de notícias já usa."""
+    system = _SYSTEM_MARKET if data else _SYSTEM_CHAT
+    hoje = datetime.datetime.now(_BRT).date().isoformat()
+    system += (
+        f"\n\n<hoje>{hoje}</hoje>\n"
+        f"Esta é a data de hoje. Use-a para julgar se uma fonte é recente ou velha, "
+        f"e NUNCA cite um ano diferente do que está na fonte que você leu agora."
+    )
+    if user_name:
+        primeiro_nome = user_name.split()[0]
+        system += (
+            f"\n\nVocê está conversando com {user_name}. Trate por *{primeiro_nome}* "
+            f"(primeiro nome). Use o nome de forma natural — em saudações, ao começar "
+            f"respostas longas, ou quando quiser dar um tom pessoal — mas sem exagerar "
+            f"(não em toda frase)."
+        )
+    return system
+
+
 def _collect_all(sections: dict | None = None) -> dict:
     active = sections if sections is not None else DEFAULT_SECTIONS
     return {
@@ -601,15 +632,7 @@ def generate_report(
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], timeout=_ANTHROPIC_TIMEOUT, max_retries=1)
     data = _collect_all(sections=sections)
 
-    system = _SYSTEM_MARKET if data else _SYSTEM_CHAT
-    if user_name:
-        primeiro_nome = user_name.split()[0]
-        system += (
-            f"\n\nVocê está conversando com {user_name}. Trate por *{primeiro_nome}* "
-            f"(primeiro nome). Use o nome de forma natural — em saudações, ao começar "
-            f"respostas longas, ou quando quiser dar um tom pessoal — mas sem exagerar "
-            f"(não em toda frase)."
-        )
+    system = _build_system(user_name, data)
 
     ticker_data = _extract_ticker_data(user_message)
 
@@ -649,6 +672,21 @@ def generate_report(
     messages = list(history or [])
     messages.append({"role": "user", "content": user_content})
 
+    # Tudo que as ferramentas devolveram neste turno. É o que o validador usa para
+    # conferir a resposta em conversa: sem isto ele confere contra os dados dos
+    # coletores, que em conversa estão vazios — e passa tudo.
+    tool_corpus: list[str] = []
+    # Semeado com as fontes que NUNCA passam pelo laço de tools e que o modelo é
+    # instruído a usar: cotação puxada por ticker no texto, identificação de planta
+    # por foto, e a notícia citada. Sem elas o validador apagava número verdadeiro
+    # por não achá-lo num corpus onde ele nunca teve como entrar — medido pelo Apolo
+    # com chamada real (confiança de 87% da identificação de praga apagada em 2 de 3
+    # amostras; preço de PETR4 apagado em 1 de 4) — achado 3, 31/08/2026.
+    for semente in (ticker_data, plant_data):
+        if semente:
+            tool_corpus.append(json.dumps(semente, ensure_ascii=False, default=str))
+    if anchored_news:
+        tool_corpus.append(_format_anchored_news(anchored_news))
     rounds = 0
     while True:
         # Ao atingir o teto de rounds, omite as ferramentas para forçar uma
@@ -730,12 +768,18 @@ def generate_report(
                             "tool_use_id": block.id,
                             "content": json.dumps({"erro": f"ferramenta desconhecida: {block.name}"}),
                         })
+            # colhido de uma vez, e não em cada um dos seis ramos acima
+            tool_corpus.extend(tr["content"] for tr in tool_results)
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": tool_results})
         else:
             for block in response.content:
                 if hasattr(block, "text"):
-                    return _validate_and_fix(block.text, data, client)
+                    validador = Anthropic(
+                        api_key=os.environ["ANTHROPIC_API_KEY"],
+                        timeout=_VALIDATOR_TIMEOUT, max_retries=0,
+                    )
+                    return _validate_and_fix(block.text, data, validador, tool_corpus)
             return ""
 
 
@@ -753,7 +797,10 @@ def describe_config() -> dict:
             for t in (_STOCK_TOOL, _AGRO_DATA_TOOL, _AGRO_SEARCH_TOOL,
                       _WEB_SEARCH_TOOL, _READ_ARTICLE_TOOL, _SENT_NEWS_TOOL)
         ],
-        "system_market": _SYSTEM_MARKET,
-        "system_chat": _SYSTEM_CHAT,
+        # via `_build_system`, senão o painel mostra o prompt SEM o `<hoje>` — ou
+        # seja, um prompt que o agente não usa (achado 11 do Apolo).
+        "system_market": _build_system(None, {"market": {}}),
+        "system_chat": _build_system(None, {}),
         "system_validator": _SYSTEM_VALIDATOR,
+        "system_validator_chat": _SYSTEM_VALIDATOR_CHAT,
     }
