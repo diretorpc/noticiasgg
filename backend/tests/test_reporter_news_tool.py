@@ -170,8 +170,12 @@ def test_lista_cheia_declara_o_corte_e_ate_onde_enxergou():
     ):
         resultado = reporter._get_sent_news(horas=720)
     assert resultado["truncado"] is True
-    assert resultado["cobertura_desde"] == itens[-1]["sent_at"]
+    # BRT e legivel, nao ISO em UTC: o modelo nao recebe fuso nem data de hoje no
+    # prompt de conversa, entao a conta e do codigo (achado 5 da 3a revisao).
+    assert resultado["cobertura_desde"] == "20/08 às 01h00"
+    assert "+00:00" not in resultado["cobertura_desde"]
     assert "cobertura_desde" in resultado["aviso"]
+    assert f"cortada em {len(resultado['noticias'])} itens" in resultado["aviso"]
 
 
 def test_lista_incompleta_nao_se_declara_truncada():
@@ -179,7 +183,10 @@ def test_lista_incompleta_nao_se_declara_truncada():
     with patch.object(reporter.supabase, "get_news_log", return_value={"itens": itens}):
         resultado = reporter._get_sent_news()
     assert "truncado" not in resultado
-    assert "cobertura_desde" not in resultado
+    # cobertura_desde SAI mesmo sem corte: a regra 7a manda dizer ate onde enxerga, e
+    # um campo que so existe no caso truncado torna a regra impossivel de cumprir na
+    # conversa normal (achado 4 da 3a revisao).
+    assert resultado["cobertura_desde"]
 
 
 def test_janela_absurda_nao_e_ecoada_de_volta_para_o_modelo():
@@ -252,12 +259,19 @@ def test_relatorio_diario_nao_recebe_a_ferramenta():
 
 # ── as regras de prompt ───────────────────────────────────────────────────────
 
-def test_prompts_mandam_consultar_o_log_antes_de_buscar():
+def test_regras_da_ferramenta_so_no_prompt_que_tem_a_ferramenta():
+    """Achado 10 da 3a revisao: `get_sent_news` so entra em `tools` no caminho de
+    conversa (`not data`). As regras dela no prompt do relatorio diario eram uma tela
+    de instrucoes sobre ferramenta ausente — ensina o modelo a citar o que nao pode
+    chamar."""
     cfg = reporter.describe_config()
-    for chave in ("system_chat", "system_market"):
-        prompt = cfg[chave]
-        assert "get_sent_news" in prompt, f"{chave} nao cita a ferramenta"
-        assert "essa notícia" in prompt.lower(), f"{chave} nao cobre o gatilho"
+    chat = cfg["system_chat"]
+    assert "get_sent_news" in chat, "system_chat nao cita a ferramenta"
+    assert "essa notícia" in chat.lower(), "system_chat nao cobre o gatilho"
+    assert "get_sent_news" not in cfg["system_market"], "regra vazou para o relatorio"
+    # as regras de NUMERO, essas sim, valem para os dois
+    assert "NÚMERO: DA FONTE, OU NADA" in cfg["system_market"]
+    assert "NÚMERO: DA FONTE, OU NADA" in chat
 
 
 def test_prompt_manda_dizer_a_cobertura_e_nao_a_janela_pedida():
@@ -266,17 +280,14 @@ def test_prompt_manda_dizer_a_cobertura_e_nao_a_janela_pedida():
     mentira (ele ressalvou o corte na frase seguinte), mas e numero grande e
     falso primeiro, ressalva vaga depois. `cobertura_desde` existe justamente
     para ele dar a data real."""
-    cfg = reporter.describe_config()
-    for chave in ("system_chat", "system_market"):
-        prompt = cfg[chave]
-        assert "janela_horas` é o que você PEDIU" in prompt, f"{chave}: falta a distincao"
-        assert "90 dias" in prompt, f"{chave}: falta o exemplo concreto do erro"
-    # e a descricao da ferramenta nao pode mais entregar o teto como se fosse cobertura
-    desc = next(t for t in cfg["tools"] if t["name"] == "get_sent_news")["description"]
+    prompt = reporter.describe_config()["system_chat"]
+    assert "janela_horas` é o que você PEDIU" in prompt, "falta a distincao"
+    assert "90 dias" in prompt, "falta o exemplo concreto do erro"
+    # e a descricao do parametro nao pode mais entregar o teto como se fosse cobertura
     ferramenta = reporter._SENT_NEWS_TOOL["input_schema"]["properties"]["horas"]["description"]
     assert "90 dias" not in ferramenta, "o teto voltou a ser anunciado como janela"
     assert "cobertura_desde" in ferramenta
-    assert desc
+    assert str(reporter._LIMITE_NOTICIAS) in ferramenta, "teto cravado em texto"
 
 
 def test_prompts_cobrem_os_limites_do_registro():
