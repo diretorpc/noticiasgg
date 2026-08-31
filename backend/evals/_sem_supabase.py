@@ -25,6 +25,19 @@ from unittest.mock import patch
 
 from backend.services import supabase
 
+
+class TravaDoEval(BaseException):
+    """Herda de BaseException, NÃO de Exception, de propósito.
+
+    Cinco das quarenta funções de `supabase.py` embrulham tudo num
+    `except Exception` — e são justamente a família `news_log`
+    (`log_sent_news`, `get_news_log`, `get_news_by_message_id`, ...), que é
+    onde a próxima ferramenta de notícia vai nascer. Com `RuntimeError`, a
+    trava era engolida ali e virava `{"itens": [], "aviso": ...}` com um
+    `logger.warning` que ninguém lê no CI: a promessa de "falhar, não
+    silenciar" valia para 35 das 40 portas, e furava justamente na vizinhança
+    certa (achado 7 do Apolo, 31/08/2026)."""
+
 # Notícia congelada que a ferramenta `get_sent_news` devolve dentro do eval.
 # Os números batem com o artigo dos fixtures: quem inventar 67% ou 2025 está
 # inventando, não copiando.
@@ -57,7 +70,7 @@ def supabase_congelado(news_log: list[dict] | None = None):
     registro = {"itens": list(linhas), "truncado": False}
 
     def _proibido(*a, **k):
-        raise RuntimeError(
+        raise TravaDoEval(
             "eval tentou abrir conexão com o Supabase de produção. "
             "Se uma ferramenta nova passou a ler o banco, congele a resposta "
             "dela em backend/evals/_sem_supabase.py — não solte o eval no dado real."

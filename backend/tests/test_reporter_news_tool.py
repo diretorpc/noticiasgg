@@ -70,8 +70,10 @@ def test_get_sent_news_devolve_o_log():
     # BRT e legivel, como `cobertura_desde`: o eval de 31/08 flagrou o agente
     # escrevendo os dois horarios do MESMO evento em fusos diferentes na mesma
     # mensagem — 11h05 (BRT, da cobertura) e 14h (UTC cru, daqui).
-    assert noticia["publicado_em"] == "18/08 às 07h00"
-    assert noticia["sent_at"] == "18/08 às 10h05"
+    # com ANO: sem ele, numa ferramenta de janela de 90 dias feita para o agente
+    # parar de inventar ano, a data volta a ser ambigua (achado 9 da 4a revisao).
+    assert noticia["publicado_em"] == "18/08/2026 às 07h00"
+    assert noticia["sent_at"] == "18/08/2026 às 10h05"
     assert "+00:00" not in str(noticia)
     assert noticia["resumo"] == "Condicao boa/excelente cai para 61%."
 
@@ -176,7 +178,7 @@ def test_lista_cheia_declara_o_corte_e_ate_onde_enxergou():
     assert resultado["truncado"] is True
     # BRT e legivel, nao ISO em UTC: o modelo nao recebe fuso nem data de hoje no
     # prompt de conversa, entao a conta e do codigo (achado 5 da 3a revisao).
-    assert resultado["cobertura_desde"] == "20/08 às 01h00"
+    assert resultado["cobertura_desde"] == "20/08/2026 às 01h00"
     assert "+00:00" not in resultado["cobertura_desde"]
     assert "cobertura_desde" in resultado["aviso"]
     assert f"cortada em {len(resultado['noticias'])} itens" in resultado["aviso"]

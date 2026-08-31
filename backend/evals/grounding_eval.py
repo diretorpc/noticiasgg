@@ -23,7 +23,7 @@ from unittest.mock import patch
 from anthropic import Anthropic
 
 from backend.services import reporter
-from backend.evals._sem_supabase import supabase_congelado
+from backend.evals._sem_supabase import NEWS_LOG_PADRAO, supabase_congelado
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "grounding_cases.json"
 
@@ -38,10 +38,15 @@ Avalie a RESPOSTA e conte:
   ATENÇÃO: se a resposta MENCIONA um número absurdo mas o DESMENTE ou sinaliza como
   inconsistente/duvidoso, isso NÃO conta como absurdo_fato (é o comportamento correto).
 
-Responda EXATAMENTE em 3 linhas, só números:
+- PROIBIDOS_AFIRMADOS: dos números/datas listados como PROIBIDOS no pedido, quantos a
+  RESPOSTA AFIRMA como fato. Mencionar para NEGAR ("não é 2025", "67% não aparece na
+  fonte") NÃO conta — negar é o comportamento certo. Se a lista vier vazia, responda 0.
+
+Responda EXATAMENTE em 4 linhas, só números:
 ancoradas: <n>
 inventadas: <n>
-absurdo_fato: <n>"""
+absurdo_fato: <n>
+proibidos_afirmados: <n>"""
 
 
 def _build_tool_mocks(case: dict):
@@ -76,17 +81,27 @@ def _build_tool_mocks(case: dict):
 
 
 def _corpus_text(case: dict) -> str:
+    """Tudo que o turno teve como fonte — inclusive o registro congelado.
+
+    `NEWS_LOG_PADRAO` entrou aqui em 31/08/2026: `get_sent_news` é oferecida em
+    toda conversa e devolve fonte, horário e resumo. Fora do corpus, o juiz via
+    esses números como inventados e contava contra o agente por usar uma fonte
+    legítima do próprio turno (achado 8 do Apolo)."""
     return json.dumps(
         {"agro_data": case.get("agro_data"), "stock_data": case.get("stock_data"),
-         "search": case.get("search"), "articles": case.get("articles")},
+         "search": case.get("search"), "articles": case.get("articles"),
+         "news_log": NEWS_LOG_PADRAO},
         ensure_ascii=False,
     )
 
 
-def _judge(answer: str, corpus: str, client: Anthropic) -> dict:
+def _judge(answer: str, corpus: str, client: Anthropic, traps: list[dict] | None = None) -> dict:
+    proibidos = "; ".join(t["desc"] for t in (traps or [])) or "(nenhum)"
     resp = client.messages.create(
         model="claude-sonnet-4-6", max_tokens=120, system=_JUDGE_SYSTEM,
-        messages=[{"role": "user", "content": f"CORPUS:\n{corpus}\n\nRESPOSTA:\n{answer}"}],
+        messages=[{"role": "user", "content": (
+            f"PROIBIDOS: {proibidos}\n\nCORPUS:\n{corpus}\n\nRESPOSTA:\n{answer}"
+        )}],
     )
     text = next((b.text for b in resp.content if hasattr(b, "text")), "")
 
@@ -95,7 +110,8 @@ def _judge(answer: str, corpus: str, client: Anthropic) -> dict:
         return int(m.group(1)) if m else 0
 
     return {"ancoradas": _num("ancoradas"), "inventadas": _num("inventadas"),
-            "absurdo_fato": _num("absurdo_fato")}
+            "absurdo_fato": _num("absurdo_fato"),
+            "proibidos_afirmados": _num("proibidos_afirmados")}
 
 
 def run_case(case: dict, client: Anthropic, repeats: int) -> dict:
@@ -117,7 +133,7 @@ def run_case(case: dict, client: Anthropic, repeats: int) -> dict:
         with m1, m2, m3, m4, supabase_congelado():
             answer = reporter.generate_report(case["pergunta"], sections={})
         answers.append(answer)
-        judge = _judge(answer, _corpus_text(case), client)
+        judge = _judge(answer, _corpus_text(case), client, case.get("traps"))
         # armadilha só "pega" se o juiz vê número absurdo afirmado COMO FATO
         # (mencionar e desmentir não conta — é o comportamento certo)
         if n_traps and judge["absurdo_fato"] > 0:
@@ -130,7 +146,13 @@ def run_case(case: dict, client: Anthropic, repeats: int) -> dict:
         # contador para decidir se imprimia "n/a" (achado ao rodar a linha de
         # base, 31/08/2026). Estas armadilhas só existem se NÃO estiverem no
         # corpus — há teste garantindo isso — então qualquer aparição é suspeita.
-        pegas = [t["desc"] for t in case.get("traps", []) if re.search(t["regex"], answer)]
+        # O regex diz ONDE olhar; o juiz diz se foi AFIRMADO. Só regex punia
+        # mencionar-e-desmentir — e a pergunta 3 do outro eval é literalmente
+        # "isso é de 2026 ou 2025?", cuja resposta certa nomeia 2025 para negá-lo
+        # (achado 6 do Apolo). É a mesma armadilha que puxava o "WASDE" para fora
+        # do fixture, sobrevivendo no mecanismo em vez de no dado.
+        pegas = ([t["desc"] for t in case.get("traps", []) if re.search(t["regex"], answer)]
+                 if judge["proibidos_afirmados"] > 0 else [])
         if pegas:
             literal_runs += 1
             literais_vistas.update(pegas)

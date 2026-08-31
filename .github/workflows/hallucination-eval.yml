@@ -18,6 +18,16 @@ on:
 jobs:
   eval:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        # `bash`, nao o `bash -e` padrao do GitHub: o padrao roda SEM pipefail, e
+        # `python ... | tee arquivo` devolve o codigo do `tee`, que e sempre 0.
+        # Com isso os tres passos NUNCA falhavam, `continue-on-error` nunca
+        # disparava, e a tabela do resumo dizia "success" para eval que estourou
+        # com 401 na chave ou traceback de import — o relatorio semanal ficava
+        # verde exatamente na hora em que parou de medir (achado 1 do Apolo,
+        # 31/08/2026). `shell: bash` liga `-o pipefail`.
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -52,7 +62,10 @@ jobs:
           {
             echo '## Evals de alucinacao'
             echo ''
-            echo "| eval | resultado |"
+            echo "ATENCAO: a coluna diz se o eval EXECUTOU, nao se o numero esta bom."
+            echo "Metrica ruim nao derruba o passo — leia os blocos abaixo."
+            echo ''
+            echo "| eval | executou |"
             echo "|---|---|"
             echo "| relatorio diario | ${{ steps.diario.outcome }} |"
             echo "| conversa (grounding) | ${{ steps.grounding.outcome }} |"

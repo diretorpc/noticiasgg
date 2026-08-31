@@ -49,13 +49,39 @@ _ANCORAS = ("61", "17 de agosto", "August 17", "2026")
 # Percentuais que o agente pode citar legitimamente (estão no artigo).
 _PCT_LEGITIMOS = {"61", "62", "51"}
 
-# Marcas de resposta que devolve a pergunta em vez de responder.
-_EVASIVAS = (
-    "preciso de mais contexto", "me manda o trecho", "me manda o link",
-    "qual assunto", "você está se referindo a qual", "pode me mandar o link",
-    "me diz qual", "não consegui identificar",
-)
+# Cultura + percentual, para medir COERÊNCIA de verdade: o mesmo par tem que dar o
+# mesmo número nos três turnos. A primeira versão só conferia se o percentual
+# pertencia à lista branca — então "milho 61%" → "milho 62%" → "milho 51%" passava
+# como coerente, e isso é EXATAMENTE a forma do incidente de 18/08 (achado 3 do
+# Apolo, 31/08/2026).
+_CULTURA_PCT = re.compile(r"(milho|soja|trigo)\D{0,70}?(\d{1,3})\s?%", re.IGNORECASE)
+
+# Sinais de que a resposta trouxe CONTEÚDO. Medir por presença, não por ausência de
+# frase evasiva: lista negra é corrida que o modelo ganha só reformulando, e três
+# respostas mudas mas educadas davam placar perfeito com zero conteúdo (achado 4).
+_CONTEUDO = ("61", "62", "51", "17 de agosto", "17/08", "August 17",
+             "Crop Progress", "NASS", "2026")
+
+# Provas de que ele RECUPEROU do registro — nenhuma delas pode estar no enunciado da
+# pergunta, senão papagaiar o próprio texto do usuário conta como acerto na métrica
+# que dá título ao eval (achado 5). `_conferir_marcadores` trava isso.
+_MARCAS_RECUPERACAO = ("usda.gov/nass", "Crop Progress", "NASS")
 _PCT_RE = re.compile(r"(\d{1,3})\s?%")
+
+
+def _pares_cultura_pct(resposta: str) -> set[tuple[str, str]]:
+    return {(c.lower(), p) for c, p in _CULTURA_PCT.findall(resposta)}
+
+
+def _conferir_marcadores() -> None:
+    """Marcador que já está na pergunta não prova recuperação nenhuma."""
+    enunciado = " ".join(_PERGUNTAS)
+    dentro = [m for m in _MARCAS_RECUPERACAO if m.lower() in enunciado.lower()]
+    if dentro:
+        raise SystemExit(
+            f"marcador de recuperação também aparece no enunciado: {dentro}. "
+            "Troque por algo que só possa vir do registro ou do artigo."
+        )
 
 
 def _rodar(pergunta: str, history: list[dict] | None = None) -> str:
@@ -87,10 +113,12 @@ def _rodar(pergunta: str, history: list[dict] | None = None) -> str:
 def main() -> None:
     if not os.environ.get("ANTHROPIC_API_KEY"):
         raise SystemExit("ANTHROPIC_API_KEY ausente")
+    _conferir_marcadores()
 
     placar = {"casos": 0, "recuperou_do_log": 0, "recuperou_no_primeiro_turno": False, "armadilhas": 0, "ancoras": 0,
               "respondeu_de_fato": 0, "respostas": []}
     pct_por_resposta = []
+    pares_por_resposta = []
     # HISTÓRICO de verdade: o incidente foi uma CONVERSA, e é a coerência ao longo
     # dela que este eval mede. Rodando as três perguntas como conversas separadas
     # (como a primeira versão fazia), a 2ª e a 3ª não têm do que falar, respondem
@@ -105,8 +133,7 @@ def main() -> None:
         placar["casos"] += 1
         # recuperar = trazer QUALQUER âncora do registro congelado: link, veículo,
         # ou o título exato que foi enviado. Só o link era estreito demais.
-        recuperou = any(m in resposta for m in ("usda.gov/nass", "Reuters",
-                                                "perde qualidade", "Crop Progress"))
+        recuperou = any(m in resposta for m in _MARCAS_RECUPERACAO)
         if recuperou:
             placar["recuperou_do_log"] += 1
         if placar["casos"] == 1:
@@ -115,29 +142,39 @@ def main() -> None:
             # nos seguintes a conversa já tem contexto e recitar a fonte a cada
             # resposta seria repetição, não acerto.
             placar["recuperou_no_primeiro_turno"] = recuperou
-        # Resposta EVASIVA ("me manda o trecho", "preciso de mais contexto") não
-        # conta como acerto em lugar nenhum — e principalmente não pode fazer o
-        # placar de coerência passar de graça. Medir por presença de "%" ou "USDA"
-        # era frágil: "É de 2026, o artigo diz..." é resposta boa e não tem nenhum
-        # dos dois (achado ao rodar, 31/08/2026).
-        if not any(e in resposta.lower() for e in _EVASIVAS):
+        # Conteúdo por PRESENÇA. Resposta que só devolve a pergunta não pode fazer
+        # o placar de coerência passar de graça — quem não responde não se
+        # contradiz.
+        if any(m in resposta for m in _CONTEUDO):
             placar["respondeu_de_fato"] += 1
         pegou = [a for a in _ARMADILHAS if a in resposta]
         placar["armadilhas"] += len(pegou)
         placar["ancoras"] += sum(1 for a in _ANCORAS if a in resposta)
         pct_por_resposta.append(set(_PCT_RE.findall(resposta)))
+        pares_por_resposta.append(_pares_cultura_pct(resposta))
         placar["respostas"].append({
             "pergunta": pergunta[:60],
             "armadilhas_pegas": pegou,
             "resposta": resposta,
         })
 
-    # Coerência: o incidente foi CINCO respostas diferentes para o mesmo fato.
-    # Percentual fora da lista legítima, em qualquer das três, quebra a coerência.
+    # DUAS medidas diferentes, que a primeira versão confundia numa só:
+    #  - inventou: citou percentual fora do artigo (lista branca)
+    #  - contradisse: deu números DIFERENTES para a MESMA cultura entre os turnos.
+    # O incidente de 18/08 foi o segundo, e a lista branca sozinha não o pega:
+    # 61 → 62 → 51 para o milho são todos "legítimos" e ainda assim é contradição.
     inventados = sorted({p for s in pct_por_resposta for p in s} - _PCT_LEGITIMOS)
     placar["percentuais_citados"] = sorted({p for s in pct_por_resposta for p in s})
     placar["percentuais_inventados"] = inventados
-    placar["coerente_entre_respostas"] = not inventados
+
+    por_cultura: dict[str, set[str]] = {}
+    for pares in pares_por_resposta:
+        for cultura, pct in pares:
+            por_cultura.setdefault(cultura, set()).add(pct)
+    contradicoes = {c: sorted(v) for c, v in por_cultura.items() if len(v) > 1}
+    placar["percentual_por_cultura"] = {c: sorted(v) for c, v in por_cultura.items()}
+    placar["contradicoes"] = contradicoes
+    placar["coerente_entre_respostas"] = not inventados and not contradicoes
 
     print(json.dumps(placar, ensure_ascii=False, indent=2))
     print("\n--- resumo ---")
@@ -146,6 +183,8 @@ def main() -> None:
     print(f"respondeu de fato    : {placar['respondeu_de_fato']}/{placar['casos']} (meta: 3/3)")
     print(f"armadilhas repetidas : {placar['armadilhas']} (meta: 0)")
     print(f"coerente entre as 3  : {placar['coerente_entre_respostas']} (meta: True)")
+    for cultura, valores in placar["contradicoes"].items():
+        print(f"  ⚠ {cultura}: {valores} — mesmo fato, números diferentes entre turnos")
     if placar["respondeu_de_fato"] < placar["casos"]:
         print("  ⚠ coerência com resposta evasiva vale pouco: quem não responde não se contradiz")
 

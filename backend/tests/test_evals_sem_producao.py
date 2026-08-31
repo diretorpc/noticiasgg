@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.evals._sem_supabase import NEWS_LOG_PADRAO, supabase_congelado
+from backend.evals._sem_supabase import NEWS_LOG_PADRAO, TravaDoEval, supabase_congelado
 from backend.services import reporter, supabase
 
 pytestmark = pytest.mark.unit
@@ -40,8 +40,15 @@ def test_qualquer_outro_acesso_ao_banco_ESTOURA_em_vez_de_devolver_vazio():
     novo; mock que estoura obriga quem acrescentar a proxima ferramenta a
     decidir o que ela responde no eval."""
     with supabase_congelado():
-        with pytest.raises(RuntimeError, match="Supabase de produ"):
+        with pytest.raises(TravaDoEval, match="Supabase de produ"):
             supabase.list_authorized()
+    # BaseException de proposito: 5 das 40 funcoes de supabase.py embrulham tudo
+    # num `except Exception`, e sao justamente a familia news_log — onde a proxima
+    # ferramenta vai nascer. Com RuntimeError a trava era engolida ali.
+    assert not issubclass(TravaDoEval, Exception)
+    with supabase_congelado():
+        with pytest.raises(TravaDoEval):
+            supabase.get_news_by_message_id("qualquer")
 
 
 def test_a_trava_solta_o_banco_de_volta_ao_sair():
@@ -53,10 +60,25 @@ def test_a_trava_solta_o_banco_de_volta_ao_sair():
 def test_grounding_eval_roda_dentro_da_trava():
     """A Story 2 acrescentou uma quinta ferramenta que le o banco, e o
     `grounding_eval` so mockava as quatro antigas. A pergunta canonica dele
-    ('me fale mais sobre essa noticia') e o gatilho literal dessa ferramenta."""
-    fonte = Path("backend/evals/grounding_eval.py").read_text(encoding="utf-8")
-    assert "supabase_congelado" in fonte
-    assert "with m1, m2, m3, m4, supabase_congelado():" in fonte
+    ('me fale mais sobre essa noticia') e o gatilho literal dessa ferramenta.
+
+    Medido por COMPORTAMENTO, nao casando string do codigo-fonte: a versao
+    anterior exigia a linha literal `with m1, m2, m3, m4, supabase_congelado():`,
+    entao quebrar a linha em duas reprovava sem defeito nenhum, e a linha dentro
+    de um `if False:` passava (achado 11 do Apolo)."""
+    from unittest.mock import patch as _patch
+
+    from backend.evals import grounding_eval
+    from backend.evals._sem_supabase import TravaDoEval
+
+    def tenta_ler_o_banco(*a, **k):
+        supabase.list_authorized()
+        return "nao chega aqui"
+
+    caso = {"id": "x", "pergunta": "?", "traps": [], "expected_good": []}
+    with _patch.object(grounding_eval.reporter, "generate_report", tenta_ler_o_banco):
+        with pytest.raises(TravaDoEval):
+            grounding_eval.run_case(caso, client=None, repeats=1)
 
 
 def test_o_caso_do_incidente_usa_as_chaves_que_o_eval_LE():
@@ -111,7 +133,8 @@ def test_a_armadilha_literal_dispara_de_verdade():
     with _patch.object(grounding_eval.reporter, "generate_report",
                        return_value=resposta_ruim), \
          _patch.object(grounding_eval, "_judge",
-                       return_value={"ancoradas": 1, "inventadas": 1, "absurdo_fato": 0}):
+                       return_value={"ancoradas": 1, "inventadas": 1, "absurdo_fato": 0,
+                                     "proibidos_afirmados": 1}):
         r = grounding_eval.run_case(caso, client=None, repeats=1)
 
     assert r["taxa_armadilha_literal"] == "1/1", "a armadilha literal nao disparou"
@@ -135,7 +158,8 @@ def test_resposta_limpa_nao_dispara_armadilha_literal():
     with _patch.object(grounding_eval.reporter, "generate_report",
                        return_value="O milho ficou em 61% bom/excelente."), \
          _patch.object(grounding_eval, "_judge",
-                       return_value={"ancoradas": 1, "inventadas": 0, "absurdo_fato": 0}):
+                       return_value={"ancoradas": 1, "inventadas": 0, "absurdo_fato": 0,
+                                     "proibidos_afirmados": 0}):
         r = grounding_eval.run_case(caso, client=None, repeats=1)
     assert r["taxa_armadilha_literal"] == "0/1"
     assert r["armadilhas_vistas"] == []
