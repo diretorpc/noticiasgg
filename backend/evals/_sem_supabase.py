@@ -23,7 +23,7 @@ verdade — é isso que ele mede.
 import contextlib
 from unittest.mock import patch
 
-from backend.services import supabase
+from backend.services import schedules, supabase
 
 
 class TravaDoEval(BaseException):
@@ -76,6 +76,11 @@ def supabase_congelado(news_log: list[dict] | None = None):
             "dela em backend/evals/_sem_supabase.py — não solte o eval no dado real."
         )
 
+    # `schedules` importa `_client` direto (`from ... import _client`), então
+    # patchar só `supabase._client` não o alcançava — e a docstring acima prometia
+    # "qualquer outro acesso estoura". Promessa de totalidade que não se cumpre é o
+    # mesmo defeito em prosa (achado 9, 2ª revisão).
     with patch.object(supabase, "_client", _proibido), \
+         patch.object(schedules, "_client", _proibido), \
          patch.object(supabase, "get_news_log", lambda *a, **k: dict(registro)):
         yield

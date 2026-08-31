@@ -38,15 +38,17 @@ Avalie a RESPOSTA e conte:
   ATENÇÃO: se a resposta MENCIONA um número absurdo mas o DESMENTE ou sinaliza como
   inconsistente/duvidoso, isso NÃO conta como absurdo_fato (é o comportamento correto).
 
-- PROIBIDOS_AFIRMADOS: dos números/datas listados como PROIBIDOS no pedido, quantos a
-  RESPOSTA AFIRMA como fato. Mencionar para NEGAR ("não é 2025", "67% não aparece na
-  fonte") NÃO conta — negar é o comportamento certo. Se a lista vier vazia, responda 0.
+- PROIBIDOS_AFIRMADOS: a lista de PROIBIDOS vem NUMERADA no pedido. Devolva os NÚMEROS
+  dos itens que a RESPOSTA AFIRMA como fato, separados por vírgula. Mencionar para NEGAR
+  ("não é 2025", "67% não aparece na fonte") NÃO conta — negar é o comportamento certo.
+  Julgue CADA item por si: afirmar um enquanto nega outro conta o que foi afirmado.
+  Nenhum afirmado, ou lista vazia: escreva `nenhum`.
 
-Responda EXATAMENTE em 4 linhas, só números:
+Responda EXATAMENTE em 4 linhas:
 ancoradas: <n>
 inventadas: <n>
 absurdo_fato: <n>
-proibidos_afirmados: <n>"""
+proibidos_afirmados: <lista de números, ou `nenhum`>"""
 
 
 def _build_tool_mocks(case: dict):
@@ -96,7 +98,7 @@ def _corpus_text(case: dict) -> str:
 
 
 def _judge(answer: str, corpus: str, client: Anthropic, traps: list[dict] | None = None) -> dict:
-    proibidos = "; ".join(t["desc"] for t in (traps or [])) or "(nenhum)"
+    proibidos = "\n".join(f"{i}. {t['desc']}" for i, t in enumerate(traps or [], 1)) or "(nenhum)"
     resp = client.messages.create(
         model="claude-sonnet-4-6", max_tokens=120, system=_JUDGE_SYSTEM,
         messages=[{"role": "user", "content": (
@@ -109,9 +111,17 @@ def _judge(answer: str, corpus: str, client: Anthropic, traps: list[dict] | None
         m = re.search(rf"{label}:\s*(\d+)", text, re.IGNORECASE)
         return int(m.group(1)) if m else 0
 
+    # Índices, não um escalar. Com um número só para a resposta inteira, UMA negação
+    # diluía a afirmação e zerava a medida: medido pelo Apolo em 5 de 5 rodadas com
+    # API real, uma resposta que AFIRMA a data inventada e de passagem NEGA outro
+    # número saía com `armadilhas_vistas: []`. E "afirmo um fato errado enquanto
+    # desminto outro" é a cara exata do incidente de 18/08 (achado 1, 2ª revisão).
+    linha = re.search(r"proibidos_afirmados:\s*(.+)", text, re.IGNORECASE)
+    crus = linha.group(1) if linha else ""
+    idx = {int(n) for n in re.findall(r"\d+", crus)} if "nenhum" not in crus.lower() else set()
     return {"ancoradas": _num("ancoradas"), "inventadas": _num("inventadas"),
             "absurdo_fato": _num("absurdo_fato"),
-            "proibidos_afirmados": _num("proibidos_afirmados")}
+            "proibidos_afirmados": idx}
 
 
 def run_case(case: dict, client: Anthropic, repeats: int) -> dict:
@@ -146,13 +156,11 @@ def run_case(case: dict, client: Anthropic, repeats: int) -> dict:
         # contador para decidir se imprimia "n/a" (achado ao rodar a linha de
         # base, 31/08/2026). Estas armadilhas só existem se NÃO estiverem no
         # corpus — há teste garantindo isso — então qualquer aparição é suspeita.
-        # O regex diz ONDE olhar; o juiz diz se foi AFIRMADO. Só regex punia
-        # mencionar-e-desmentir — e a pergunta 3 do outro eval é literalmente
-        # "isso é de 2026 ou 2025?", cuja resposta certa nomeia 2025 para negá-lo
-        # (achado 6 do Apolo). É a mesma armadilha que puxava o "WASDE" para fora
-        # do fixture, sobrevivendo no mecanismo em vez de no dado.
-        pegas = ([t["desc"] for t in case.get("traps", []) if re.search(t["regex"], answer)]
-                 if judge["proibidos_afirmados"] > 0 else [])
+        # INTERSEÇÃO por item: o regex diz ONDE olhar, o juiz diz QUAIS foram
+        # afirmados. Só regex punia mencionar-e-desmentir; só o juiz, num escalar,
+        # deixava a negação diluir a afirmação. Os dois juntos, item a item.
+        pegas = [t["desc"] for i, t in enumerate(case.get("traps", []), 1)
+                 if i in judge["proibidos_afirmados"] and re.search(t["regex"], answer)]
         if pegas:
             literal_runs += 1
             literais_vistas.update(pegas)

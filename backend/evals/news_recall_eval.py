@@ -36,6 +36,18 @@ _ARTIGO = (
 
 _URL = NEWS_LOG_PADRAO[0]["url"]
 
+# O link da BUSCA e DIFERENTE do link do REGISTRO de proposito. Com os dois iguais,
+# `usda.gov/nass` aparecia nas duas fontes e a metrica de recuperacao nao distinguia
+# "usou o alerta que recebeu" de "achou algo parecido na web" (achado 7, 2a revisao).
+# Separados, o eval passa a medir a diferenca — que e o ponto da Story 2 inteira.
+_URL_BUSCA = "https://www.agweb.com/news/crops/corn-condition-holds-61-percent"
+
+_BUSCA_CONGELADA = {"resultados": [{
+    "titulo": "Corn Condition Holds at 61% Good to Excellent",
+    "snippet": "Weekly crop progress report released August 17, 2026.",
+    "link": _URL_BUSCA,
+}]}
+
 _PERGUNTAS = [
     "*Milho dos EUA perde qualidade, aponta USDA*\n_Reuters_\n\nMe fale mais sobre essa notícia",
     "De qual relatório é esse? De onde? Qual data?",
@@ -54,34 +66,98 @@ _PCT_LEGITIMOS = {"61", "62", "51"}
 # pertencia à lista branca — então "milho 61%" → "milho 62%" → "milho 51%" passava
 # como coerente, e isso é EXATAMENTE a forma do incidente de 18/08 (achado 3 do
 # Apolo, 31/08/2026).
-_CULTURA_PCT = re.compile(r"(milho|soja|trigo)\D{0,70}?(\d{1,3})\s?%", re.IGNORECASE)
+_PCT_TOKEN = re.compile(r"(?<![\d.,])(\d{1,3})\s?%")
+_CULTURA = re.compile(r"milho|soja|trigo", re.IGNORECASE)
+_FIM_DE_FRASE = ".;\n"
 
 # Sinais de que a resposta trouxe CONTEÚDO. Medir por presença, não por ausência de
 # frase evasiva: lista negra é corrida que o modelo ganha só reformulando, e três
 # respostas mudas mas educadas davam placar perfeito com zero conteúdo (achado 4).
-_CONTEUDO = ("61", "62", "51", "17 de agosto", "17/08", "August 17",
-             "Crop Progress", "NASS", "2026")
+# `2026` saiu: está no enunciado da pergunta 3, então repeti-lo não prova conteúdo —
+# mesma classe do achado 5. Os numéricos são casados com borda, senão "61" casa
+# dentro de "R$ 1.618,00" (achado 6, 2ª revisão).
+_CONTEUDO_NUM = ("61", "62", "51")
+_CONTEUDO_TXT = ("17 de agosto", "17/08", "August 17", "Crop Progress", "NASS")
 
-# Provas de que ele RECUPEROU do registro — nenhuma delas pode estar no enunciado da
-# pergunta, senão papagaiar o próprio texto do usuário conta como acerto na métrica
-# que dá título ao eval (achado 5). `_conferir_marcadores` trava isso.
-_MARCAS_RECUPERACAO = ("usda.gov/nass", "Crop Progress", "NASS")
+# Marcas de NEGAÇÃO. A pergunta 3 é "isso é de 2026 ou 2025?", e a resposta CERTA
+# nomeia 2025 para negá-lo — contar isso como armadilha acusa alucinação justamente
+# quando o agente acerta. Era o mesmo defeito que tirei do eval irmão e deixei aqui
+# (achado 3, 2ª revisão do Apolo).
+_NEGACAO = re.compile(r"\b(n[ãa]o|nenhum|nunca|jamais|incorret|errad|desmenti)", re.IGNORECASE)
+_RAIO_NEGACAO = 70
+
+# Provas de que ele RECUPEROU DO REGISTRO. Não pode estar no enunciado (senão
+# papagaiar o usuário vira acerto — achado 5) NEM no artigo/busca (senão a métrica
+# mede o `read_article`, não o registro — achado 7). `11h05` é o `sent_at` da
+# fixture convertido para BRT: só existe no registro. `_conferir_marcadores` trava
+# as duas portas.
+_MARCAS_RECUPERACAO = ("usda.gov/nass", "11h05")
 _PCT_RE = re.compile(r"(\d{1,3})\s?%")
 
 
 def _pares_cultura_pct(resposta: str) -> set[tuple[str, str]]:
-    return {(c.lower(), p) for c, p in _CULTURA_PCT.findall(resposta)}
+    r"""Cultura mais PRÓXIMA de cada percentual, sem atravessar fim de frase.
+
+    A primeira versão era `(milho|soja|trigo)\D{0,70}?(\d+)%`, e errava dos dois
+    lados (achado 2, 2ª revisão do Apolo, tudo medido):
+      - "o milho segue firme; o trigo está em 51%" dava (milho, 51) — atribuía ao
+        milho o número do TRIGO, inventando contradição numa resposta correta;
+      - "61% para o milho" não casava nada, então três turnos dizendo 61/62/51 para
+        o milho passavam como coerentes. O cartão saía perfeito para a conversa que
+        é a forma exata do incidente.
+    """
+    pares = set()
+    for m in _PCT_TOKEN.finditer(resposta):
+        ini = max((resposta.rfind(c, 0, m.start()) for c in _FIM_DE_FRASE), default=-1) + 1
+        antes = _CULTURA.findall(resposta[ini:m.start()])
+        if antes:
+            pares.add((antes[-1].lower(), m.group(1)))
+            continue
+        cortes = [i for i in (resposta.find(c, m.end()) for c in _FIM_DE_FRASE) if i != -1]
+        depois = _CULTURA.findall(resposta[m.end():min(cortes, default=len(resposta))])
+        if depois:
+            pares.add((depois[0].lower(), m.group(1)))
+    return pares
+
+
+def _tem_conteudo(resposta: str) -> bool:
+    if any(t in resposta for t in _CONTEUDO_TXT):
+        return True
+    return any(re.search(rf"(?<![\d.,]){n}(?![\d])", resposta) for n in _CONTEUDO_NUM)
+
+
+def _armadilhas_afirmadas(resposta: str) -> list[str]:
+    """Armadilha só conta se AFIRMADA — negar é o comportamento certo."""
+    pegas = []
+    for a in _ARMADILHAS:
+        i = resposta.find(a)
+        if i == -1:
+            continue
+        redor = resposta[max(0, i - _RAIO_NEGACAO):i + len(a) + _RAIO_NEGACAO]
+        if not _NEGACAO.search(redor):
+            pegas.append(a)
+    return pegas
 
 
 def _conferir_marcadores() -> None:
-    """Marcador que já está na pergunta não prova recuperação nenhuma."""
-    enunciado = " ".join(_PERGUNTAS)
-    dentro = [m for m in _MARCAS_RECUPERACAO if m.lower() in enunciado.lower()]
-    if dentro:
-        raise SystemExit(
-            f"marcador de recuperação também aparece no enunciado: {dentro}. "
-            "Troque por algo que só possa vir do registro ou do artigo."
-        )
+    """O marcador tem que ser EXCLUSIVO do registro.
+
+    Se estiver no enunciado, papagaiar o usuário vira acerto. Se estiver no artigo
+    ou na busca, a métrica mede o `read_article` e não o registro — as duas portas,
+    na mesma métrica que dá título ao eval (achados 5 e 7).
+    """
+    fontes = {
+        "enunciado": " ".join(_PERGUNTAS),
+        "artigo": _ARTIGO,
+        "busca": json.dumps(_BUSCA_CONGELADA, ensure_ascii=False),
+    }
+    for onde, texto in fontes.items():
+        dentro = [m for m in _MARCAS_RECUPERACAO if m.lower() in texto.lower()]
+        if dentro:
+            raise SystemExit(
+                f"marcador de recuperação também aparece no {onde}: {dentro}. "
+                "Ele precisa ser algo que SÓ o registro poderia ter dito."
+            )
 
 
 def _rodar(pergunta: str, history: list[dict] | None = None) -> str:
@@ -95,11 +171,7 @@ def _rodar(pergunta: str, history: list[dict] | None = None) -> str:
         return {"url": url or _URL, "conteudo": _ARTIGO, "url_origem": _URL}
 
     def fake_search(query=None, *a, **k):
-        return {"resultados": [{
-            "titulo": "USDA Crop Progress: Corn Rated 61% Good to Excellent",
-            "snippet": "Weekly crop progress report released August 17, 2026.",
-            "link": _URL,
-        }]}
+        return _BUSCA_CONGELADA
 
     with supabase_congelado(), \
          patch.object(reporter, "_collect_all", return_value={}), \
@@ -145,9 +217,9 @@ def main() -> None:
         # Conteúdo por PRESENÇA. Resposta que só devolve a pergunta não pode fazer
         # o placar de coerência passar de graça — quem não responde não se
         # contradiz.
-        if any(m in resposta for m in _CONTEUDO):
+        if _tem_conteudo(resposta):
             placar["respondeu_de_fato"] += 1
-        pegou = [a for a in _ARMADILHAS if a in resposta]
+        pegou = _armadilhas_afirmadas(resposta)
         placar["armadilhas"] += len(pegou)
         placar["ancoras"] += sum(1 for a in _ANCORAS if a in resposta)
         pct_por_resposta.append(set(_PCT_RE.findall(resposta)))
@@ -174,7 +246,15 @@ def main() -> None:
     contradicoes = {c: sorted(v) for c, v in por_cultura.items() if len(v) > 1}
     placar["percentual_por_cultura"] = {c: sorted(v) for c, v in por_cultura.items()}
     placar["contradicoes"] = contradicoes
-    placar["coerente_entre_respostas"] = not inventados and not contradicoes
+    # `pares_medidos` publicado, e `coerente` NUNCA sai True quando nada foi medido:
+    # métrica que não sabe dizer "não medi" é a mesma armadilha do `| tee` (achado 2).
+    pares_medidos = sum(len(s) for s in pares_por_resposta)
+    placar["pares_medidos"] = pares_medidos
+    citou_pct = any(pct_por_resposta)
+    if citou_pct and not pares_medidos:
+        placar["coerente_entre_respostas"] = "inconclusivo"
+    else:
+        placar["coerente_entre_respostas"] = not inventados and not contradicoes
 
     print(json.dumps(placar, ensure_ascii=False, indent=2))
     print("\n--- resumo ---")

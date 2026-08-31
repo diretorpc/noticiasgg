@@ -305,3 +305,21 @@ def test_prompts_cobrem_os_limites_do_registro():
     assert "truncado" in prompt and "cobertura_desde" in prompt
     assert "RELATÓRIO DIÁRIO" in prompt
     assert "<noticia_citada>" in prompt, "falta a excecao do caminho ancorado"
+
+
+def test_o_bloco_ancorado_usa_o_mesmo_formatador_de_data_da_ferramenta():
+    """Mutante que sobrevivia: `_format_anchored_news` voltar ao `publicado_em`
+    cru. Tres formatos para o mesmo campo no mesmo backend — e dois deles podem
+    chegar no MESMO turno, quando o usuario responde citando um alerta."""
+    bloco = reporter._format_anchored_news(_linha())
+    assert f"publicado_em: {reporter._momento_br(_linha()['publicado_em'])}\n" in bloco
+    assert "+00:00" not in bloco
+
+
+def test_meia_noite_exata_nao_vira_o_dia_para_tras():
+    """00:00 e a convencao de RSS para 'so sei o dia'. Converter de fuso joga
+    para 21h do dia ANTERIOR — e agora que a data sai com ano, o erro ganharia
+    cara de autoridade. `alert_checker._to_brt` ja tinha essa guarda."""
+    assert reporter._momento_br("2026-08-17T00:00:00+00:00") == "17/08/2026"
+    # hora de verdade continua convertendo
+    assert reporter._momento_br("2026-08-17T14:00:00+00:00") == "17/08/2026 às 11h00"

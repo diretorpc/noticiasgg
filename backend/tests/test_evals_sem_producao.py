@@ -134,7 +134,7 @@ def test_a_armadilha_literal_dispara_de_verdade():
                        return_value=resposta_ruim), \
          _patch.object(grounding_eval, "_judge",
                        return_value={"ancoradas": 1, "inventadas": 1, "absurdo_fato": 0,
-                                     "proibidos_afirmados": 1}):
+                                     "proibidos_afirmados": {1}}):
         r = grounding_eval.run_case(caso, client=None, repeats=1)
 
     assert r["taxa_armadilha_literal"] == "1/1", "a armadilha literal nao disparou"
@@ -159,7 +159,101 @@ def test_resposta_limpa_nao_dispara_armadilha_literal():
                        return_value="O milho ficou em 61% bom/excelente."), \
          _patch.object(grounding_eval, "_judge",
                        return_value={"ancoradas": 1, "inventadas": 0, "absurdo_fato": 0,
-                                     "proibidos_afirmados": 0}):
+                                     "proibidos_afirmados": set()}):
         r = grounding_eval.run_case(caso, client=None, repeats=1)
     assert r["taxa_armadilha_literal"] == "0/1"
     assert r["armadilhas_vistas"] == []
+
+
+def _caso_com_traps():
+    return {
+        "id": "sintetico",
+        "pergunta": "?",
+        "traps": [
+            {"regex": r"\b67\s?%", "desc": "milho a 67% — inventado"},
+            {"regex": r"12 de agosto", "desc": "data inventada"},
+        ],
+        "expected_good": [{"regex": r"\b61\b", "desc": "61 esta no corpus"}],
+    }
+
+
+def _run(resposta, juiz):
+    from unittest.mock import patch as _patch
+
+    from backend.evals import grounding_eval
+
+    with _patch.object(grounding_eval.reporter, "generate_report", return_value=resposta), \
+         _patch.object(grounding_eval, "_judge", return_value=juiz):
+        return grounding_eval.run_case(_caso_com_traps(), client=None, repeats=1)
+
+
+def test_afirmar_uma_armadilha_E_negar_outra_ainda_conta_a_afirmada():
+    """ACHADO 1 da 2a revisao, o mais grave — e um defeito que o proprio revisor
+    tinha me recomendado. Com um ESCALAR do juiz para a resposta inteira, UMA
+    negacao diluia a afirmacao e zerava a medida: medido com API real, 5 de 5
+    rodadas devolveram `armadilhas_vistas: []` para uma resposta que AFIRMA a
+    data inventada. E 'afirmo um fato errado enquanto desminto outro' e a cara
+    exata do incidente de 18/08."""
+    r = _run(
+        "O relatorio saiu em 12 de agosto e o milho esta em 61%. "
+        "Aquele 67% que circulou nao aparece na fonte.",
+        {"ancoradas": 1, "inventadas": 1, "absurdo_fato": 0,
+         "proibidos_afirmados": {2}},   # o juiz afirma so o item 2 (a data)
+    )
+    assert r["armadilhas_vistas"] == ["data inventada"]
+    assert r["taxa_armadilha_literal"] == "1/1"
+
+
+def test_o_que_o_juiz_nao_marcou_nao_conta_mesmo_casando_o_regex():
+    """Negar e o comportamento certo: o regex acha o numero, o juiz diz que foi
+    negado, e a armadilha nao pontua."""
+    r = _run(
+        "Nao existe 67% nem relatorio de 12 de agosto — o milho esta em 61%.",
+        {"ancoradas": 1, "inventadas": 0, "absurdo_fato": 0,
+         "proibidos_afirmados": set()},
+    )
+    assert r["armadilhas_vistas"] == []
+    assert r["taxa_armadilha_literal"] == "0/1"
+
+
+def test_o_que_o_juiz_marcou_mas_o_regex_nao_acha_tambem_nao_conta():
+    """Intersecao dos DOIS: juiz alucinado sozinho nao reprova o agente."""
+    r = _run(
+        "O milho esta em 61% bom/excelente.",
+        {"ancoradas": 1, "inventadas": 0, "absurdo_fato": 0,
+         "proibidos_afirmados": {1, 2}},
+    )
+    assert r["armadilhas_vistas"] == []
+
+
+def test_o_juiz_recebe_as_armadilhas_NUMERADAS():
+    """Mutante que sobrevivia: mandar '(nenhum)' sempre deixava o juiz cego."""
+    from unittest.mock import patch as _patch
+
+    from backend.evals import grounding_eval
+
+    visto = {}
+
+    def fake_create(**kw):
+        visto["pedido"] = kw["messages"][0]["content"]
+        resp = type("R", (), {})()
+        bloco = type("B", (), {"text": "ancoradas: 0\ninventadas: 0\n"
+                                       "absurdo_fato: 0\nproibidos_afirmados: nenhum"})()
+        resp.content = [bloco]
+        return resp
+
+    cliente = type("C", (), {})()
+    cliente.messages = type("M", (), {"create": staticmethod(fake_create)})()
+    grounding_eval._judge("resposta", "corpus", cliente, _caso_com_traps()["traps"])
+    assert "1. milho a 67%" in visto["pedido"]
+    assert "2. data inventada" in visto["pedido"]
+
+
+def test_o_corpus_do_juiz_inclui_o_registro_congelado():
+    """ACHADO 8 da 1a revisao: sem o `news_log` no corpus, um numero que o agente
+    tirou corretamente do `get_sent_news` era contado contra ele como inventado."""
+    from backend.evals import grounding_eval
+
+    corpus = grounding_eval._corpus_text({"search": {}, "articles": {}})
+    assert "Milho dos EUA perde qualidade" in corpus
+    assert "news_log" in corpus

@@ -391,6 +391,13 @@ def _momento_br(iso: str | None) -> str:
         dt = datetime.datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=datetime.timezone.utc)
+        # 00:00 exato é a convenção de RSS para "só sei o dia, não a hora". Converter
+        # de fuso joga para 21h do dia ANTERIOR — e agora que a data sai com ano,
+        # ela ganharia cara de autoridade justamente no caso em que está errada.
+        # `alert_checker._to_brt` já tinha esta guarda; copiei o ano de lá e esqueci
+        # dela (achado 8, 2ª revisão do Apolo).
+        if (dt.hour, dt.minute) == (0, 0) and dt.utcoffset() == datetime.timedelta(0):
+            return dt.date().strftime("%d/%m/%Y")
         return dt.astimezone(_BRT).strftime("%d/%m/%Y às %Hh%M")
     except (ValueError, TypeError):
         return str(iso)[:40]

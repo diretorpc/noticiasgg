@@ -56,6 +56,22 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python -m backend.evals.news_recall_eval | tee eval-recall.txt
 
+      - name: Falhar se algum eval nao executou
+        if: always()
+        run: |
+          # Sem este passo o job fica VERDE com os tres evals mortos: cada um tem
+          # `continue-on-error` e nada consolidava. Cron semanal que nunca fica
+          # vermelho nao notifica ninguem — o 401 na chave so apareceria para quem
+          # abrisse a execucao verde e lesse a tabela (achado 4, 2a revisao).
+          # Metrica RUIM continua nao derrubando; eval que nao RODOU, sim.
+          falhou=0
+          for par in "diario:${{ steps.diario.outcome }}" \
+                     "grounding:${{ steps.grounding.outcome }}" \
+                     "recall:${{ steps.recall.outcome }}"; do
+            [ "${par#*:}" = "success" ] || { echo "eval nao executou: $par"; falhou=1; }
+          done
+          exit $falhou
+
       - name: Publish summary
         if: always()
         run: |
