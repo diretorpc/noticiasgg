@@ -160,7 +160,7 @@ def _conferir_marcadores() -> None:
             )
 
 
-def _rodar(pergunta: str, history: list[dict] | None = None) -> str:
+def _rodar(pergunta: str, history: list[dict] | None = None) -> tuple[str, bool]:
     """Uma pergunta pelo caminho REAL de produção, com as fontes congeladas.
 
     `read_article` devolve `conteudo`, não `texto` — é o que `reporter` lê, e o
@@ -173,13 +173,29 @@ def _rodar(pergunta: str, history: list[dict] | None = None) -> str:
     def fake_search(query=None, *a, **k):
         return _BUSCA_CONGELADA
 
+    # Espião na ferramenta: "consultou o registro" é FATO observável, não algo a
+    # adivinhar no texto da resposta. Duas versões deste eval tentaram inferir por
+    # marcador — e as duas erraram: a 1ª contava papagaiar o enunciado, a 2ª exigia
+    # que ele citasse a URL ou o horário de envio, coisa que ele não faz na primeira
+    # resposta (mede: no turno 1 acerta 61/62/51 e o nome do relatório sem citar
+    # link; no turno 2 cita o link inteiro). Heurística de texto era o instrumento
+    # errado desde o começo.
+    chamou = []
+    original = reporter._get_sent_news
+
+    def espiao(*a, **k):
+        chamou.append(True)
+        return original(*a, **k)
+
     with supabase_congelado(), \
          patch.object(reporter, "_collect_all", return_value={}), \
+         patch.object(reporter, "_get_sent_news", espiao), \
          patch.multiple("backend.services.web_search",
                         search=fake_search, read_article=fake_read), \
          patch.multiple("backend.services.agro_search", search=fake_search):
-        return reporter.generate_report(pergunta, history=history, sections={},
-                                        user_phone="5534999945010")
+        texto = reporter.generate_report(pergunta, history=history, sections={},
+                                         user_phone="5534999945010")
+    return texto, bool(chamou)
 
 
 def main() -> None:
@@ -187,8 +203,10 @@ def main() -> None:
         raise SystemExit("ANTHROPIC_API_KEY ausente")
     _conferir_marcadores()
 
-    placar = {"casos": 0, "recuperou_do_log": 0, "recuperou_no_primeiro_turno": False, "armadilhas": 0, "ancoras": 0,
-              "respondeu_de_fato": 0, "respostas": []}
+    placar = {"casos": 0, "recuperou_do_log": 0, "consultou_o_registro": 0,
+              "consultou_no_primeiro_turno": False,
+              "citou_a_fonte_no_primeiro_turno": False,
+              "armadilhas": 0, "ancoras": 0, "respondeu_de_fato": 0, "respostas": []}
     pct_por_resposta = []
     pares_por_resposta = []
     # HISTÓRICO de verdade: o incidente foi uma CONVERSA, e é a coerência ao longo
@@ -199,7 +217,7 @@ def main() -> None:
     history: list[dict] = []
 
     for pergunta in _PERGUNTAS:
-        resposta = _rodar(pergunta, history=list(history))
+        resposta, consultou = _rodar(pergunta, history=list(history))
         history.append({"role": "user", "content": pergunta})
         history.append({"role": "assistant", "content": resposta})
         placar["casos"] += 1
@@ -208,12 +226,14 @@ def main() -> None:
         recuperou = any(m in resposta for m in _MARCAS_RECUPERACAO)
         if recuperou:
             placar["recuperou_do_log"] += 1
+        if consultou:
+            placar["consultou_o_registro"] += 1
         if placar["casos"] == 1:
-            # O PRIMEIRO turno é o do incidente: o usuário chega com um título
-            # solto e nada mais. É nele que recuperar do registro é obrigatório —
-            # nos seguintes a conversa já tem contexto e recitar a fonte a cada
-            # resposta seria repetição, não acerto.
-            placar["recuperou_no_primeiro_turno"] = recuperou
+            # O PRIMEIRO turno é o do incidente: o usuário chega com um título solto
+            # e nada mais. É nele que consultar o registro é obrigatório — nos
+            # seguintes a conversa já tem o contexto no histórico.
+            placar["consultou_no_primeiro_turno"] = consultou
+            placar["citou_a_fonte_no_primeiro_turno"] = recuperou
         # Conteúdo por PRESENÇA. Resposta que só devolve a pergunta não pode fazer
         # o placar de coerência passar de graça — quem não responde não se
         # contradiz.
@@ -226,6 +246,7 @@ def main() -> None:
         pares_por_resposta.append(_pares_cultura_pct(resposta))
         placar["respostas"].append({
             "pergunta": pergunta[:60],
+            "consultou_o_registro": consultou,
             "armadilhas_pegas": pegou,
             "resposta": resposta,
         })
@@ -258,8 +279,10 @@ def main() -> None:
 
     print(json.dumps(placar, ensure_ascii=False, indent=2))
     print("\n--- resumo ---")
-    print(f"recuperou no 1o turno: {placar['recuperou_no_primeiro_turno']} (meta: True — é o turno do incidente)")
-    print(f"recuperou em algum   : {placar['recuperou_do_log']}/{placar['casos']} (informativo)")
+    print(f"consultou o registro : {placar['consultou_no_primeiro_turno']} no 1o turno "
+          f"(meta: True — é o turno do incidente) | {placar['consultou_o_registro']}/{placar['casos']} no total")
+    print(f"citou a fonte no 1o  : {placar['citou_a_fonte_no_primeiro_turno']} (informativo — "
+          f"ele costuma citar o link só quando perguntam)")
     print(f"respondeu de fato    : {placar['respondeu_de_fato']}/{placar['casos']} (meta: 3/3)")
     print(f"armadilhas repetidas : {placar['armadilhas']} (meta: 0)")
     print(f"coerente entre as 3  : {placar['coerente_entre_respostas']} (meta: True)")

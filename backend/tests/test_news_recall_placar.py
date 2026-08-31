@@ -18,13 +18,17 @@ from backend.evals import news_recall_eval as ev
 pytestmark = pytest.mark.unit
 
 
-def _rodar_main(respostas: list[str], espiao: list | None = None) -> dict:
+def _rodar_main(respostas: list[str], espiao: list | None = None,
+                consultou: list[bool] | None = None) -> dict:
     it = iter(respostas)
+    consultas = iter(consultou if consultou is not None else [True] * len(respostas))
 
     def fake(pergunta, history=None, *a, **k):
         if espiao is not None:
             espiao.append(history)
-        return next(it)
+        # `_rodar` devolve (texto, consultou_o_registro): a consulta virou FATO
+        # observado na ferramenta, nao heuristica de texto.
+        return next(it), next(consultas)
 
     with patch.object(ev, "_rodar", fake), \
          patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-teste"}):
@@ -163,7 +167,7 @@ def test_papagaiar_o_enunciado_nao_conta_como_recuperar():
         "Idem.",
         "Idem.",
     ])
-    assert p["recuperou_no_primeiro_turno"] is False
+    assert p["citou_a_fonte_no_primeiro_turno"] is False
 
 
 def test_repetir_o_artigo_tambem_nao_conta_como_recuperar():
@@ -175,7 +179,7 @@ def test_repetir_o_artigo_tambem_nao_conta_como_recuperar():
         "Idem.",
         "Idem.",
     ])
-    assert p["recuperou_no_primeiro_turno"] is False
+    assert p["citou_a_fonte_no_primeiro_turno"] is False
 
 
 def test_recuperar_do_REGISTRO_conta():
@@ -185,7 +189,7 @@ def test_recuperar_do_REGISTRO_conta():
         "17/08.",
         "2026, milho 61%.",
     ])
-    assert p["recuperou_no_primeiro_turno"] is True
+    assert p["citou_a_fonte_no_primeiro_turno"] is True
 
 
 def test_marcadores_precisam_ser_exclusivos_do_registro():
@@ -229,3 +233,25 @@ def test_o_historico_e_passado_turno_a_turno():
     assert len(espiao[2]) == 4, "3o turno tem que ver os dois anteriores"
     assert espiao[2][0]["role"] == "user"
     assert espiao[2][1]["content"] == "Milho 61%."
+
+
+def test_consulta_ao_registro_e_FATO_da_ferramenta_nao_heuristica_de_texto():
+    """Duas versoes tentaram inferir a consulta pelo TEXTO e as duas erraram: a 1a
+    contava papagaiar o enunciado, a 2a exigia citar a URL ou o horario de envio —
+    coisa que o agente nao faz na primeira resposta (medido: no turno 1 ele acerta
+    61/62/51 e o nome do relatorio SEM citar link; no turno 2 cita o link inteiro).
+    Espionar a ferramenta responde a pergunta certa, sem adivinhar."""
+    p = _rodar_main(
+        ["Milho em 61%.", "Crop Progress, 17/08.", "2026."],
+        consultou=[False, True, True],
+    )
+    assert p["consultou_no_primeiro_turno"] is False
+    assert p["consultou_o_registro"] == 2
+    assert p["respostas"][0]["consultou_o_registro"] is False
+    assert p["respostas"][1]["consultou_o_registro"] is True
+
+
+def test_consultar_no_primeiro_turno_e_a_meta():
+    p = _rodar_main(["Milho 61%.", "17/08.", "2026."], consultou=[True, False, False])
+    assert p["consultou_no_primeiro_turno"] is True
+    assert p["consultou_o_registro"] == 1
