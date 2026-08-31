@@ -111,3 +111,16 @@ def test_o_eval_reprova_na_largada_se_alguem_puser_o_marcador_na_pergunta():
     with patch.object(ev, "_PERGUNTAS", ["e o Crop Progress de hoje?"]):
         with pytest.raises(SystemExit, match="enunciado"):
             ev._conferir_marcadores()
+
+
+def test_resposta_so_com_o_numero_ja_conta_como_conteudo():
+    """Achado por mutacao: tirar 61/62/51 de `_CONTEUDO` passava na suite. Uma
+    resposta que traz SO o numero certo — sem citar relatorio, data ou ano — e
+    resposta de conteudo, e nao pode ser contada como muda."""
+    p = _placar([
+        "Milho em 61% bom/excelente.",
+        "Soja em 62%.",
+        "Trigo de primavera em 51%.",
+    ])
+    assert p["respondeu_de_fato"] == 3
+    assert p["contradicoes"] == {}
