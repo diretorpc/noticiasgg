@@ -22,6 +22,68 @@ Agente de IA multi-domínio, backend em Python/FastAPI:
 
 Fonte viva do que existe hoje: `README.md` e `CLAUDE.md` na raiz do projeto.
 
+## Estado em 31/08/2026 — plano anti-alucinação COMPLETO, e um ponto cego achado no caminho
+
+As quatro stories estão em produção. Também subiu, fora do plano, o conserto do
+monitoramento que o próprio dia expôs.
+
+| Story | O que faz | PR |
+|---|---|---|
+| 1 | o alerta grava a notícia que enviou | (18/08) |
+| 2 | o agente consulta o que ele mesmo mandou | #13, provada em campo 5/5 |
+| 3 | o corretor liga na conversa | #20 |
+| 4 | evals que prendem o comportamento | #21 |
+| — | `/api/health` enxerga a Anthropic | #22 |
+
+### O incidente do dia: o saldo acabou e NADA avisou
+
+O saldo da conta Anthropic zerou em produção. `/api/health` respondia `keys: ok`
+— porque só conferia se a variável de ambiente EXISTE, não se ela FUNCIONA — e o
+cron de alertas caía num `except Exception: logger.warning(); continue`, logando
+um aviso por notícia a cada 15 minutos, para sempre. **O agente ficou mudo e o
+painel ficou verde.** O Matheus descobriu à mão, porque um eval falhou.
+
+Conserto em duas camadas, porque são duas falhas diferentes:
+
+- **imediata:** o cron separa o que adianta repetir (timeout, 529) do que não
+  adianta (saldo, chave revogada, chave sem permissão). O que não adianta para o
+  laço e vai para o WhatsApp do dono.
+- **diária:** o boletim sonda a API de verdade. `models.list()` NÃO serve — responde
+  200 com saldo zerado, porque não é inferência. Só o endpoint de mensagens recusa
+  por cobrança.
+
+A sonda mora em `collect_status_completo` (com senha), **nunca** no
+`collect_status`: `GET /api/health` é público, e chamada paga em endpoint aberto é
+convite para esvaziarem o saldo. Há teste que reprova se ela vazar para lá.
+
+### Custo dos evals — medido, não estimado
+
+Uma passada completa: **US$ 0,62** (42 chamadas Sonnet + 11 Haiku, 190 s). Por isso
+o cron foi para **mensal** (`0 9 1 * *`), não semanal: o número não muda de semana
+para semana — o que muda é modelo e prompt, e esses mexem em release. Rodar à mão:
+aba Actions → Run workflow.
+
+Medir de novo (nunca confiar no número escrito aqui):
+```bash
+PYTHONPATH=. python -m backend.evals.news_recall_eval
+```
+
+### O que as revisões acharam, e vale lembrar
+
+Quatro rodadas do Apolo, e o padrão se repetiu em todas: **medida que fica verde
+sem medir nada.**
+
+- o `| tee` do CI engolia o código de saída — os três evals nunca podiam falhar;
+- a coerência do eval conferia se o número estava numa lista branca, então
+  61% → 62% → 51% para o milho passava como coerente (a forma exata do incidente);
+- o `regex` das armadilhas nunca era comparado com a resposta;
+- três respostas educadas e vazias davam cartão perfeito;
+- o portão de 100 caracteres do validador descartava justamente a correção BEM feita.
+
+E duas vezes o instrumento estava errado, não o código: a "recuperação do registro"
+era adivinhada no texto da resposta quando dava para **espionar a chamada da
+ferramenta**. Trocado o instrumento, o número saiu 5/5 onde a heurística dizia False.
+
 ## Estado em 20/08/2026 — Story 2 (`get_sent_news`) NO AR e provada em campo (5 de 5)
 
 PR #13 mergeada (`ebe6268`), branch apagada, **deploy confirmado em produção**: o
@@ -625,24 +687,30 @@ python -c "from backend.collectors import news; print(news.source_health())"
 - [x] ~~**Os 3 defeitos da primeira validação em produção (18/08 23h)**~~ — **FEITOS e
       provados em alerta real em 19/08** (`18e9cb0` + `a08e12a`). O defeito 2 (sigla) segue
       em observação: nenhum título com sigla traduzível saiu desde então.
-- [ ] 🔴 **PROVA DE CAMPO da Story 2** — o código está NO AR sem nenhum teste em WhatsApp
-      real. As cinco provas estão na seção de 20/08, no topo. **Duas mandam reverter, não
-      consertar no ar:** usuário sem `alerts_enabled` recebendo título+data, e link que abre
-      a home do jornal. Rollback: `git revert ebe6268` (não há migration para desfazer).
-- [ ] 🔴 **Stories 3 e 4 do plano anti-alucinação** —
-      `docs/superpowers/plans/2026-08-18-noticias-ancoradas-e-antialucinacao.md`.
-      A Story 2 fechou o buraco de "essa notícia que você mandou". A **Story 3** é a rede de
-      segurança: hoje o corretor (`integrity.validate_and_fix`) **não enxerga o que as
-      ferramentas trouxeram** na conversa — ele só valida contra os dados coletados. Story 4
-      são os evals que prendem tudo isso.
+- [x] ~~**PROVA DE CAMPO da Story 2**~~ — **5 de 5 feitas** em WhatsApp real (4 em 20/08, a
+      do segundo número em 31/08). Detalhe na seção de 20/08.
+- [x] ~~**Stories 3 e 4**~~ — **as duas em produção** (PR #20 e #21). O plano
+      anti-alucinação está completo.
+- [ ] 🟡 **Prova de campo da Story 3** — o corretor está no ar e nunca foi exercitado em
+      conversa real. Pergunte algo que force busca + leitura de matéria e veja se a resposta
+      continua com números. **Se voltar vaga, sem preço, com "não foi possível recuperar", o
+      corretor está apagando dado bom** — é o risco que mais persegui e o único que a suíte
+      não prova.
+- [ ] 🟡 **O `<hoje>` NÃO chega ao relatório diário de verdade.** Ele existe em
+      `reporter._build_system`, que serve o chat e o fallback do `send_report`. O cron sai por
+      `cron_report.py` → `report_engine` → `report_prompts`, e ali não há data nenhuma
+      (conferido: zero ocorrências de `hoje`/`datetime` no arquivo). Se o incidente dos anos
+      misturados foi no relatório diário, o remédio foi para o outro paciente.
+- [x] ~~`build_fact_corpus` com dado bom E `"erro"` juntos~~ — **decidido na Story 3**:
+      `integrity._com_fato` descarta só a entrada que é SÓ erro; degradação parcial (aviso
+      junto com dado) continua valendo, senão perdia o dado bom.
 - [ ] 🟡 `CREATE UNIQUE INDEX ON news_log_messages (news_log_id, phone)` — o
       `_RetryTransport` repete POST e a 008 não tem trava. Zero duplicatas medidas em 20/08;
       o sinal `truncado` já não depende disso, mas o índice é barato e correto.
 - [ ] 🟡 Achados do revisor deixados para depois (nenhum trava a entrega): prompt de
       commodities pode preencher número quando o scraping cai inteiro; `BRAPI_TOKEN` vai
       na URL e a máscara não cobre `token=` (hoje não vaza, `stocks.py` engole o erro);
-      `build_fact_corpus` descarta a entrada inteira se ela tiver dado bom E `"erro"`
-      juntos — decidir a regra na Story 3; `score = result.get("score", 0)` devolve
+      `score = result.get("score", 0)` devolve
       `None` se o classificador mandar `null`.
 - [ ] **Conferir o volume em 16/08** com o comando acima (esperado ~18/dia). É a
       primeira medição depois do freio de `9c62ae0`.
