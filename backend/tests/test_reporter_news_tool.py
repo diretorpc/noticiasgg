@@ -67,8 +67,12 @@ def test_get_sent_news_devolve_o_log():
     noticia = resultado["noticias"][0]
     assert noticia["titulo"] == "Milho dos EUA perde qualidade"
     assert noticia["fonte"] == "Reuters"
-    assert noticia["publicado_em"] == "2026-08-18T10:00:00+00:00"
-    assert noticia["sent_at"] == "2026-08-18T13:05:00+00:00"
+    # BRT e legivel, como `cobertura_desde`: o eval de 31/08 flagrou o agente
+    # escrevendo os dois horarios do MESMO evento em fusos diferentes na mesma
+    # mensagem — 11h05 (BRT, da cobertura) e 14h (UTC cru, daqui).
+    assert noticia["publicado_em"] == "18/08 às 07h00"
+    assert noticia["sent_at"] == "18/08 às 10h05"
+    assert "+00:00" not in str(noticia)
     assert noticia["resumo"] == "Condicao boa/excelente cai para 61%."
 
 

@@ -23,6 +23,7 @@ from unittest.mock import patch
 from anthropic import Anthropic
 
 from backend.services import reporter
+from backend.evals._sem_supabase import supabase_congelado
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "grounding_cases.json"
 
@@ -103,11 +104,17 @@ def run_case(case: dict, client: Anthropic, repeats: int) -> dict:
     n_traps = len(case.get("traps", []))
     n_good = len(case.get("expected_good", []))
     trap_runs = 0          # rodadas em que o agente afirmou número absurdo COMO FATO
+    literal_runs = 0       # rodadas em que um número/data do incidente reapareceu
     good_hits = 0          # âncoras (número legítimo) presentes, somadas
     absurdo_total = invent_total = 0
+    literais_vistas: set[str] = set()
     answers = []
     for _ in range(repeats):
-        with m1, m2, m3, m4:
+        # `supabase_congelado` entrou em 31/08/2026: a ferramenta `get_sent_news`
+        # (Story 2) lê `news_log` no banco e é oferecida em toda conversa. Sem a
+        # trava, este eval — que se anuncia determinístico — passaria a depender
+        # de quais alertas saíram na hora em que ele rodou.
+        with m1, m2, m3, m4, supabase_congelado():
             answer = reporter.generate_report(case["pergunta"], sections={})
         answers.append(answer)
         judge = _judge(answer, _corpus_text(case), client)
@@ -115,6 +122,18 @@ def run_case(case: dict, client: Anthropic, repeats: int) -> dict:
         # (mencionar e desmentir não conta — é o comportamento certo)
         if n_traps and judge["absurdo_fato"] > 0:
             trap_runs += 1
+        # Segunda medida, LITERAL. O juiz mede número ABSURDO ("+123% de
+        # produtividade"), e para esse caso mencionar-e-desmentir é acerto. Mas o
+        # caso do incidente de 18/08 tem armadilha PLAUSÍVEL e falsa — 67%, 2025,
+        # "12 de agosto". Nenhuma delas é absurda, então o juiz não pega, e sem
+        # esta linha o `regex` das armadilhas era decoração: `traps` só servia de
+        # contador para decidir se imprimia "n/a" (achado ao rodar a linha de
+        # base, 31/08/2026). Estas armadilhas só existem se NÃO estiverem no
+        # corpus — há teste garantindo isso — então qualquer aparição é suspeita.
+        pegas = [t["desc"] for t in case.get("traps", []) if re.search(t["regex"], answer)]
+        if pegas:
+            literal_runs += 1
+            literais_vistas.update(pegas)
         good_hits += sum(1 for g in case.get("expected_good", []) if re.search(g["regex"], answer))
         absurdo_total += judge["absurdo_fato"]
         invent_total += judge["inventadas"]
@@ -122,6 +141,8 @@ def run_case(case: dict, client: Anthropic, repeats: int) -> dict:
         "id": case["id"],
         "repeats": repeats,
         "taxa_armadilha": f"{trap_runs}/{repeats}" if n_traps else "n/a",
+        "taxa_armadilha_literal": f"{literal_runs}/{repeats}" if n_traps else "n/a",
+        "armadilhas_vistas": sorted(literais_vistas),
         "taxa_ancora": f"{good_hits}/{n_good * repeats}" if n_good else "n/a",
         "absurdo_como_fato_por_rodada": round(absurdo_total / repeats, 2),
         "inventados_por_rodada": round(invent_total / repeats, 2),
@@ -138,6 +159,9 @@ def run(repeats: int = 4, dump_path: str | None = None) -> dict:
     for r in results:
         print(f"\n[{r['id']}]")
         print(f"  absurdo afirmado como fato (menor=melhor): {r['taxa_armadilha']}")
+        print(f"  número/data do incidente   (menor=melhor): {r['taxa_armadilha_literal']}")
+        for vista in r["armadilhas_vistas"]:
+            print(f"      ⚠ {vista}")
         print(f"  âncoras corretas presentes (maior=melhor): {r['taxa_ancora']}")
         print(f"  absurdo/fato por rodada    (menor=melhor): {r['absurdo_como_fato_por_rodada']}")
         print(f"  inventados por rodada      (menor=melhor): {r['inventados_por_rodada']}")

@@ -359,7 +359,13 @@ _SENT_NEWS_TOOL = {
 # A linha de `news_log` tem 16 colunas; o modelo só precisa destas. Repassar a linha
 # crua enche o contexto de ruído (score, ativos, feed, resumo_fonte) e — pior — põe as
 # TRÊS urls na frente do modelo, deixando ele escolher a do Google, que dá 403.
-_CAMPOS_NOTICIA = ("fonte", "categoria", "resumo", "direcao", "publicado_em", "sent_at")
+# `publicado_em` e `sent_at` saem por `_momento_br`, não crus: o eval de 31/08/2026
+# flagrou o agente escrevendo "cobre a partir de 17/08 às 11h05" (BRT, de
+# `cobertura_desde`) e "publicado em 17/08 às 14h" (UTC cru) na MESMA mensagem —
+# o mesmo evento com dois horários e 3 h de diferença. Ou tudo no fuso de quem lê,
+# ou nada.
+_CAMPOS_NOTICIA = ("fonte", "categoria", "resumo", "direcao")
+_CAMPOS_MOMENTO = ("publicado_em", "sent_at")
 
 # Brasil aboliu o horário de verão em 2019: deslocamento fixo, sem regra sazonal.
 # (Mesma constante existe em `alert_checker` e `report_engine` — dívida conhecida.)
@@ -422,6 +428,9 @@ def _resumir_noticia(n: dict) -> dict:
     for campo in _CAMPOS_NOTICIA:
         if n.get(campo):
             saida[campo] = n[campo]
+    for campo in _CAMPOS_MOMENTO:
+        if n.get(campo):
+            saida[campo] = _momento_br(n[campo])
     return saida
 
 
