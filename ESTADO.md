@@ -22,7 +22,7 @@ Agente de IA multi-domínio, backend em Python/FastAPI:
 
 Fonte viva do que existe hoje: `README.md` e `CLAUDE.md` na raiz do projeto.
 
-## Estado em 20/08/2026 — Story 2 (`get_sent_news`) NO AR e provada em campo (4 de 5)
+## Estado em 20/08/2026 — Story 2 (`get_sent_news`) NO AR e provada em campo (5 de 5)
 
 PR #13 mergeada (`ebe6268`), branch apagada, **deploy confirmado em produção**: o
 `/api/health` respondeu com o campo `entregas_registradas`, que só existe no código novo.
@@ -101,7 +101,7 @@ reabriria o 403 na cara do usuário.
   `message_id`). Se secar, o agente nega para quem recebeu. `/api/health` passou a
   vigiar com `entregas_registradas`.
 
-### ✅ PROVA DE CAMPO — 4 de 5 feitas em 20/08, em WhatsApp real
+### ✅ PROVA DE CAMPO — as 5 feitas em WhatsApp real (4 em 20/08, a 5ª em 31/08)
 
 | # | Prova | Resultado |
 |---|---|---|
@@ -109,7 +109,17 @@ reabriria o 403 na cara do usuário.
 | 2 | Clicar no 🔗 da resposta | ✅ abriu a matéria |
 | 3 | Perguntar por alerta além do corte | ✅ **depois do conserto** — ver abaixo |
 | 4 | Resposta citando alerta, cronometrada | ✅ 13 s citada contra 16 s de pergunta comum: a citada é **mais rápida**, a exceção do bloco ancorado pegou |
-| 5 | Outro número, sem `alerts_enabled` | ⏳ **falta** — precisa de segunda pessoa |
+| 5 | Outro número, sem `alerts_enabled` | ✅ **31/08** — não inventou título nem horário |
+
+**As cinco fecharam.** A prova 5 era a única que ainda podia produzir mentira com data e
+fonte: outra pessoa, autorizada mas fora da lista de alertas, perguntando "qual a última
+notícia que você me mandou?". O agente respondeu que não tinha notícia recente para ela,
+sem inventar título nem horário — o filtro por `news_log_messages.phone` segurou.
+
+⚠️ **Meio grau de folga na redação, anotado e não consertado:** a frase foi sobre O MUNDO
+("não tem notícias recentes"), não sobre O REGISTRO ("não te mandei alerta nenhum"). O
+risco real (título falso com hora) não aconteceu, mas a forma certa é falar do registro.
+Se reaparecer, é aperto de uma frase na regra 7.
 
 **A prova 3 passou TORTO na primeira vez, e foi o achado mais valioso do dia.** O
 comportamento estava certo (não negou, pediu o link), mas a frase dizia *"os últimos ~90
@@ -129,13 +139,12 @@ Cruzamento independente: 20 itens ÷ 17 alertas/dia = **28,2 h**; 28 h antes das
 20/08 cai em 19/08 de manhã. A data do agente e a conta batem por caminhos separados. De
 quebra, a regra 8 (relatório diário) disparou sozinha na mesma frase.
 
-### ⛔ O que FALTA — a quinta prova
+### O roteiro das provas, para reusar
 
-Falta a prova 5 — a única que ainda pode produzir mentira com hora e fonte, e a única
-que exige um segundo número. Roteiro completo das cinco, com o que é passar e o que é
-falhar lado a lado: https://claude.ai/code/artifact/f21bd8eb-00ea-4446-8dff-38756431a0e1
+Com o que é passar e o que é falhar lado a lado:
+https://claude.ai/code/artifact/f21bd8eb-00ea-4446-8dff-38756431a0e1
 
-As quatro já feitas, para referência:
+Resumo das cinco:
 
 1. **Link:** pergunte sobre um alerta cujo `url_final` seja nulo e **clique no link** que ele
    devolver. Passa = abriu a matéria, ou o agente disse que não tem o endereço.
