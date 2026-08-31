@@ -1,7 +1,12 @@
 import json
+import logging
 import re
 
 from anthropic import Anthropic
+
+from backend.services.secrets_mask import sanitize_error
+
+logger = logging.getLogger("noticiasgg")
 
 ANALYSIS_MARKERS = ("📊", "ANÁLISE", "Visão Macro", "Visão Brasil", "Visão Agro")
 
@@ -9,7 +14,7 @@ SYSTEM_VALIDATOR = """Você é um validador de integridade factual para relatór
 
 Você receberá:
 1. Um relatório gerado por IA
-2. Os dados brutos que o geraram (JSON)
+2. O CORPUS — os dados brutos que o geraram (JSON)
 
 Sua única tarefa: retornar o relatório corrigido, removendo ou reescrevendo qualquer afirmação factual que NÃO possa ser verificada nos dados recebidos.
 
@@ -19,6 +24,8 @@ O que DEVE ser removido ou corrigido:
 - Atribuições geográficas não verificáveis ("empresa X é do país Y" sem base nos dados)
 - Relações causais inventadas ("X subiu porque Y" se Y não está nos dados como fato real)
 - Qualquer afirmação especulativa apresentada como verdade factual
+
+Se o CORPUS trouxer o aviso CORPUS TRUNCADO, ele está incompleto: NÃO remova um dado só por não achá-lo ali. Nesse caso mexa apenas no que CONTRADIZ o corpus — apagar informação certa é pior que deixar passar uma duvidosa.
 
 O que DEVE ser preservado:
 - Seções de dados diretos (câmbio, bolsas, cripto, indicadores) — esses vêm dos coletores e já são verificados
@@ -34,10 +41,27 @@ Retorne APENAS o relatório corrigido, sem prefácio, sem explicação, sem come
 # não rodar é o número inventado chegando ao usuário.
 _TEM_NUMERO = re.compile(r"\d")
 
-# Teto do pedaço de corpus que vem das FERRAMENTAS. Separado do teto geral porque o
-# corte não pode cair sobre a fonte de onde o número saiu — ver `build_fact_corpus`.
-_TETO_FERRAMENTAS = 5000
 _TETO_CORPUS = 6000
+
+# Teto do pedaço que vem das FERRAMENTAS, separado do teto geral porque o corte não
+# pode cair sobre a fonte de onde o número saiu — ver `build_fact_corpus`.
+# Em CONVERSA a ferramenta é a única fonte (`data` é `{}`), então ela pode usar o
+# corpus inteiro: o teto menor deixava ~740 chars parados enquanto cortava o artigo.
+# No RELATÓRIO é o contrário — `send_report` chama com seções E com as ferramentas
+# ligadas, e sem um teto apertado o texto raspado expulsava do corpus os coletores
+# (`indicators_*`, `commodities_br`, `Notícias`, `Pesquisas` sumiam), fazendo o
+# validador apagar linha verdadeira (achados 4 e 6 do Apolo, 31/08/2026).
+_TETO_FERRAMENTAS_CHAT = _TETO_CORPUS
+_TETO_FERRAMENTAS_RELATORIO = 1500
+
+# Piso de aceitação da saída do validador. RELATIVO ao original, não absoluto: o piso
+# fixo de 100 chars descartava justamente a correção BEM feita. Medido pelo Apolo com
+# chamada real — resposta de 174 chars, correção perfeita de 92 chars, jogada fora, e
+# o 78% inventado voltou ao usuário. O prompt manda encurtar e o código punia quem
+# encurtava: quanto melhor o validador trabalhava, maior a chance de ser descartado
+# (achado 1, crítico, 31/08/2026).
+_PISO_RELATIVO = 0.25
+_PISO_ABSOLUTO = 20
 
 SYSTEM_VALIDATOR_CHAT = """Você é um validador de integridade factual para respostas de um analista financeiro no WhatsApp.
 
@@ -83,6 +107,29 @@ def _sem_series_com_erro(val):
     return val
 
 
+def _com_fato(tool_corpus: list[str] | None) -> list[str]:
+    """Descarta o `tool_result` que só carrega erro.
+
+    `{"erro": "timeout na busca", "resultados": []}` é um dict verdadeiro em Python,
+    e o portão lia isso como "as ferramentas trouxeram algo contra o que conferir" —
+    o oposto do que aconteceu. Resultado medido pelo Apolo com chamada real: resposta
+    inteiramente verdadeira teve os QUATRO preços apagados, porque nenhum deles
+    estava num corpus que não existia. Busca que estoura não é rara: o ScraperAPI
+    trava ~1% das rodadas (achado 2, crítico, 31/08/2026)."""
+    uteis = []
+    for bruto in tool_corpus or []:
+        try:
+            obj = json.loads(bruto) if isinstance(bruto, str) else bruto
+        except (ValueError, TypeError):
+            uteis.append(bruto)  # não é JSON: é texto solto, presume-se fato
+            continue
+        if isinstance(obj, dict) and "erro" in obj:
+            if not any(v for k, v in obj.items() if k != "erro"):
+                continue
+        uteis.append(bruto)
+    return uteis
+
+
 def build_fact_corpus(data: dict, tool_corpus: list[str] | None = None) -> str:
     """Serializa o que o validador pode usar como verdade.
 
@@ -99,6 +146,7 @@ def build_fact_corpus(data: dict, tool_corpus: list[str] | None = None) -> str:
     parts = []
     gasto = 0
     cortou = False
+    teto = _TETO_FERRAMENTAS_RELATORIO if data else _TETO_FERRAMENTAS_CHAT
     if tool_corpus:
         # O aviso vive TAMBÉM aqui, e não só no system: o corpus pode ter milhares de
         # caracteres, e a instrução do system fica longe do texto hostil. Mesmo
@@ -110,10 +158,10 @@ def build_fact_corpus(data: dict, tool_corpus: list[str] | None = None) -> str:
         )
     for bruto in (tool_corpus or []):
         inteiro = _escape(str(bruto))
-        if gasto >= _TETO_FERRAMENTAS:
+        if gasto >= teto:
             cortou = True
             break
-        texto = inteiro[: _TETO_FERRAMENTAS - gasto]
+        texto = inteiro[: teto - gasto]
         cortou = cortou or len(texto) < len(inteiro)
         gasto += len(texto)
         parts.append(f"<ferramenta>\n{texto}\n</ferramenta>")
@@ -129,7 +177,9 @@ def build_fact_corpus(data: dict, tool_corpus: list[str] | None = None) -> str:
     ):
         val = data.get(key)
         if isinstance(val, list) and val:
-            titles = [a.get("titulo", a.get("instituto", "")) for a in val[:limit]]
+            # `_escape` aqui também: manchete vem da NewsAPI e dos feeds, e agora que
+            # o corpus TEM tags, forjar uma passou a servir para alguma coisa (achado 12).
+            titles = [_escape(str(a.get("titulo", a.get("instituto", "")))) for a in val[:limit]]
             parts.append(f"{label}: {json.dumps(titles, ensure_ascii=False)}")
     corpus = "\n".join(parts)
     # `cortou` cobre o teto das FERRAMENTAS, que é o corte MAIS provável e ficava
@@ -163,6 +213,7 @@ def validate_and_fix(report: str, data: dict, client: Anthropic,
     Em caso de falha devolve o original: o validador é rede de segurança, não
     pode virar ponto único de quebra da resposta."""
     tem_marcador = any(m in report for m in ANALYSIS_MARKERS)
+    tool_corpus = _com_fato(tool_corpus)
     modo_relatorio = bool(data) and tem_marcador
     modo_chat = bool(tool_corpus) and bool(_TEM_NUMERO.search(report))
     if not (modo_relatorio or modo_chat):
@@ -183,8 +234,17 @@ def validate_and_fix(report: str, data: dict, client: Anthropic,
             }],
         )
         for block in resp.content:
-            if hasattr(block, "text") and len(block.text.strip()) > 100:
-                return block.text.strip()
-    except Exception:
-        pass
+            if not hasattr(block, "text"):
+                continue
+            saida = block.text.strip()
+            if len(saida) >= _PISO_ABSOLUTO and len(saida) >= _PISO_RELATIVO * len(report):
+                return saida
+            # Rejeição CALADA era indistinguível de "nada a corrigir" — a mesma doença
+            # que esta story veio curar, reconstruída na porta nova (achado 5).
+            logger.info("validador rejeitado pelo piso: %d chars para original de %d",
+                        len(saida), len(report))
+    except Exception as e:
+        # `sanitize_error`, não `str(e)`: erro de fornecedor já vazou chave neste
+        # projeto duas vezes (29/06 e 18/08).
+        logger.warning("validador falhou: %s", sanitize_error(e))
     return report
