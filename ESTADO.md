@@ -68,6 +68,18 @@ Medir de novo (nunca confiar no número escrito aqui):
 PYTHONPATH=. python -m backend.evals.news_recall_eval
 ```
 
+### Prova de campo da Story 3 — feita em 01/09/2026
+
+Pergunta que força busca + leitura de matéria ("o que saiu hoje sobre o preço do boi
+gordo?"). **O corretor não apagou dado bom**: voltou com faixa do físico (R$ 338–344/@),
+variação do dia, spot da B3, três vencimentos futuros e quatro estados. Latência 16 s —
+sem regressão.
+
+⚠️ **Ressalva:** "o corretor rodou" é INFERIDO (resposta rica + tempo compatível), não
+observado — os 16 s de referência vinham de uma pergunta SIMPLES, então não isolam os
+2,3 s dele. O que está provado é a **ausência do dano**, que era o risco: resposta vaga e
+sem número. Para observar de verdade seria preciso ler o log da Vercel.
+
 ### O que as revisões acharam, e vale lembrar
 
 Quatro rodadas do Apolo, e o padrão se repetiu em todas: **medida que fica verde
@@ -691,11 +703,12 @@ python -c "from backend.collectors import news; print(news.source_health())"
       do segundo número em 31/08). Detalhe na seção de 20/08.
 - [x] ~~**Stories 3 e 4**~~ — **as duas em produção** (PR #20 e #21). O plano
       anti-alucinação está completo.
-- [ ] 🟡 **Prova de campo da Story 3** — o corretor está no ar e nunca foi exercitado em
-      conversa real. Pergunte algo que force busca + leitura de matéria e veja se a resposta
-      continua com números. **Se voltar vaga, sem preço, com "não foi possível recuperar", o
-      corretor está apagando dado bom** — é o risco que mais persegui e o único que a suíte
-      não prova.
+- [x] ~~**Prova de campo da Story 3**~~ — **FEITA em 01/09/2026**, pergunta sobre preço do
+      boi gordo (força busca + leitura de matéria). O corretor **não apagou dado bom**: a
+      resposta voltou com faixa do físico, variação do dia, spot da B3, três vencimentos
+      futuros e quatro estados. Latência 16 s — sem regressão. Ressalva honesta: "o corretor
+      rodou" é INFERIDO (números ricos + tempo compatível), não observado; o que está provado
+      é a ausência do dano, que era o risco. Detalhe na seção de 31/08.
 - [ ] 🟡 **O `<hoje>` NÃO chega ao relatório diário de verdade.** Ele existe em
       `reporter._build_system`, que serve o chat e o fallback do `send_report`. O cron sai por
       `cron_report.py` → `report_engine` → `report_prompts`, e ali não há data nenhuma
