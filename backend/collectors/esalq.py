@@ -5,6 +5,7 @@ import httpx
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException
 
+from backend.collectors._br_num import parse_br_float as _parse_br_float
 from backend.services.secrets_mask import sanitize_error
 
 router = APIRouter()
@@ -15,14 +16,6 @@ _HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "pt-BR,pt;q=0.9",
 }
-
-
-def _parse_br_float(text: str) -> float | None:
-    try:
-        cleaned = text.strip().replace(".", "").replace(",", ".").lstrip("+")
-        return float(cleaned)
-    except Exception:
-        return None
 
 
 def _parse_table(html: str) -> dict:

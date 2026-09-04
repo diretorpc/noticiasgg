@@ -64,18 +64,36 @@ Fretes derivados da mensagem dele (Porto − praça): **Pontal 9,00 · Uberaba 1
   mostrar 3 casas ("12,504/bushel"). "Mais curto" = menor vencimento AINDA negociado (Set
   negocia até ~14/09); calcular por código, não pelo `ZS=F`.
 - **`BRL=X`** = comercial (5,1267 em 04/09); arredondar a 3 casas.
-- **CEPEA bloqueia datacenter**: WebFetch → **403**; a auditoria de julho já registrava
-  `esalq` quebrado em prod por isso (timeout ~21 s). `collectors/esalq.py` existe (cana) e já
-  tenta ScraperAPI como 2ª via. Plano: CEPEA via **ScraperAPI** (primeiro sem render; `render=true`
-  se precisar) com fallback em `noticiasagricolas.com.br/cotacoes/soja` → linha **"Porto
-  Paranaguá (disponível)"** (159,00 em 01/09; é o CEPEA arredondado). **Casar por NOME da
-  linha, nunca por posição** — o scraper atual é posicional (achado da auditoria).
+- **CEPEA é inalcançável, ponto** (medido 04/09 ~17h): direto → 403; via ScraperAPI → **500
+  "protected domain" nas 4 variantes** (normal, `render`, `premium`, `ultra_premium`). Não é
+  questão de parâmetro. A auditoria de julho já registrava `esalq` quebrado em prod por isso.
+- **Fonte do Porto = Notícias Agrícolas republicando o CEPEA**, bloco **"Indicador da Soja
+  ESALQ/B3 - Paranaguá"** com `Fonte: Cepea/Esalq`, 2 casas e data de referência (160,14 em
+  03/09). Tem página própria: `/cotacoes/soja/soja-indicador-cepea-esalq-porto-paranagua`
+  (preferida) e aparece também em `/cotacoes/soja` (fallback). **Armadilha:** a linha "Porto
+  Paranaguá (disponível)" da página geral é da **Insoy Commodities** (162,00), NÃO o CEPEA —
+  a versão anterior desta spec presumia o contrário. **Casar por NOME em três níveis — bloco
+  (título + fonte), coluna (`<th>` "Valor R$") e linha (data mais recente), nunca por posição**;
+  dois blocos empatados na data com preços diferentes → erro, nunca escolhe às cegas. Testes
+  provam: o 162,00 da Insoy nunca sai; coluna `Valor US$` injetada não engana; bloco Paraná
+  injetado na página dedicada vira erro; tabela em ordem crescente devolve o dia certo.
+- **CEPEA publica à tarde**: às 12h o valor disponível é o de ontem (D-1). O formato do primo
+  não mostra data — decidir no passo 3 se a mensagem carrega o `data_ref`.
+- **O 159,44 do exemplo do primo não bate com nenhum CEPEA Paranaguá de 01–03/09**
+  (161,14 / 160,99 / 160,14). Ou o exemplo é de outro dia, ou ele usa a série **CEPEA
+  Paraná** (outra). Perguntar a ele antes do passo 3.
 - Fonte caiu → a linha diz "indisponível"; **nunca some em silêncio**.
 
 ### Próximos passos (nesta ordem)
 
-1. `collectors/soja_disponivel.py`: CEPEA (ScraperAPI) + fallback NA por nome; `BRL=X`;
-   contrato mais curto (`ZS*.CBT`). Tudo com teste unitário e sem rede no CI.
+1. ✅ (04/09, branch `feat/soja-disponivel-collector`) `collectors/soja_disponivel.py`: Porto
+   via NA (dedicada → geral → ScraperAPI) casado por nome; `BRL=X`; contrato mais curto por
+   calendário (último dia útil antes do dia 15) + 404 do Yahoo. Endpoint
+   `/api/collectors/soja_disponivel`. Medir: `python -m pytest backend/tests/test_soja_disponivel.py -q`.
+   Conferir em prod depois do deploy: `curl -s https://noticiasgg.vercel.app/api/collectors/soja_disponivel`
+   (NA testada só do PC; da Vercel ainda não). Apolo revisou em 04/09: 3 furos posicionais
+   provados por cenário e consertados; `market.collect()` agora projeta só `preco`/`variacao_pct`
+   para não inchar o corpus do relatório (teto 6.000). `fetch_cbot`: 3 diretos, depois 1 ScraperAPI.
 2. Fretes em `agent_config` (painel), já com 9/12/27 e data da última edição; aviso no
    boletim de saúde se passar de 60 dias.
 3. `services/soja_msg.py`: monta a string exata (teste compara byte a byte com o exemplo).

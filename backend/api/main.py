@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from anthropic import Anthropic
 
-from backend.collectors import market, crypto, indicators_us, indicators_br, news, commodities_br, politics_br, polls_br, agro_br, esalq, eia
+from backend.collectors import market, crypto, indicators_us, indicators_br, news, commodities_br, politics_br, polls_br, agro_br, esalq, eia, soja_disponivel
 from backend.services import reporter, whatsapp, supabase, health
 from backend.services import media as media_service
 from backend.api import send_report, cron_report, check_alerts, admin, me, health_digest, cron_investing
@@ -41,6 +41,7 @@ app.include_router(cron_report.router)
 app.include_router(check_alerts.router)
 app.include_router(esalq.router)
 app.include_router(eia.router)
+app.include_router(soja_disponivel.router)
 app.include_router(admin.router)
 app.include_router(me.router)
 app.include_router(health_digest.router)
