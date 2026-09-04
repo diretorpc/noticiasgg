@@ -22,6 +22,51 @@ Agente de IA multi-domínio, backend em Python/FastAPI:
 
 Fonte viva do que existe hoje: `README.md` e `CLAUDE.md` na raiz do projeto.
 
+## Estado em 04/09/2026 — bot MUDO por ~35 h: a VPS reiniciou e a versão VELHA ganhou a porta
+
+Descoberto por acidente, ao tentar mandar uma mensagem pelo bot. `/api/health` marcava
+`evolution: warn (404)` — mas o boletim que avisaria viaja por WhatsApp, que era o que
+estava quebrado. **Todos os alarmes tocam no mesmo sino.**
+
+### Causa-raiz (medida na VPS)
+
+A VPS reiniciou (`uptime` batia com os 35 h dos containers). No boot, o Docker subiu os
+DOIS containers, porque os dois tinham `restart: always`:
+
+| container | o que é | o que aconteceu |
+|---|---|---|
+| `evolution-api` (v1.8.2) | a versão VELHA, "parada para rollback" desde 16/07 | subiu e pegou a 8080 |
+| `evolution-v2` (v2.3.7) | a de produção | perdeu a porta → `Exited (255)` |
+
+Por isso o 404: o backend falava com a v1.8.2, que só conhece o backup
+`noticiasgg.bak-20260714`. A instância viva e a sessão estavam intactas no `evo2-postgres`.
+A bomba-relógio estava armada desde 16/07: "parada" só valia até o primeiro reboot, que
+levou 7 semanas para acontecer.
+
+### O conserto, e por que precisou de dois passos
+
+1. `docker update --restart=no evolution-api && docker stop evolution-api` — permanente:
+   a v1.8.2 nunca mais ganha a porta num reboot.
+2. `docker start evolution-v2` NÃO bastou: o container ficou **sem rede** (não resolvia
+   `postgres:5432`, loop de 24 reinícios). `docker compose up -d evolution` também não —
+   viu o container existente e só deu start. O que resolveu foi
+   `docker compose up -d --force-recreate evolution`, que remonta o container dentro
+   da `evolution-v2_evo2`. A sessão do WhatsApp **sobreviveu** (sem QR code).
+
+Conferir se voltou a acontecer (uma linha, de fora):
+```bash
+curl -s -H "apikey: noticiasgg2026" http://46.202.179.33:8080/instance/connectionState/noticiasgg
+```
+Esperado: `{"instance":{"instanceName":"noticiasgg","state":"open"}}`. Qualquer outra
+coisa (404, vazio, `close`) = o bot está mudo.
+
+### ⚠️ Pendência que este incidente abriu
+
+**O sistema não tem como avisar quando o WhatsApp cai** — health digest e `notify_admin`
+dependem dele. Precisa de um segundo canal (e-mail, Telegram, ou o próprio `/api/health`
+vigiado por um serviço externo tipo UptimeRobot, que é grátis). Sem isso, a próxima queda
+só é descoberta quando alguém estranhar o silêncio.
+
 ## Estado em 31/08/2026 — plano anti-alucinação COMPLETO, e um ponto cego achado no caminho
 
 As quatro stories estão em produção. Também subiu, fora do plano, o conserto do
@@ -709,6 +754,11 @@ python -c "from backend.collectors import news; print(news.source_health())"
       futuros e quatro estados. Latência 16 s — sem regressão. Ressalva honesta: "o corretor
       rodou" é INFERIDO (números ricos + tempo compatível), não observado; o que está provado
       é a ausência do dano, que era o risco. Detalhe na seção de 31/08.
+- [ ] 🔴 **Alarme fora do WhatsApp.** Em 04/09 o bot ficou mudo ~35 h e nenhum aviso chegou:
+      o boletim de saúde e o `notify_admin` viajam pelo canal que caiu. Opção mais barata:
+      UptimeRobot (grátis) batendo em `/api/health` e mandando e-mail se `status != ok`.
+- [ ] 🟡 Tirar `restart: always` da v1.8.2 TAMBÉM no compose antigo (feito só via `docker
+      update`; se alguém subir a stack v1 pelo compose, volta). Ou apagar o container de vez.
 - [ ] 🟡 **O `<hoje>` NÃO chega ao relatório diário de verdade.** Ele existe em
       `reporter._build_system`, que serve o chat e o fallback do `send_report`. O cron sai por
       `cron_report.py` → `report_engine` → `report_prompts`, e ali não há data nenhuma
