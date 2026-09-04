@@ -46,7 +46,30 @@ def _parse_v8_meta(meta: dict) -> dict | None:
     if not atual:
         return None
     variacao = round(((atual - anterior) / anterior) * 100, 2) if anterior else None
-    return {"preco": round(atual, 2), "variacao_pct": variacao}
+    return {
+        "preco": round(atual, 2),
+        "variacao_pct": variacao,
+        # "atual"/"anterior"/"atualizado_em" ficam SEM arredondar — bolsas/câmbio
+        # usam só "preco"/"variacao_pct" (ver `_projetar_para_relatorio`), mas
+        # collectors/soja_disponivel.py precisa do valor cheio (ex.: USX/100 =
+        # dólar por bushel com 4 casas) e do horário (para marcar dado
+        # defasado em fim de semana/feriado) sem duplicar o parsing do JSON
+        # da Yahoo para consegui-los (DRY).
+        "atual": atual,
+        "anterior": anterior,
+        "atualizado_em": meta.get("regularMarketTime"),
+    }
+
+
+# Campos que só quem pediu o dict cru de `_parse_v8_meta` usa (hoje,
+# collectors/soja_disponivel.py). `collect()` alimenta o corpus do relatório
+# diário e o corpus de integridade (teto de 6.000 chars — `integrity.py`) —
+# esses campos ali só inchariam o corpus sem servir ao leitor.
+_CAMPOS_INTERNOS = ("atual", "anterior", "atualizado_em")
+
+
+def _projetar_para_relatorio(data: dict) -> dict:
+    return {k: v for k, v in data.items() if k not in _CAMPOS_INTERNOS}
 
 
 def _fetch_direct_one(sym: str) -> tuple[str, dict | None]:
@@ -129,7 +152,7 @@ def collect() -> dict:
         direct = _fetch_all_direct(list(SYMBOLS.keys()))
         for sym, data in direct.items():
             categoria, nome = SYMBOLS[sym]
-            resultado[categoria][nome] = data
+            resultado[categoria][nome] = _projetar_para_relatorio(data)
     except Exception:
         pass
 
@@ -142,7 +165,7 @@ def collect() -> dict:
     if missing:
         fallback = _fetch_all_scraperapi(missing)
         for (cat, nom), data in fallback.items():
-            resultado[cat][nom] = data
+            resultado[cat][nom] = _projetar_para_relatorio(data)
 
     return resultado
 
