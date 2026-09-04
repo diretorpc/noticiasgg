@@ -114,3 +114,35 @@ export async function fetchReportPrompts(): Promise<ReportPrompt[]> {
   if (!res.ok) throw new Error(`backend ${res.status}`);
   return (await res.json()).prompts as ReportPrompt[];
 }
+
+export type SojaPraca = {
+  chave: string;
+  rotulo: string;
+  valor: number;
+};
+
+export type SojaFretes = {
+  fretes: { pontal: number; uberaba: number; canarana: number };
+  pracas: SojaPraca[];
+  is_custom: boolean;
+  updated_at: string | null;
+  updated_by: string | null;
+  idade_dias: number | null;
+  envelhecido: boolean;
+  // Valor default por praça (independe do que está salvo) — usado no confirm
+  // do "Voltar ao padrão": `pracas[].valor` traz o EFETIVO, não o default.
+  defaults: { pontal: number; uberaba: number; canarana: number };
+  erro?: string;
+  aviso?: string;
+};
+
+export async function fetchSojaFretes(): Promise<SojaFretes> {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/admin/soja-fretes`,
+    { headers: { Authorization: `Bearer ${session?.access_token}` }, cache: "no-store" },
+  );
+  if (!res.ok) throw new Error(`backend ${res.status}`);
+  return res.json();
+}

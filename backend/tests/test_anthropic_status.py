@@ -99,7 +99,11 @@ def _completo(sonda):
                       return_value={"status": "ok", "checks": {"keys": {"status": "ok", "faltando": []}},
                                     "checked_at": "t"}), \
          patch("backend.collectors.news.source_health",
-               return_value={"vivas": 20, "total": 20, "mortas": []}):
+               return_value={"vivas": 20, "total": 20, "mortas": []}), \
+         patch.object(health.soja_fretes, "describe",
+                      return_value={"fretes": {"pontal": 9.0, "uberaba": 12.0, "canarana": 27.0},
+                                    "pracas": [], "is_custom": True, "updated_at": "2026-09-01T00:00:00+00:00",
+                                    "updated_by": "x", "idade_dias": 3, "envelhecido": False}):
         return health.collect_status_completo()
 
 

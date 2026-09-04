@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import logging
 
-from backend.services import anthropic_status, supabase, whatsapp
+from backend.services import anthropic_status, soja_fretes, supabase, whatsapp
 
 logger = logging.getLogger("noticiasgg")
 
@@ -136,7 +136,12 @@ def collect_status_completo() -> dict:
     Separado de propósito: `GET /api/health` é público e sem senha (main.py:59), então
     deixar a coleta lá dentro deixaria qualquer um disparar 20 buscas no seu servidor.
     Só o boletim diário chama isto — uma vez por dia, não a cada visita."""
-    status = collect_status()
+    base = collect_status()
+    # Cópia rasa de propósito: os checks abaixo são ACRESCENTADOS aqui, e escrever
+    # no dict recebido envenenava quem o compartilhava (nos testes, os dicts de
+    # módulo `_STATUS_OK`/`_STATUS_PROBLEMA` voltavam com 3 checks a mais e
+    # quebravam os testes seguintes conforme a ordem — 3ª revisão do Apolo, 04/09).
+    status = {**base, "checks": {**base["checks"]}}
     # A sonda vive AQUI e não no `collect_status`, pela mesma razão que a medição
     # das fontes: `GET /api/health` é público e sem senha, e uma chamada PAGA num
     # endpoint aberto é convite para esvaziarem o saldo por você. Uma vez por dia,
@@ -153,11 +158,45 @@ def collect_status_completo() -> dict:
     except Exception as e:
         check = {"status": "warn", "message": str(e)[:120]}
     status["checks"]["news_sources"] = check
+    status["checks"]["soja_fretes"] = _check_soja_fretes()
     # `_reavaliar` no lugar do `if` antigo: ele só sabia promover "ok" -> "warn"
     # para as FONTES. Com a sonda da Anthropic entrando aqui, saldo esgotado é
     # `error` e o cabeçalho continuaria dizendo "ok" — a mesma mentira que a
     # sonda veio consertar, uma linha abaixo dela.
     return _reavaliar(status)
+
+
+def _check_soja_fretes() -> dict:
+    """Fretes da mensagem diária 'Soja Disponível' (Porto − frete = praça).
+    `soja_fretes.describe()` já não levanta sozinho, mas o try/except aqui segue
+    o mesmo padrão dos vizinhos (news_sources, anthropic): um check novo não
+    pode derrubar o boletim inteiro se algo mudar ali amanhã."""
+    try:
+        d = soja_fretes.describe()
+    except Exception as e:
+        return {"status": "warn", "message": str(e)[:120]}
+    if d.get("erro"):
+        return {"status": "warn", "message": d["erro"]}
+    # Achado 1 (Apolo): valor salvo incompleto/inválido (describe() completou
+    # com default e marcou "aviso") não pode ser engolido só porque updated_at
+    # é recente — "envelhecido" mede IDADE, não VALIDADE do valor.
+    if d.get("aviso"):
+        return {"status": "warn", "message": d["aviso"], "idade_dias": d.get("idade_dias"),
+                "updated_at": d.get("updated_at")}
+    if not d.get("envelhecido"):
+        return {"status": "ok", "idade_dias": d.get("idade_dias"), "updated_at": d.get("updated_at")}
+    if not d.get("is_custom"):
+        message = f"nunca salvos no painel — usando padrão {soja_fretes.descrever_defaults()}"
+    else:
+        idade = d.get("idade_dias")
+        # Achado 2 (Apolo): updated_at nulo/ilegível -> idade_dias=None. Sem
+        # este ramo a mensagem virava "editados há None dias" no WhatsApp.
+        if idade is None:
+            message = "data da última edição ilegível — salve de novo no painel"
+        else:
+            message = f"editados há {idade} dias (>60): confira com o primo"
+    return {"status": "warn", "message": message, "idade_dias": d.get("idade_dias"),
+            "updated_at": d.get("updated_at")}
 
 
 _ICON = {"ok": "✅", "warn": "⚠️", "error": "❌"}
@@ -235,6 +274,12 @@ def _line_news_sources(v: dict) -> str:
     return f"• {_ICON['warn']} Fontes de notícia: {v.get('message', 'indisponível')}"
 
 
+def _line_soja_fretes(v: dict) -> str:
+    if v.get("status") == "ok":
+        return f"• Fretes Soja Disponível: OK ({v.get('idade_dias') or 0} dias)"
+    return f"• {_ICON['warn']} Fretes Soja Disponível: {v.get('message', 'indisponível')}"
+
+
 def format_digest(status: dict) -> str:
     checks = status.get("checks", {})
     problems = [k for k, v in checks.items() if v.get("status") in ("warn", "error")]
@@ -250,6 +295,8 @@ def format_digest(status: dict) -> str:
         lines.append(_line_anthropic(checks["anthropic"]))
     if "news_sources" in checks:  # ausente quando veio do collect_status simples
         lines.append(_line_news_sources(checks["news_sources"]))
+    if "soja_fretes" in checks:  # ausente quando veio do collect_status simples
+        lines.append(_line_soja_fretes(checks["soja_fretes"]))
     lines.append(_line_polls(checks.get("polls", {})))
     return "\n".join(lines)
 

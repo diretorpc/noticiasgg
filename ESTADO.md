@@ -95,8 +95,17 @@ Fretes derivados da mensagem dele (Porto − praça): **Pontal 9,00 · Uberaba 1
    → 04/09 21:14 UTC: 200 em 0,8 s, três blocos OK a partir da Vercel. Apolo revisou 2x em 04/09: 3 furos posicionais
    provados por cenário e consertados; `market.collect()` agora projeta só `preco`/`variacao_pct`
    para não inchar o corpus do relatório (teto 6.000). `fetch_cbot`: 3 diretos, depois 1 ScraperAPI.
-2. Fretes em `agent_config` (painel), já com 9/12/27 e data da última edição; aviso no
-   boletim de saúde se passar de 60 dias.
+2. ✅ CÓDIGO PRONTO (04/09, branch `feat/soja-fretes-painel`, 4 rodadas do Apolo) — fretes
+   em `agent_config` chave `soja_fretes` (JSON pontal/uberaba/canarana), `services/soja_fretes.py`
+   é a fonte única de ordem/rótulo/default (`PRACAS`); data e autor vêm de `updated_at`/
+   `updated_by` da própria tabela (o `upsert_config` do backend passou a gravá-los). Painel:
+   tela `/soja`. Boletim de saúde: check `soja_fretes` (só no completo, não no `/api/health`
+   público) → ⚠️ se >60 dias, nunca salvo ou valor corrompido.
+   **CHECKLIST PÓS-DEPLOY: abrir `/soja` no painel e clicar Salvar uma vez** (grava 9/12/27
+   com data) — senão o boletim diário mostra ⚠️ "nunca salvos" todo dia.
+   Medir: `python -m pytest backend/tests/test_soja_fretes.py backend/tests/test_admin_soja_fretes.py -q`.
+   Fora do escopo, registrado: o aviso viaja pelo mesmo WhatsApp que ficou mudo 35 h — só o
+   alarme externo (UptimeRobot) fecha esse buraco.
 3. `services/soja_msg.py`: monta a string exata (teste compara byte a byte com o exemplo).
 4. Cron 12h BRT (= 15:00 UTC) em `vercel.json` + endpoint com `check_cron_secret`, enviando à
    lista de alertas (hoje 2 pessoas).

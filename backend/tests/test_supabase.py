@@ -181,3 +181,62 @@ def test_count_recent_broadcasts_zero_quando_sem_header():
          patch.object(httpx.HTTPTransport, "handle_request", fake_handle):
         n = supabase.count_recent_broadcasts()
     assert n == 0
+
+
+def test_get_config_row_devolve_linha_completa():
+    row = {"key": "soja_fretes", "value": {"pontal": 9.0}, "updated_at": "2026-09-01T00:00:00+00:00",
+           "updated_by": "x@y.com"}
+    captured, fake_handle = _capture_transport([row])
+    with patch.dict(os.environ, _ENV), \
+         patch.object(httpx.HTTPTransport, "handle_request", fake_handle):
+        out = supabase.get_config_row("soja_fretes")
+    assert out == row
+    assert "key=eq.soja_fretes" in captured["url"]
+    assert "select=key%2Cvalue%2Cupdated_at%2Cupdated_by" in captured["url"] or \
+           "select=key,value,updated_at,updated_by" in captured["url"]
+
+
+def test_get_config_row_none_quando_nao_existe():
+    captured, fake_handle = _capture_transport([])
+    with patch.dict(os.environ, _ENV), \
+         patch.object(httpx.HTTPTransport, "handle_request", fake_handle):
+        out = supabase.get_config_row("nao_existe")
+    assert out is None
+
+
+def test_upsert_config_envia_updated_at():
+    captured, fake_handle = _capture_transport([])
+    with patch.dict(os.environ, _ENV), \
+         patch.object(httpx.HTTPTransport, "handle_request", fake_handle):
+        supabase.upsert_config("soja_fretes", {"pontal": 9.0})
+    assert '"updated_at"' in captured["body"]
+
+
+def test_upsert_config_envia_updated_by_quando_informado():
+    captured, fake_handle = _capture_transport([])
+    with patch.dict(os.environ, _ENV), \
+         patch.object(httpx.HTTPTransport, "handle_request", fake_handle):
+        supabase.upsert_config("soja_fretes", {"pontal": 9.0}, updated_by="matheusmouro@hotmail.com")
+    assert '"updated_by": "matheusmouro@hotmail.com"' in captured["body"] or \
+           '"updated_by":"matheusmouro@hotmail.com"' in captured["body"]
+
+
+def test_upsert_config_sem_updated_by_continua_funcionando():
+    """Chamadores existentes (report_prompts) não passam updated_by."""
+    captured, fake_handle = _capture_transport([])
+    with patch.dict(os.environ, _ENV), \
+         patch.object(httpx.HTTPTransport, "handle_request", fake_handle):
+        supabase.upsert_config("report_prompt_bolsas", "PROMPT")
+    assert '"key": "report_prompt_bolsas"' in captured["body"] or \
+           '"key":"report_prompt_bolsas"' in captured["body"]
+
+
+def test_upsert_config_sem_updated_by_nao_manda_o_campo():
+    """Achado 9: mandar `"updated_by": null` sobrescreveria, no upsert (merge-
+    duplicates), o e-mail já gravado pelo painel numa edição anterior. Omitir
+    o campo por completo faz o PostgREST preservar o valor existente na linha."""
+    captured, fake_handle = _capture_transport([])
+    with patch.dict(os.environ, _ENV), \
+         patch.object(httpx.HTTPTransport, "handle_request", fake_handle):
+        supabase.upsert_config("soja_fretes", {"pontal": 9.0})
+    assert "updated_by" not in captured["body"]

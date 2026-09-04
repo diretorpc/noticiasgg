@@ -2,9 +2,9 @@ import os
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictFloat, StrictInt
 
-from backend.services import reporter, auth, supabase, report_engine, schedules, config, report_prompts
+from backend.services import reporter, auth, supabase, report_engine, schedules, config, report_prompts, soja_fretes
 from backend.services import media as media_service
 from backend.collectors import news
 
@@ -195,6 +195,43 @@ def preview_section(body: PreviewSectionBody,
         raise HTTPException(status_code=400, detail="seção inválida")
     text = report_engine.preview_section(body.section, body.prompt)
     return {"text": text}
+
+
+@router.get("/api/admin/soja-fretes")
+def get_soja_fretes(user: dict = Depends(auth.require_admin)) -> dict:
+    """Fretes da mensagem diária 'Soja Disponível': valor efetivo + metadados
+    de edição (para o painel decidir se mostra o selo de envelhecido)."""
+    return soja_fretes.describe()
+
+
+class SojaFretesBody(BaseModel):
+    # StrictFloat | StrictInt (não `float` puro): o Pydantic padrão coage
+    # bool -> float ANTES de `soja_fretes.validar` rodar (bool é subclasse de
+    # int em Python) — {"pontal": true} virava 200 com 1.0 (achado 4, Apolo).
+    # `validar` continua a fonte da faixa/negativo/NaN; isto só barra o tipo.
+    pontal: StrictFloat | StrictInt
+    uberaba: StrictFloat | StrictInt
+    canarana: StrictFloat | StrictInt
+
+
+@router.put("/api/admin/soja-fretes")
+def put_soja_fretes(body: SojaFretesBody,
+                    user: dict = Depends(auth.require_admin)) -> dict:
+    try:
+        fretes = soja_fretes.validar(body.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    supabase.upsert_config(soja_fretes.CONFIG_KEY, fretes, updated_by=user.get("email"))
+    config.clear_cache()
+    return soja_fretes.describe()
+
+
+@router.delete("/api/admin/soja-fretes")
+def delete_soja_fretes(user: dict = Depends(auth.require_admin)) -> dict:
+    """Volta ao default (9/12/27), apagando a linha em agent_config."""
+    supabase.delete_config(soja_fretes.CONFIG_KEY)
+    config.clear_cache()
+    return soja_fretes.describe()
 
 
 @router.post("/api/admin/selflink/{phone}")

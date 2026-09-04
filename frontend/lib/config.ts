@@ -1,6 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
+import type { SojaFretes } from "@/lib/api";
 
 export async function upsertConfig(key: string, value: unknown): Promise<void> {
   const supabase = createClient();
@@ -168,6 +169,49 @@ export async function resetReportPrompt(section: string): Promise<void> {
     { method: "DELETE", headers: { Authorization: `Bearer ${session?.access_token}` } },
   );
   if (!res.ok) throw new Error(`backend ${res.status}`);
+}
+
+export type SojaFretesInput = {
+  pontal: number;
+  uberaba: number;
+  canarana: number;
+};
+
+// A validação mora no backend (soja_fretes.validar) — por isso vai pelo backend,
+// não pelo upsertConfig direto no Supabase (que não confere faixa nem chaves).
+// PUT/DELETE devolvem describe() já atualizado (data/autor novos) — o chamador
+// não precisa refazer o GET.
+export async function saveSojaFretes(body: SojaFretesInput): Promise<SojaFretes> {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/admin/soja-fretes`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token}` },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) {
+    // O 422 do FastAPI/Pydantic manda `detail` como LISTA de erros de
+    // validação (não string) — sem esta checagem a mensagem virava
+    // "Erro: [object Object]" no editor (achado 5).
+    const d = await res.json().catch(() => null);
+    const detail = typeof d?.detail === "string" ? d.detail : "dados inválidos";
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+export async function resetSojaFretes(): Promise<SojaFretes> {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/admin/soja-fretes`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${session?.access_token}` } },
+  );
+  if (!res.ok) throw new Error(`backend ${res.status}`);
+  return res.json();
 }
 
 export async function previewSection(section: string, prompt: string): Promise<string> {
