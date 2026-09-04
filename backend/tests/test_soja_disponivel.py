@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -281,14 +281,16 @@ def test_fetch_cbot_usa_data_de_sao_paulo_quando_hoje_nao_informado(monkeypatch)
     assert "erro" in result
 
 
-def test_hoje_brt_usa_fuso_de_sao_paulo():
+def test_hoje_brt_usa_fuso_de_brasilia():
+    """Offset fixo -3 como o resto do backend — sem `ZoneInfo`, que exigiria
+    `tzdata` instalado na Vercel (achado do Apolo, 04/09)."""
     with patch.object(sd, "datetime") as mock_datetime:
         mock_datetime.now.return_value.date.return_value = date(2026, 9, 4)
         resultado = sd._hoje_brt()
 
     mock_datetime.now.assert_called_once()
     fuso = mock_datetime.now.call_args.args[0]
-    assert str(fuso) == "America/Sao_Paulo"
+    assert fuso.utcoffset(None) == timedelta(hours=-3)
     assert resultado == date(2026, 9, 4)
 
 

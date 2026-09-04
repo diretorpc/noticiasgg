@@ -12,7 +12,6 @@ A formatação da mensagem para o usuário NÃO é responsabilidade deste módul
 """
 import os
 from datetime import date, datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 
 import httpx
 from bs4 import BeautifulSoup
@@ -214,14 +213,17 @@ def parse_porto(html: str) -> dict:
 
 
 def fetch_porto() -> dict:
-    """Tenta, em ordem: página dedicada direto, página geral direto, página
+    """Tenta, em ordem: página geral direto, página dedicada direto, página
     dedicada via ScraperAPI (só se houver chave). Devolve o primeiro parse
     sem erro; senão o último erro (sanitizado)."""
     api_key = os.environ.get("SCRAPER_API_KEY", "")
 
     tentativas: list[tuple[str, int]] = [
-        (_URL_PORTO_DEDICADA, 20),
+        # Geral PRIMEIRO: lá cada bloco tem título próprio e o casamento por nome
+        # é real. Na dedicada todos herdam o <h1>; um bloco intruso (ex.: Paraná)
+        # com data mais nova venceria calado (cenário executado na revisão).
         (_URL_PORTO_GERAL, 20),
+        (_URL_PORTO_DEDICADA, 20),
     ]
     if api_key:
         url_scraper = f"https://api.scraperapi.com/?api_key={api_key}&url={_URL_PORTO_DEDICADA}"
@@ -285,9 +287,11 @@ def rotulo(simbolo: str) -> str:
 
 
 def _hoje_brt() -> date:
-    """Data de HOJE em America/Sao_Paulo — nunca `date.today()`: a Vercel
-    roda em UTC, e perto da meia-noite BRT isso já daria o dia errado."""
-    return datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    """Data de HOJE em Brasília — nunca `date.today()`: a Vercel roda em UTC,
+    e perto da meia-noite BRT isso já daria o dia errado. Offset fixo -3 como
+    o resto do backend (cron_report, alert_checker...): o Brasil não tem
+    horário de verão desde 2019, e `ZoneInfo` exigiria `tzdata` na Vercel."""
+    return datetime.now(timezone(timedelta(hours=-3))).date()
 
 
 def _resultado_cbot(simbolo: str, dados: dict) -> dict:
