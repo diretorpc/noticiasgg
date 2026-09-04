@@ -87,7 +87,8 @@ Fretes derivados da mensagem dele (Porto − praça): **Pontal 9,00 · Uberaba 1
 ### Próximos passos (nesta ordem)
 
 1. ✅ EM PROD (PR #27 mergeada 04/09 18h) `collectors/soja_disponivel.py`: Porto
-   via NA (dedicada → geral → ScraperAPI) casado por nome; `BRL=X`; contrato mais curto por
+   via NA (geral → dedicada → ScraperAPI; geral primeiro porque só lá cada bloco tem título
+   próprio — 2ª revisão do Apolo) casado por nome; `BRL=X`; contrato mais curto por
    calendário (último dia útil antes do dia 15) + 404 do Yahoo. Endpoint
    `/api/collectors/soja_disponivel`. Medir: `python -m pytest backend/tests/test_soja_disponivel.py -q`.
    Conferir em prod depois do deploy: `curl -s https://noticiasgg.vercel.app/api/collectors/soja_disponivel`
