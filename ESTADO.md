@@ -135,7 +135,10 @@ mensagem em nome do bot.
 local atualizado, e a chave saiu dos 6 arquivos (placeholders). **Privar o repo não
 bastaria**: o que ficou 4 meses público trata-se como queimado — a troca é o conserto.
 
-Ainda em aberto: ligar o `ufw` (22 e 8080) e tornar o repositório privado.
+**17h36 — `ufw` LIGADO** (nega o que entra; libera 22/tcp, 8080/tcp, `tailscale0` e
+41641/udp). Provado: `/api/health` `ok`/`open` depois. ⚠️ Porta publicada pelo Docker
+passa por fora do ufw: a 8080 ficaria aberta de qualquer jeito — quem protege a
+Evolution é a chave, não o firewall. Ainda em aberto: tornar o repositório privado.
 
 ### ⚠️ Pendência que este incidente abriu
 
