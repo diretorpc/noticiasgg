@@ -86,12 +86,12 @@ Fretes derivados da mensagem dele (Porto − praça): **Pontal 9,00 · Uberaba 1
 
 ### Próximos passos (nesta ordem)
 
-1. ✅ (04/09, branch `feat/soja-disponivel-collector`) `collectors/soja_disponivel.py`: Porto
+1. ✅ EM PROD (PR #27 mergeada 04/09 18h) `collectors/soja_disponivel.py`: Porto
    via NA (dedicada → geral → ScraperAPI) casado por nome; `BRL=X`; contrato mais curto por
    calendário (último dia útil antes do dia 15) + 404 do Yahoo. Endpoint
    `/api/collectors/soja_disponivel`. Medir: `python -m pytest backend/tests/test_soja_disponivel.py -q`.
    Conferir em prod depois do deploy: `curl -s https://noticiasgg.vercel.app/api/collectors/soja_disponivel`
-   (NA testada só do PC; da Vercel ainda não). Apolo revisou em 04/09: 3 furos posicionais
+   → 04/09 21:14 UTC: 200 em 0,8 s, três blocos OK a partir da Vercel. Apolo revisou 2x em 04/09: 3 furos posicionais
    provados por cenário e consertados; `market.collect()` agora projeta só `preco`/`variacao_pct`
    para não inchar o corpus do relatório (teto 6.000). `fetch_cbot`: 3 diretos, depois 1 ScraperAPI.
 2. Fretes em `agent_config` (painel), já com 9/12/27 e data da última edição; aviso no
