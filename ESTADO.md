@@ -22,6 +22,67 @@ Agente de IA multi-domínio, backend em Python/FastAPI:
 
 Fonte viva do que existe hoje: `README.md` e `CLAUDE.md` na raiz do projeto.
 
+## Feature em andamento (04/09/2026) — mensagem diária "Soja Disponível" às 12h
+
+Pedido do Matheus: o bot manda todo dia às 12h, em MENSAGEM SEPARADA (não no relatório),
+neste formato EXATO — montado por CÓDIGO, nunca pelo modelo (formato fixo + LLM = deriva):
+
+```
+Soja Disponível
+
+Porto 🌱🛳️ = 159,44
+Pontal/SP🌱1️⃣ = 150,44
+Uberaba/MG🌱2️⃣ = 147,44
+Canarana/MT🌱3️⃣ = 132,44
+
+💵 = 5,153
+🇺🇸🌱ZSU6 Setembro26 = 12,504/bushe
+```
+
+### Especificação FECHADA — respondida pelo primo (G.Mouro, 5516991016898) em 04/09 15:33
+
+Fonte: mensagem dele no banco da Evolution (`Message`, remoteJid `255666618896603@lid`).
+Eu conversei com ele direto pelo número do bot, com autorização do Matheus.
+
+| # | Pergunta | Resposta dele | Consequência |
+|---|---|---|---|
+| 1 | porto base | **Santos = Paranaguá, considerar iguais; fonte CEPEA** (`cepea.org.br/br/indicador/soja.aspx`) | **UM bloco só** — morreu o problema dos 6 fretes |
+| 2 | Canarana R$ 27/sc (58% acima do mercado→Santos) | é valor **conservador, perto da máxima de safra** (fev/mar passa de R$ 500/t); Canarana escoa por Santos, Paranaguá, Vitória, Arco Norte, Rio Verde, Uberaba, Rondonópolis | usar os números DELE como estão; nunca "corrigir" por média |
+| 3 | frete inclui algo? | **só frete** | — |
+| 4 | fretes p/ 2º porto? | **não tem** — rotas variam no ano | confirma bloco único |
+| 5 | frete muda quando? | caro em **jan–mar** (colheita: menos caminhão na estrada) | painel: frete editável + data; lembrete sazonal é opcional |
+| 6 | CBOT fixo em ZSU6? | **sempre o contrato MAIS CURTO** (hoje ZSU6) | rótulo roda sozinho: Set→Nov→Jan…; `ZS=F` do Yahoo NÃO serve (já está em Nov) |
+| 7 | dólar | **comercial** | Yahoo `BRL=X`, 3 casas |
+
+Fretes derivados da mensagem dele (Porto − praça): **Pontal 9,00 · Uberaba 12,00 · Canarana 27,00**
+(R$/sc, todos redondos — por isso os ",44" repetidos vinham do Porto).
+
+### Verificações feitas (o que já se sabe que funciona / não funciona)
+
+- **Yahoo tem cada contrato:** `ZS{F,H,K,N,Q,U,X}{aa}.CBT` — testado ZSU26 (1294,25), ZSX26, ZSF27,
+  ZSH27, ZSK27, ZSN27, ZSQ27, todos 200. Preço em **USX (centavos)** → dividir por 100 e
+  mostrar 3 casas ("12,504/bushel"). "Mais curto" = menor vencimento AINDA negociado (Set
+  negocia até ~14/09); calcular por código, não pelo `ZS=F`.
+- **`BRL=X`** = comercial (5,1267 em 04/09); arredondar a 3 casas.
+- **CEPEA bloqueia datacenter**: WebFetch → **403**; a auditoria de julho já registrava
+  `esalq` quebrado em prod por isso (timeout ~21 s). `collectors/esalq.py` existe (cana) e já
+  tenta ScraperAPI como 2ª via. Plano: CEPEA via **ScraperAPI** (primeiro sem render; `render=true`
+  se precisar) com fallback em `noticiasagricolas.com.br/cotacoes/soja` → linha **"Porto
+  Paranaguá (disponível)"** (159,00 em 01/09; é o CEPEA arredondado). **Casar por NOME da
+  linha, nunca por posição** — o scraper atual é posicional (achado da auditoria).
+- Fonte caiu → a linha diz "indisponível"; **nunca some em silêncio**.
+
+### Próximos passos (nesta ordem)
+
+1. `collectors/soja_disponivel.py`: CEPEA (ScraperAPI) + fallback NA por nome; `BRL=X`;
+   contrato mais curto (`ZS*.CBT`). Tudo com teste unitário e sem rede no CI.
+2. Fretes em `agent_config` (painel), já com 9/12/27 e data da última edição; aviso no
+   boletim de saúde se passar de 60 dias.
+3. `services/soja_msg.py`: monta a string exata (teste compara byte a byte com o exemplo).
+4. Cron 12h BRT (= 15:00 UTC) em `vercel.json` + endpoint com `check_cron_secret`, enviando à
+   lista de alertas (hoje 2 pessoas).
+5. Apolo antes do merge. Prova de campo: comparar com a mensagem que o primo manda no dia.
+
 ## Estado em 04/09/2026 — bot MUDO por ~35 h: a VPS reiniciou e a versão VELHA ganhou a porta
 
 Descoberto por acidente, ao tentar mandar uma mensagem pelo bot. `/api/health` marcava
