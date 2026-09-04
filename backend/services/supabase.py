@@ -706,11 +706,34 @@ def get_by_selflink_token(token: str) -> dict | None:
         return rows[0] if rows else None
 
 
-def upsert_config(key: str, value) -> None:
+def get_config_row(key: str) -> dict | None:
+    """Lê uma linha COMPLETA de agent_config (key, value, updated_at, updated_by).
+    Diferente de get_all_config (só key/value, para o cache de config.py) — usado
+    por quem precisa saber QUANDO e QUEM editou (soja_fretes)."""
+    with _client() as c:
+        r = c.get(f"/agent_config?key=eq.{_f(key)}&select=key,value,updated_at,updated_by")
+        r.raise_for_status()
+        rows = r.json()
+        return rows[0] if rows else None
+
+
+def upsert_config(key: str, value, updated_by: str | None = None) -> None:
+    payload = {
+        "key": key,
+        "value": value,
+        "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    # Só inclui `updated_by` quando informado (achado 9): com Prefer
+    # resolution=merge-duplicates, o PostgREST só sobrescreve, no conflito, as
+    # colunas presentes no payload. Mandar `updated_by: null` explicitamente
+    # apagaria o e-mail já gravado numa edição anterior sempre que um chamador
+    # futuro fizer upsert na mesma chave sem passar quem editou.
+    if updated_by:
+        payload["updated_by"] = updated_by
     with _client() as c:
         r = c.post(
             "/agent_config",
-            json={"key": key, "value": value},
+            json=payload,
             headers={"Prefer": "resolution=merge-duplicates,return=representation"},
         )
         r.raise_for_status()

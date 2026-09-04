@@ -1,3 +1,4 @@
+import copy
 import os
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
@@ -251,9 +252,14 @@ _ADMIN_ENV = {"REPLY_TO_NUMBER": "5534999945010"}
 
 
 def test_send_daily_digest_envia_para_admin():
+    # deepcopy virou redundante em 04/09: collect_status_completo passou a copiar
+    # os dois níveis antes de acrescentar checks (health.py). Fica como rede caso
+    # alguém reintroduza escrita no dict recebido — foi isso que envenenava os
+    # testes seguintes conforme a ordem (3ª revisão do Apolo).
     with patch.dict(os.environ, _ADMIN_ENV), \
          patch("backend.services.health.supabase.get_alert_last_triggered", return_value=None), \
-         patch("backend.services.health.collect_status", return_value=_STATUS_OK), \
+         patch("backend.services.health.collect_status",
+               side_effect=lambda: copy.deepcopy(_STATUS_OK)), \
          patch("backend.services.health.supabase.set_alert_triggered"), \
          patch("backend.services.health.whatsapp.send_message") as mock_send:
         out = health.send_daily_digest()
@@ -338,6 +344,145 @@ def test_digest_diario_confere_as_fontes():
     assert st["checks"]["news_sources"]["status"] == "warn"
     assert st["checks"]["news_sources"]["mortas"] == ["A", "B"]
     assert "18/20" in health.format_digest(st)
+
+
+def _completo_soja(describe_return, sonda=None, fontes=None):
+    """Molde de `_completo` em test_anthropic_status.py: `collect_status` fixo em
+    ok e só a peça sob teste (soja_fretes.describe) varia."""
+    with patch.object(health.anthropic_status, "sondar",
+                      return_value=sonda or {"status": "ok"}), \
+         patch.object(health, "collect_status",
+                      return_value={"status": "ok", "checks": {"keys": {"status": "ok", "faltando": []}},
+                                    "checked_at": "t"}), \
+         patch("backend.collectors.news.source_health",
+               return_value=fontes or {"vivas": 20, "total": 20, "mortas": []}), \
+         patch.object(health.soja_fretes, "describe", return_value=describe_return):
+        return health.collect_status_completo()
+
+
+_SOJA_NUNCA_SALVO = {
+    "fretes": {"pontal": 9.0, "uberaba": 12.0, "canarana": 27.0},
+    "pracas": [], "is_custom": False, "updated_at": None, "updated_by": None,
+    "idade_dias": None, "envelhecido": True,
+}
+
+_SOJA_10_DIAS = {
+    "fretes": {"pontal": 8.5, "uberaba": 11.0, "canarana": 26.0},
+    "pracas": [], "is_custom": True, "updated_at": "2026-08-25T00:00:00+00:00",
+    "updated_by": "matheusmouro@hotmail.com", "idade_dias": 10, "envelhecido": False,
+}
+
+_SOJA_61_DIAS = {
+    **_SOJA_10_DIAS, "idade_dias": 61, "envelhecido": True,
+}
+
+# Achado 1: valor salvo inválido/parcial (describe() completa com default e
+# marca "aviso"), mas com updated_at RECENTE (envelhecido=False) — o check
+# ignorava o aviso e dizia "ok".
+_SOJA_AVISO_RECENTE = {
+    **_SOJA_10_DIAS,
+    "aviso": "valor salvo incompleto ou inválido — usando padrão para o(s) frete(s) faltante(s)",
+}
+
+# Achado 2: updated_at nulo/ilegível -> idade_dias=None, com is_custom True
+# (linha existe, mas a data não presta). A mensagem não pode virar "há None dias".
+_SOJA_ILEGIVEL = {
+    "fretes": {"pontal": 8.5, "uberaba": 11.0, "canarana": 26.0},
+    "pracas": [], "is_custom": True, "updated_at": "não é uma data",
+    "updated_by": "x", "idade_dias": None, "envelhecido": True,
+}
+
+
+@pytest.mark.unit
+def test_collect_status_completo_soja_fretes_warn_quando_nunca_salvo():
+    r = _completo_soja(_SOJA_NUNCA_SALVO)
+    assert r["checks"]["soja_fretes"]["status"] == "warn"
+    assert "9/12/27" in r["checks"]["soja_fretes"]["message"] or \
+           "padrão" in r["checks"]["soja_fretes"]["message"].lower()
+
+
+@pytest.mark.unit
+def test_collect_status_completo_soja_fretes_ok_quando_10_dias():
+    r = _completo_soja(_SOJA_10_DIAS)
+    assert r["checks"]["soja_fretes"]["status"] == "ok"
+    assert r["checks"]["soja_fretes"]["idade_dias"] == 10
+    assert r["checks"]["soja_fretes"]["updated_at"] == "2026-08-25T00:00:00+00:00"
+
+
+@pytest.mark.unit
+def test_collect_status_completo_soja_fretes_warn_quando_61_dias():
+    r = _completo_soja(_SOJA_61_DIAS)
+    assert r["checks"]["soja_fretes"]["status"] == "warn"
+    assert "61" in r["checks"]["soja_fretes"]["message"]
+    assert "primo" in r["checks"]["soja_fretes"]["message"].lower()
+
+
+@pytest.mark.unit
+def test_collect_status_completo_soja_fretes_warn_quando_aviso_mesmo_nao_envelhecido():
+    """Achado 1 do Apolo: valor salvo inválido/parcial some atrás do default
+    silenciosamente — o check tem que avisar mesmo com updated_at recente."""
+    r = _completo_soja(_SOJA_AVISO_RECENTE)
+    assert r["checks"]["soja_fretes"]["status"] == "warn"
+    assert "inválido" in r["checks"]["soja_fretes"]["message"] or \
+           "incompleto" in r["checks"]["soja_fretes"]["message"]
+
+
+@pytest.mark.unit
+def test_line_soja_fretes_aviso_mostra_alerta():
+    linha = health._line_soja_fretes({"status": "warn", "message": "valor salvo incompleto"})
+    assert "⚠️" in linha
+
+
+@pytest.mark.unit
+def test_collect_status_completo_soja_fretes_warn_data_ilegivel_sem_none_na_mensagem():
+    """Achado 2 do Apolo: 'editados há None dias' não pode ir pro WhatsApp."""
+    r = _completo_soja(_SOJA_ILEGIVEL)
+    assert r["checks"]["soja_fretes"]["status"] == "warn"
+    msg = r["checks"]["soja_fretes"]["message"]
+    assert "None" not in msg
+    assert "ilegível" in msg.lower() or "ilegivel" in msg.lower()
+
+
+@pytest.mark.unit
+def test_collect_status_completo_soja_fretes_warn_quando_describe_traz_erro():
+    r = _completo_soja({**_SOJA_NUNCA_SALVO, "erro": "500 supabase indisponível"})
+    assert r["checks"]["soja_fretes"]["status"] == "warn"
+    assert "supabase" in r["checks"]["soja_fretes"]["message"].lower()
+
+
+@pytest.mark.unit
+def test_collect_status_completo_soja_fretes_excecao_nao_derruba_outros_checks():
+    """Vizinhos (news_sources, anthropic) protegem com try/except; soja_fretes
+    tem que seguir o mesmo padrão, sem soja_fretes.describe() ele nunca levanta,
+    mas o check em si (chamada + montagem da linha) não pode derrubar o boletim."""
+    with patch.object(health.anthropic_status, "sondar", return_value={"status": "ok"}), \
+         patch.object(health, "collect_status",
+                      return_value={"status": "ok", "checks": {"keys": {"status": "ok", "faltando": []}},
+                                    "checked_at": "t"}), \
+         patch("backend.collectors.news.source_health",
+               return_value={"vivas": 20, "total": 20, "mortas": []}), \
+         patch.object(health.soja_fretes, "describe", side_effect=RuntimeError("estourou")):
+        r = health.collect_status_completo()
+    assert r["checks"]["soja_fretes"]["status"] == "warn"
+    assert "news_sources" in r["checks"]
+    assert "anthropic" in r["checks"]
+
+
+@pytest.mark.unit
+def test_format_digest_soja_fretes_aparece_quando_envelhecido():
+    status = {**_STATUS_OK, "checks": {**_STATUS_OK["checks"],
+              "soja_fretes": {"status": "warn", "message": "nunca salvos no painel — usando padrão 9/12/27"}}}
+    msg = health.format_digest(status)
+    assert "soja" in msg.lower() or "Soja" in msg
+    assert "⚠️" in msg
+
+
+@pytest.mark.unit
+def test_format_digest_soja_fretes_nao_aparece_se_ausente():
+    """Igual a news_sources: só entra no boletim quando a chave existe (é
+    exclusiva do collect_status_completo)."""
+    msg = health.format_digest(_STATUS_OK)
+    assert "Soja" not in msg and "soja" not in msg
 
 
 def test_entrega_por_destinatario_secando_vira_error_com_a_mensagem_certa():
