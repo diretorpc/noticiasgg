@@ -73,7 +73,7 @@ c:\noticiasgg\
 | `NEWS_API_KEY` | Chave da NewsAPI |
 | `SCRAPER_API_KEY` | Chave do ScraperAPI |
 | `EVOLUTION_API_URL` | `http://46.202.179.33:8080` |
-| `EVOLUTION_API_KEY` | `noticiasgg2026` |
+| `EVOLUTION_API_KEY` | **só no `.env` e na Vercel** — nunca aqui. Ficou pública neste repo de 13/05 a 04/09/2026 e foi TROCADA em 04/09 |
 | `EVOLUTION_INSTANCE` | `noticiasgg` |
 | `EVOLUTION_API_V2` | `true` — payload achatado da v2. Sem ela o backend usa o formato v1.8.2 e a v2 rejeita com 500 |
 | `AUTHORIZED_NUMBER` | Número WhatsApp autorizado (formato Evolution: `553496592975`) |
@@ -191,7 +191,7 @@ pytest backend/tests/ -v
 
 ```bash
 curl -X POST "http://46.202.179.33:8080/webhook/set/noticiasgg" \
-  -H "apikey: noticiasgg2026" \
+  -H "apikey: $EVOLUTION_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"url": "https://noticiasgg.vercel.app/api/webhook", "events": ["MESSAGES_UPSERT"]}'
 ```

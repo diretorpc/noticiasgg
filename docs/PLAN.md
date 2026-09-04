@@ -210,7 +210,7 @@ Usuário: "relatório pdf"
 ### Entregas
 
 - [ ] **WhatsApp — conectar via QR code:**
-  - [ ] Na VPS: `curl http://localhost:8080/instance/connect/noticiasgg -H "apikey: noticiasgg2026"`
+  - [ ] Na VPS: `curl http://localhost:8080/instance/connect/noticiasgg -H "apikey: $EVOLUTION_API_KEY"`
   - [ ] Salvar QR code em `/tmp/qr.png` e baixar pelo File Manager do Hostinger
   - [ ] Escanear com o WhatsApp
   - [ ] Verificar: `GET http://46.202.179.33:8080/instance/connectionState/noticiasgg` → `"open"`

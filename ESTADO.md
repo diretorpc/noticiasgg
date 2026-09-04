@@ -116,10 +116,26 @@ levou 7 semanas para acontecer.
 
 Conferir se voltou a acontecer (uma linha, de fora):
 ```bash
-curl -s -H "apikey: noticiasgg2026" http://46.202.179.33:8080/instance/connectionState/noticiasgg
+curl -s -H "apikey: $EVOLUTION_API_KEY" http://46.202.179.33:8080/instance/connectionState/noticiasgg
 ```
 Esperado: `{"instance":{"instanceName":"noticiasgg","state":"open"}}`. Qualquer outra
 coisa (404, vazio, `close`) = o bot está mudo.
+
+### 🔴 04/09, 17h — A CHAVE DA EVOLUTION ESTAVA PÚBLICA DESDE 13/05, e foi TROCADA
+
+Achado na conferência do reset da VPS: o repositório é PÚBLICO e a chave real da
+API (a mesma do `docker-compose.yml`) estava em 6 arquivos versionados desde o
+scaffold de 13/05 — `CLAUDE.md`, este arquivo, `docs/PLAN.md` e 3 exports do n8n.
+Porta 8080 aberta para a internet, `ufw` inativo: qualquer um com um `curl` mandava
+mensagem em nome do bot.
+
+**Feito em 04/09:** chave nova gerada, trocada no compose da VPS (backup em
+`docker-compose.yml.bak-20260904`), container recriado, chave velha responde **401**,
+`EVOLUTION_API_KEY` trocada na Vercel + redeploy, `/api/health` = `ok`/`open`, `.env`
+local atualizado, e a chave saiu dos 6 arquivos (placeholders). **Privar o repo não
+bastaria**: o que ficou 4 meses público trata-se como queimado — a troca é o conserto.
+
+Ainda em aberto: ligar o `ufw` (22 e 8080) e tornar o repositório privado.
 
 ### ⚠️ Pendência que este incidente abriu
 

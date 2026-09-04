@@ -178,7 +178,7 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "apikey", "value": "noticiasgg2026" },
+            { "name": "apikey", "value": "COLOQUE_A_EVOLUTION_API_KEY_DO_ENV" },
             { "name": "Content-Type", "value": "application/json" }
           ]
         },
@@ -200,7 +200,7 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "apikey", "value": "noticiasgg2026" },
+            { "name": "apikey", "value": "COLOQUE_A_EVOLUTION_API_KEY_DO_ENV" },
             { "name": "Content-Type", "value": "application/json" }
           ]
         },
@@ -222,7 +222,7 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "apikey", "value": "noticiasgg2026" },
+            { "name": "apikey", "value": "COLOQUE_A_EVOLUTION_API_KEY_DO_ENV" },
             { "name": "Content-Type", "value": "application/json" }
           ]
         },

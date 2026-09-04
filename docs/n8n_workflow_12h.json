@@ -123,7 +123,7 @@
           "parameters": [
             {
               "name": "apikey",
-              "value": "noticiasgg2026"
+              "value": "COLOQUE_A_EVOLUTION_API_KEY_DO_ENV"
             },
             {
               "name": "Content-Type",
