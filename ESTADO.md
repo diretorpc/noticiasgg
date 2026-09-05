@@ -105,14 +105,26 @@ Fretes derivados da mensagem dele (Porto − praça): **Pontal 9,00 · Uberaba 1
    Medir: `python -m pytest backend/tests/test_soja_fretes.py backend/tests/test_admin_soja_fretes.py -q`.
    Fora do escopo, registrado: o aviso viaja pelo mesmo WhatsApp que ficou mudo 35 h — só o
    alarme externo (UptimeRobot) fecha esse buraco.
-3. ✅ CÓDIGO PRONTO (04/09, branch `feat/soja-msg`, 3 rodadas do Apolo) `services/soja_msg.py`:
+3. ✅ EM PROD (PR #29 mergeada 05/09 10h; 3 rodadas do Apolo) `services/soja_msg.py`:
    `montar()` pura (byte a byte com o exemplo, `/bushel`), `gerar()` nunca levanta e devolve texto +
    `indisponiveis`/`avisos` derivados do próprio texto (fonte caiu → linha `indisponível`; Supabase
    fora ou frete corrompido → 3 praças `indisponível`, nunca o padrão calado; praça ≤ 0 → indisponível
    + aviso). Prévia no painel `/soja` (`GET /api/admin/soja-preview`, timeout 10 s, com data do CEPEA
    e horário do pregão em BRT). Medir: `python -m pytest backend/tests/test_soja_msg.py -q`.
 4. Cron 12h BRT (= 15:00 UTC) em `vercel.json` + endpoint com `check_cron_secret`, enviando à
-   lista de alertas (hoje 2 pessoas).
+   lista de alertas (hoje 2 pessoas). **Decisão do Matheus (05/09): se `indisponiveis` não estiver
+   vazio, a mensagem NÃO sai — só o admin recebe o aviso** (nunca mandar praça "indisponível"
+   ao primo). Trava "já enviado hoje" por `alert_state`; `?test=true` manda só ao admin.
+   ✅ CÓDIGO PRONTO (05/09, branch `feat/soja-cron`, 2 rodadas do Apolo): `services/soja_digest.py`,
+   `GET /api/cron/soja`, `vercel.json` `0 15 * * *`. Avisos de falha ao admin vão DIRETO por
+   `send_message` (o `notify_admin` tem cooldown de 2 h que engoliria o aviso das 12h). Trava
+   conferida antes da coleta; `test_mode` sem admin aborta (antes mandava à lista real).
+   Medir: `python -m pytest backend/tests/test_soja_digest_run.py backend/tests/test_cron_soja_route.py -q`.
+   Prova de campo: `curl -H "x-cron-secret: $CRON_SECRET" "https://noticiasgg.vercel.app/api/cron/soja?test=true"`
+   (manda só ao admin, texto idêntico ao real).
+   **Acompanhamento (Apolo, 05/09):** aviso ao admin quando `porto_data_ref` for mais velho que o
+   último dia útil (fonte congelada passa como dado do dia); migrar as 7 cópias de `hours=-3`
+   para `services/date_brt.py`.
 5. Apolo antes do merge. Prova de campo: comparar com a mensagem que o primo manda no dia.
 
 ## Estado em 04/09/2026 — bot MUDO por ~35 h: a VPS reiniciou e a versão VELHA ganhou a porta

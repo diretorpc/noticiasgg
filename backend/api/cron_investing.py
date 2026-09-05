@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request
 
 from backend.api.cron_auth import check_cron_secret
 from backend.services import investing_digest, alert_checker
+from backend.services.secrets_mask import sanitize_error
 
 logger = logging.getLogger("noticiasgg")
 router = APIRouter()
@@ -16,8 +17,9 @@ async def cron_investing(request: Request, test: bool = False):
         return investing_digest.run(test_mode=test)
     except Exception as e:
         logger.exception("cron_investing failed")
+        detail = sanitize_error(e)
         try:
-            alert_checker.notify_admin([f"fatal: {e}"], title="cron investing com falha")
+            alert_checker.notify_admin([f"fatal: {detail}"], title="cron investing com falha")
         except Exception:
             logger.exception("admin notify failed")
-        return {"status": "error", "detail": str(e)}
+        return {"status": "error", "detail": detail}
