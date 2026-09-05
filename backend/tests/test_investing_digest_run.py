@@ -78,3 +78,54 @@ def test_run_no_recipients_returns_error(monkeypatch):
     result = investing_digest.run()
     assert result["status"] == "error"
     assert notified  # admin avisado de 0 destinatários
+
+
+def test_test_mode_without_admin_does_not_broadcast_to_real_list(monkeypatch):
+    """Achado da revisão 05/09/2026 (Apolo): sem REPLY_TO_NUMBER/AUTHORIZED_NUMBER,
+    test_mode mandava a mensagem REAL para a lista inteira, sem marca de teste e
+    sem armar a trava. Tem que abortar antes de qualquer broadcast."""
+    sent = []
+    _wire(monkeypatch, sent)
+    monkeypatch.delenv("REPLY_TO_NUMBER", raising=False)
+    monkeypatch.delenv("AUTHORIZED_NUMBER", raising=False)
+
+    broadcast_calls = []
+    monkeypatch.setattr(alert_checker, "_broadcast",
+                        lambda *a, **k: broadcast_calls.append(a) or 0)
+
+    result = investing_digest.run(test_mode=True)
+
+    assert result["status"] == "error"
+    assert result["detail"] == "test_mode sem admin configurado"
+    assert result["sent"] == 0
+    assert broadcast_calls == []
+
+
+@pytest.mark.unit
+def test_set_alert_triggered_falhando_num_evento_nao_derruba_o_lote(monkeypatch):
+    """Trava gravada por evento em try/except: 503 intermitente no 2º evento não
+    pode estourar run() (e reenviar o lote inteiro na próxima hora)."""
+    monkeypatch.setattr(alert_checker, "_get_recipients",
+                        lambda: [{"phone": "553400000000", "name": "Chefe"}])
+    monkeypatch.setattr(investing_calendar, "fetch", lambda: "<html/>")
+    monkeypatch.setattr(investing_calendar, "parse", lambda html: [
+        {"event_id": "e1", "flag_emoji": "🇺🇸", "name": "CPI", "time": "09:30",
+         "actual": "1.0", "forecast": "1.0", "previous": "1.0"},
+        {"event_id": "e2", "flag_emoji": "🇺🇸", "name": "PPI", "time": "09:30",
+         "actual": "1.0", "forecast": "1.0", "previous": "1.0"},
+    ])
+    monkeypatch.setattr(supabase, "get_alert_last_triggered", lambda rid: None)
+    gravadas = []
+
+    def set_trigger(rid):
+        if rid.startswith("investing_e2_"):
+            raise RuntimeError("supabase 503")
+        gravadas.append(rid)
+    monkeypatch.setattr(supabase, "set_alert_triggered", set_trigger)
+    monkeypatch.setattr(alert_checker, "_broadcast", lambda msg, targets, errors: 1)
+    monkeypatch.setattr(alert_checker, "notify_admin", lambda errors, title="x": None)
+
+    out = investing_digest.run()
+
+    assert out["status"] == "ok"
+    assert len(gravadas) == 1 and gravadas[0].startswith("investing_e1_")
