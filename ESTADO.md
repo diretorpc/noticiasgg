@@ -101,9 +101,8 @@ Fretes derivados da mensagem dele (Porto − praça): **Pontal 9,00 · Uberaba 1
    `updated_by` da própria tabela (o `upsert_config` do backend passou a gravá-los). Painel:
    tela `/soja`. Boletim de saúde: check `soja_fretes` (só no completo, não no `/api/health`
    público) → ⚠️ se >60 dias, nunca salvo ou valor corrompido.
-   **PENDENTE (Matheus, combinado 04/09): abrir `/soja` no painel e clicar Salvar uma vez**
-   (grava 9/12/27 com data) — até lá o boletim diário mostra ⚠️ "nunca salvos". Conferir:
-   o boletim do dia seguinte deve trazer "Fretes Soja Disponível: OK (0 dias)".
+   Matheus salvou 9/12/27 em `/soja` em 04/09 21:16 (data e autor gravados, selo sumiu).
+   Conferir no boletim de 05/09: "Fretes Soja Disponível: OK (0 dias)".
    Medir: `python -m pytest backend/tests/test_soja_fretes.py backend/tests/test_admin_soja_fretes.py -q`.
    Fora do escopo, registrado: o aviso viaja pelo mesmo WhatsApp que ficou mudo 35 h — só o
    alarme externo (UptimeRobot) fecha esse buraco.
