@@ -77,11 +77,10 @@ Fretes derivados da mensagem dele (Porto − praça): **Pontal 9,00 · Uberaba 1
   dois blocos empatados na data com preços diferentes → erro, nunca escolhe às cegas. Testes
   provam: o 162,00 da Insoy nunca sai; coluna `Valor US$` injetada não engana; bloco Paraná
   injetado na página dedicada vira erro; tabela em ordem crescente devolve o dia certo.
-- **CEPEA publica à tarde**: às 12h o valor disponível é o de ontem (D-1). O formato do primo
-  não mostra data — decidir no passo 3 se a mensagem carrega o `data_ref`.
-- **O 159,44 do exemplo do primo não bate com nenhum CEPEA Paranaguá de 01–03/09**
-  (161,14 / 160,99 / 160,14). Ou o exemplo é de outro dia, ou ele usa a série **CEPEA
-  Paraná** (outra). Perguntar a ele antes do passo 3.
+- **Respostas 8 e 9 do primo (04/09 ~22h40, via Matheus):** (8) o 159,44 era só exemplo; a
+  série é **Paranaguá** e a regra é **sempre o valor mais recente**. (9) o CEPEA do dia só sai
+  **depois das 19h** → às 12h a mensagem carrega o valor de ontem (D-1), **sem data**, igual
+  ao formato dele. O `data_ref` fica só no coletor/boletim, não na mensagem.
 - Fonte caiu → a linha diz "indisponível"; **nunca some em silêncio**.
 
 ### Próximos passos (nesta ordem)
