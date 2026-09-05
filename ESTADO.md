@@ -36,7 +36,7 @@ Uberaba/MG🌱2️⃣ = 147,44
 Canarana/MT🌱3️⃣ = 132,44
 
 💵 = 5,153
-🇺🇸🌱ZSU6 Setembro26 = 12,504/bushe
+🇺🇸🌱ZSU6 Setembro26 = 12,504/bushel
 ```
 
 ### Especificação FECHADA — respondida pelo primo (G.Mouro, 5516991016898) em 04/09 15:33
@@ -105,7 +105,12 @@ Fretes derivados da mensagem dele (Porto − praça): **Pontal 9,00 · Uberaba 1
    Medir: `python -m pytest backend/tests/test_soja_fretes.py backend/tests/test_admin_soja_fretes.py -q`.
    Fora do escopo, registrado: o aviso viaja pelo mesmo WhatsApp que ficou mudo 35 h — só o
    alarme externo (UptimeRobot) fecha esse buraco.
-3. `services/soja_msg.py`: monta a string exata (teste compara byte a byte com o exemplo).
+3. ✅ CÓDIGO PRONTO (04/09, branch `feat/soja-msg`, 3 rodadas do Apolo) `services/soja_msg.py`:
+   `montar()` pura (byte a byte com o exemplo, `/bushel`), `gerar()` nunca levanta e devolve texto +
+   `indisponiveis`/`avisos` derivados do próprio texto (fonte caiu → linha `indisponível`; Supabase
+   fora ou frete corrompido → 3 praças `indisponível`, nunca o padrão calado; praça ≤ 0 → indisponível
+   + aviso). Prévia no painel `/soja` (`GET /api/admin/soja-preview`, timeout 10 s, com data do CEPEA
+   e horário do pregão em BRT). Medir: `python -m pytest backend/tests/test_soja_msg.py -q`.
 4. Cron 12h BRT (= 15:00 UTC) em `vercel.json` + endpoint com `check_cron_secret`, enviando à
    lista de alertas (hoje 2 pessoas).
 5. Apolo antes do merge. Prova de campo: comparar com a mensagem que o primo manda no dia.
