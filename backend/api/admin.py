@@ -4,7 +4,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, StrictFloat, StrictInt
 
-from backend.services import reporter, auth, supabase, report_engine, schedules, config, report_prompts, soja_fretes
+from backend.services import reporter, auth, supabase, report_engine, schedules, config, report_prompts, soja_fretes, soja_msg
 from backend.services import media as media_service
 from backend.collectors import news
 
@@ -232,6 +232,13 @@ def delete_soja_fretes(user: dict = Depends(auth.require_admin)) -> dict:
     supabase.delete_config(soja_fretes.CONFIG_KEY)
     config.clear_cache()
     return soja_fretes.describe()
+
+
+@router.get("/api/admin/soja-preview")
+def get_soja_preview(user: dict = Depends(auth.require_admin)) -> dict:
+    """Prévia da mensagem diária 'Soja Disponível' com os dados AO VIVO
+    (coleta + fretes) — mesma montagem que o cron das 12h vai enviar."""
+    return soja_msg.gerar()
 
 
 @router.post("/api/admin/selflink/{phone}")

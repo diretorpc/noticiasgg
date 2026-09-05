@@ -146,3 +146,34 @@ export async function fetchSojaFretes(): Promise<SojaFretes> {
   if (!res.ok) throw new Error(`backend ${res.status}`);
   return res.json();
 }
+
+export type SojaPreview = {
+  texto: string;
+  porto_data_ref: string | null;
+  cbot_simbolo: string | null;
+  // Epoch (segundos) do pregão CBOT / da cotação do dólar — usados só para
+  // exibir a defasagem embaixo da prévia (achado 3); a mensagem do WhatsApp
+  // em si continua sem data.
+  cbot_atualizado_em: number | null;
+  dolar_atualizado_em: number | null;
+  avisos: string[];
+  indisponiveis: string[];
+};
+
+export async function fetchSojaPreview(): Promise<SojaPreview> {
+  const supabase = await createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/admin/soja-preview`,
+    {
+      headers: { Authorization: `Bearer ${session?.access_token}` },
+      cache: "no-store",
+      // A prévia chama coleta AO VIVO (scraping + Yahoo) — pode demorar ou
+      // travar sozinha (achado 4); um timeout aqui evita que ISSO derrube a
+      // página `/soja` inteira (fretes incluídos).
+      signal: AbortSignal.timeout(10000),
+    },
+  );
+  if (!res.ok) throw new Error(`backend ${res.status}`);
+  return res.json();
+}
