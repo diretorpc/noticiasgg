@@ -1,5 +1,6 @@
 import os
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -13,6 +14,14 @@ from backend.services import alert_checker
 # get_recent_sent_titles — o resultado dependia dos dados do dia. Corrigido, o
 # arquivo é determinístico (medido: zero conexões) e entra no portão.
 pytestmark = pytest.mark.unit
+
+# Referência ao `_capture_conteudo` de VERDADE, capturada no IMPORT do módulo —
+# antes de qualquer `patch()` de teste rodar. `_sem_news_log` (fixture autouse
+# abaixo) troca `alert_checker._capture_conteudo` por um stub em TODO teste
+# deste arquivo; os testes de reaproveitamento da camada 1 precisam da função
+# real (para provar que `web_search.read_article` é chamado uma única vez) e
+# sobrescrevem o stub de volta com esta referência.
+_capture_conteudo_real = alert_checker._capture_conteudo
 
 
 @pytest.fixture(autouse=True)
@@ -98,6 +107,30 @@ def test_run_checks_sem_recipients_notifica_admin():
     assert result["recipients"] == 0
     mock_notify.assert_called_once()
     assert "recipients" in mock_notify.call_args[0][0][0]
+
+
+def test_run_checks_devolve_duracao_s():
+    """Item 2 (3ª revisão do Apolo, 05/09/2026): orçamento de tempo tem que
+    ser MEDIDO, não estimado — número em comentário apodrece, medição não."""
+    with patch("backend.services.alert_checker._get_recipients", return_value=_RECIPIENTS), \
+         patch("backend.services.alert_checker._collect_all", return_value={"market": {}}), \
+         patch("backend.services.alert_checker._check_price_rules", return_value=0), \
+         patch("backend.services.alert_checker._check_copom", return_value=0), \
+         patch("backend.services.alert_checker._check_eia", return_value=0), \
+         patch("backend.services.alert_checker._check_news", return_value=0):
+        result = alert_checker.run_checks(test_mode=False)
+    assert "duracao_s" in result
+    assert result["duracao_s"] >= 0
+
+
+def test_run_checks_sem_recipients_tambem_devolve_duracao_s():
+    """A saída antecipada (sem destinatário) é um `return` separado — sem
+    teste próprio, ela ficaria sem a chave calada."""
+    with patch("backend.services.alert_checker._get_recipients", return_value=[]), \
+         patch("backend.services.alert_checker.notify_admin"):
+        result = alert_checker.run_checks(test_mode=True)
+    assert "duracao_s" in result
+    assert result["duracao_s"] >= 0
 
 
 def test_check_news_respeita_cooldown_do_newsapi():
@@ -745,3 +778,735 @@ def test_classifier_prompt_manda_traduzir_sigla_de_organizacao():
     p = alert_checker._NEWS_CLASSIFIER_SYSTEM
     assert "OPEC" in p and "OPEP" in p
     assert "USDA" in p and "Fed" in p
+
+
+# ── Camada 1 (05/09/2026): data REAL da matéria antes de enviar ────────────
+#
+# Incidente medido: o check-alerts mandou "May WASDE report to reveal first
+# look at new crop outlook" (farmprogress.com) em SETEMBRO — o Google carimbou
+# a REINDEXAÇÃO, não a publicação, e o classificador recebeu a data errada.
+
+# 10 dias: bem acima de `_IDADE_MAXIMA_REAL` (7 dias). Antes do conserto do
+# achado 1 (05/09/2026) este valor era `timedelta(hours=100)` (~4,2 dias) —
+# "velho" pelo teto antigo (`news._MAX_AGE`, 48h), mas hoje FRESCO pelo teto
+# novo. Usar 100h aqui de novo faria estes testes pararem de provar o que
+# dizem provar, calados.
+_DATA_VELHA = (datetime.now(timezone.utc) - timedelta(days=10)).date().isoformat()
+
+
+def _rodar_com_notas_e_capturas(notas: list[int], capturas_por_url: dict,
+                                candidatas: list[dict], test_mode: bool = False):
+    """Como `_rodar_com_notas`, mas com controle por URL do que
+    `_capture_conteudo` devolve — usado pelos testes de `_confirmar_frescor`.
+    `capturas_por_url` fora do dicionário devolve `_CAPTURA_VAZIA` (não achou
+    nada, comportamento honesto de falha). Devolve também o mock de
+    `set_alert_triggered` (item 1b, 3ª revisão do Apolo, 05/09/2026): é onde o
+    veredito "confirmada velha" é gravado agora, no lugar do `_mark_sent`
+    antigo."""
+    respostas = [_resp_nota(n, f"pt {n}") for n in notas]
+
+    def fake_capture(url, url_publisher="", timeout=None):
+        return capturas_por_url.get(url, alert_checker._CAPTURA_VAZIA)
+
+    with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered") as mock_set, \
+         patch("backend.services.alert_checker._mark_sent") as mock_mark, \
+         patch("backend.collectors.news.collect", return_value=list(candidatas)), \
+         patch("backend.services.alert_checker.Anthropic") as mock_cli, \
+         patch("backend.services.alert_checker._capture_conteudo", side_effect=fake_capture), \
+         patch("backend.services.alert_checker.whatsapp") as mock_wa:
+        mock_cli.return_value.messages.create.side_effect = respostas
+        mock_wa.send_message.return_value = True
+        enviados = alert_checker._check_news(
+            [{"phone": "5534999000001", "name": "A"}], test_mode=test_mode)
+    return enviados, mock_wa, mock_mark, mock_set
+
+
+def test_confirma_frescor_descarta_vencedora_velha_sem_marcar_para_sempre():
+    """A candidata de MAIOR nota tem data real velha (a matéria de maio,
+    republicada em setembro) — é descartada e a rodada termina sem envio
+    (item 2, 3ª revisão do Apolo, 05/09/2026: com `_MAX_PRE_LEITURAS=1`, a
+    2ª colocada não chega a ser lida NESTA rodada — ver o teste-irmão
+    `test_confirma_frescor_velha_libera_a_segunda_na_rodada_seguinte` para o
+    que acontece na rodada seguinte).
+
+    Item 1b: a candidata velha NÃO leva mais `_mark_sent` (permanente, sem
+    TTL — condenava matéria FRESCA para sempre quando a leitura errava). O
+    veredito agora é gravado como cooldown de 7 dias em
+    `preleitura_velha_<url_id>` — e NÃO no cooldown de 6h de "já li, segue"
+    (`preleitura_<url_id>`), que é só para o caminho que SEGUE."""
+    import hashlib
+    candidatas = [
+        {"titulo": "WASDE de maio republicado", "fonte": "Farm Progress", "url": "https://e.com/velha"},
+        {"titulo": "notícia fresca", "fonte": "Reuters", "url": "https://e.com/fresca"},
+    ]
+    capturas = {
+        "https://e.com/velha": alert_checker.Captura(
+            "May 11, 2026 The USDA's May WASDE report...", "read_article:trafilatura", None, _DATA_VELHA),
+    }
+    enviados, wa, mark, set_triggered = _rodar_com_notas_e_capturas([9, 6], capturas, candidatas)
+
+    assert enviados == 0
+    wa.send_message.assert_not_called()
+    news_id_velha = hashlib.md5("WASDE de maio republicado".encode()).hexdigest()
+    url_id_velha = hashlib.md5("https://e.com/velha".encode()).hexdigest()
+    marcados = [c.args[0] for c in mark.call_args_list]
+    assert news_id_velha not in marcados
+    assert url_id_velha not in marcados
+    rule_ids = [c.args[0] for c in set_triggered.call_args_list]
+    assert f"preleitura_velha_{url_id_velha}" in rule_ids
+    assert f"preleitura_{url_id_velha}" not in rule_ids
+
+
+def test_confirma_frescor_velha_libera_a_segunda_na_rodada_seguinte():
+    """Item 1b + 2 combinados (3ª revisão do Apolo, 05/09/2026): com
+    orçamento de 1 leitura por rodada, a candidata confirmada velha consome
+    o único read desta rodada e a 2ª colocada não chega a ser tentada — mas
+    na RODADA SEGUINTE (15 min depois, cron; mesmas candidatas re-fetchadas),
+    o gate de 7 dias pula a velha SEM ler (não consome orçamento nenhum),
+    sobrando a leitura para a 2ª colocada, que sai fresca e é enviada.
+    A velha NUNCA é relida (`leituras` só tem uma entrada dela)."""
+    import hashlib
+    candidatas = [
+        {"titulo": "WASDE de maio republicado", "fonte": "Farm Progress", "url": "https://e.com/velha"},
+        {"titulo": "notícia fresca", "fonte": "Reuters", "url": "https://e.com/fresca"},
+    ]
+    capturas = {
+        "https://e.com/velha": alert_checker.Captura(
+            "May 11, 2026 The USDA's May WASDE report...", "read_article:trafilatura", None, _DATA_VELHA),
+        # Conteúdo REAL (não `_CAPTURA_VAZIA`) para a fresca: sem isto, a
+        # captura pós-envio (que roda quando a pré-leitura não trouxe
+        # conteúdo de verdade) chamaria `_capture_conteudo` DE NOVO só para
+        # o registro — um 2º "https://e.com/fresca" em `leituras` que não é
+        # o que este teste quer provar (a REGRA de orçamento/cooldown, não a
+        # reaproveitamento de captura, que já tem teste próprio).
+        "https://e.com/fresca": alert_checker.Captura(
+            "Texto da matéria fresca, com conteúdo suficiente para não ser vazio.",
+            "read_article:trafilatura", None, None),
+    }
+    leituras: list[str] = []
+    ultimo_disparo: dict[str, datetime] = {}
+
+    def fake_cooldown_ok(rule_id, hours):
+        gatilho = ultimo_disparo.get(rule_id)
+        if gatilho is None:
+            return True
+        return gatilho < datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    def fake_set_triggered(rule_id):
+        ultimo_disparo[rule_id] = datetime.now(timezone.utc)
+
+    def fake_capture(url, url_publisher="", timeout=None):
+        leituras.append(url)
+        return capturas.get(url, alert_checker._CAPTURA_VAZIA)
+
+    with patch("backend.services.alert_checker._cooldown_ok", side_effect=fake_cooldown_ok), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered", side_effect=fake_set_triggered), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker._mark_sent") as mock_mark, \
+         patch("backend.collectors.news.collect", return_value=list(candidatas)), \
+         patch("backend.services.alert_checker.Anthropic") as mock_cli, \
+         patch("backend.services.alert_checker._capture_conteudo", side_effect=fake_capture), \
+         patch("backend.services.alert_checker.whatsapp") as mock_wa:
+        mock_cli.return_value.messages.create.side_effect = [
+            _resp_nota(9, "pt 9"), _resp_nota(6, "pt 6"),   # rodada 1: classifica as 2
+            _resp_nota(9, "pt 9"), _resp_nota(6, "pt 6"),   # rodada 2: classifica as 2 de novo
+        ]
+        mock_wa.send_message.return_value = True
+
+        enviados_1 = alert_checker._check_news([{"phone": "5534999000001", "name": "A"}])
+        enviados_2 = alert_checker._check_news([{"phone": "5534999000001", "name": "A"}])
+
+    assert enviados_1 == 0
+    assert enviados_2 == 1
+    assert "pt 6" in mock_wa.send_message.call_args[0][1]
+    assert leituras == ["https://e.com/velha", "https://e.com/fresca"]
+    mock_mark.assert_called_once()  # só a fresca enviada, na 2ª rodada
+
+
+def test_confirma_frescor_sem_data_envia():
+    """Leitura sem data nenhuma (metadado ausente, texto sem data reconhecível)
+    é falha ABERTA: segue como se fosse fresca."""
+    candidatas = [{"titulo": "materia sem data", "fonte": "F1", "url": "https://e.com/semdata"}]
+    capturas = {
+        "https://e.com/semdata": alert_checker.Captura("texto qualquer da matéria", "read_article:trafilatura", None, None),
+    }
+    enviados, wa, _, _ = _rodar_com_notas_e_capturas([9], capturas, candidatas)
+    assert enviados == 1
+    assert wa.send_message.call_count == 1
+
+
+def test_confirma_frescor_estoura_prazo_e_segue_falha_aberta(monkeypatch):
+    """Leitura que estoura o prazo (40s por padrão) é falha ABERTA: o alerta
+    sai mesmo assim. O teste injeta um prazo curto para não gastar 40s reais —
+    a thread É daemon (item 7, 05/09/2026: `threading.Thread(daemon=True)` no
+    lugar do `ThreadPoolExecutor`) e morre junto com o processo, então o
+    teste termina em segundos mesmo com a leitura simulada 'pendurada'."""
+    monkeypatch.setattr(alert_checker, "_PRE_LEITURA_TIMEOUT_S", 0.2)
+    candidatas = [{"titulo": "materia lenta", "fonte": "F1", "url": "https://e.com/lenta"}]
+
+    def capture_lenta(url, url_publisher="", timeout=None):
+        time.sleep(1.0)
+        return alert_checker._CAPTURA_VAZIA
+
+    with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.services.alert_checker._mark_sent"), \
+         patch("backend.collectors.news.collect", return_value=list(candidatas)), \
+         patch("backend.services.alert_checker.Anthropic") as mock_cli, \
+         patch("backend.services.alert_checker._capture_conteudo", side_effect=capture_lenta), \
+         patch("backend.services.alert_checker.whatsapp") as mock_wa:
+        mock_cli.return_value.messages.create.return_value = _resp_nota(9, "pt 9")
+        mock_wa.send_message.return_value = True
+        t0 = time.monotonic()
+        enviados = alert_checker._check_news([{"phone": "5534999000001", "name": "A"}])
+        gasto = time.monotonic() - t0
+
+    assert enviados == 1
+    assert gasto < 3.0
+
+
+def test_confirma_frescor_test_mode_com_velha_nao_envia_nem_marca():
+    """`test_mode` segue a mesma lógica de descarte, mas sem `_mark_sent` nem
+    escrita de cooldown — é só uma conferência visual, não pode sujar o
+    estado de produção (nem o dedup nem o veredito de 7 dias, item 1b/2, 3ª
+    revisão do Apolo, 05/09/2026)."""
+    candidatas = [{"titulo": "materia velha unica", "fonte": "F1", "url": "https://e.com/velha-tm"}]
+    capturas = {
+        "https://e.com/velha-tm": alert_checker.Captura("t", "read_article:trafilatura", None, _DATA_VELHA),
+    }
+    enviados, wa, mark, set_triggered = _rodar_com_notas_e_capturas(
+        [9], capturas, candidatas, test_mode=True)
+    assert enviados == 0
+    wa.send_message.assert_not_called()
+    mark.assert_not_called()
+    set_triggered.assert_not_called()
+
+
+def test_confirma_frescor_captura_reaproveitada_le_a_materia_uma_vez():
+    """A captura da pré-leitura (bem-sucedida) é REAPROVEITADA na captura
+    pós-envio — `web_search.read_article` roda exatamente 1 vez na rodada, não
+    2, mesmo a matéria sendo lida duas vezes na lógica (pré-envio + registro)."""
+    candidatas = [{"titulo": "materia unica", "fonte": "Farm Progress",
+                  "url": "https://www.farmprogress.com/x",
+                  "url_publisher": "https://www.farmprogress.com"}]
+    leituras: list[str] = []
+
+    def fake_read_article(url, timeout=30.0, url_publisher=""):
+        leituras.append(url)
+        return {"url": url, "conteudo": "Texto suficientemente longo da matéria de teste " * 5,
+                "extrator": "trafilatura", "data_publicacao": None}
+
+    with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.services.alert_checker.supabase.mark_news_sent"), \
+         patch("backend.services.alert_checker.supabase.log_sent_news", return_value=999), \
+         patch("backend.services.alert_checker.supabase.log_alert_messages"), \
+         patch("backend.services.alert_checker.supabase.update_news_log_conteudo"), \
+         patch("backend.collectors.news.collect", return_value=list(candidatas)), \
+         patch("backend.services.alert_checker.Anthropic") as mock_cli, \
+         patch("backend.services.alert_checker._capture_conteudo", side_effect=_capture_conteudo_real), \
+         patch("backend.services.alert_checker.web_search.read_article", side_effect=fake_read_article), \
+         patch("backend.services.alert_checker.web_search.resolve_google_news", return_value=""), \
+         patch("backend.services.alert_checker.whatsapp.send_message",
+               return_value={"key": {"id": "MSG1"}}):
+        mock_cli.return_value.messages.create.return_value = _resp_nota(9, "pt 9")
+        enviados = alert_checker._check_news([{"phone": "5534999000001", "name": "A"}])
+
+    assert enviados == 1
+    assert leituras == ["https://www.farmprogress.com/x"]
+
+
+def test_confirma_frescor_prazo_e_teto_de_pre_leituras_sao_constantes_medidas():
+    """Números com motivo documentado no código — não travam sem comentário."""
+    assert alert_checker._PRE_LEITURA_TIMEOUT_S == 40.0
+    # Item 2 (3ª revisão do Apolo, 05/09/2026): baixado de 2 para 1 — a 2ª
+    # leitura só entrava quando a 1ª saía confirmada velha, e hoje quem barra
+    # a releitura de uma candidata confirmada velha é o cooldown de 7 dias
+    # (`_PRELEITURA_VELHA_COOLDOWN_HOURS`), sem gastar orçamento de leitura.
+    assert alert_checker._MAX_PRE_LEITURAS == 1
+    assert alert_checker._IDADE_MAXIMA_REAL == timedelta(days=7)
+    assert alert_checker._PRELEITURA_COOLDOWN_HOURS == 6.0
+    assert alert_checker._PRELEITURA_VELHA_COOLDOWN_HOURS == 24 * 7
+
+
+# ── Achado 1 (05/09/2026): `_MAX_AGE` (48h, do agregador) condenava notícia
+# FRESCA por causa da precisão de DIA (não hora) de `_data_publicacao` ────────
+
+@pytest.mark.parametrize("horas_atras,espera_velha", [
+    (34.5, False),
+    (38.0, False),
+    (46.0, False),
+    (24 * 9, True),     # 9 dias
+    (24 * 117, True),   # o próprio incidente: WASDE de maio "confirmado" em setembro
+])
+def test_confirmar_frescor_usa_7_dias_nao_48h(horas_atras, espera_velha):
+    """`_data_publicacao` só devolve o DIA (meia-noite) — comparado a "agora"
+    isso soma até +24h de idade artificial. O `_MAX_AGE` do agregador (48h)
+    condenaria as três primeiras (34,5h / 38h / 46h, todas notícias de fato
+    FRESCAS) e `_mark_sent` sem TTL as mataria PARA SEMPRE. `_IDADE_MAXIMA_REAL`
+    (7 dias) só pega o claramente velho: 9 dias e o próprio incidente (117
+    dias) continuam sendo descartados."""
+    data = (datetime.now(timezone.utc) - timedelta(hours=horas_atras)).date().isoformat()
+    candidata = {"titulo": "x", "url": "https://e.com/x", "url_publisher": ""}
+    captura = alert_checker.Captura("texto", "read_article:trafilatura", None, data)
+    with patch("backend.services.alert_checker._capture_conteudo", return_value=captura):
+        velha, _ = alert_checker._confirmar_frescor(candidata, "https://e.com/x")
+    assert velha is espera_velha
+
+
+# ── Achado 2 (05/09/2026): Evolution fora do ar relia a MESMA matéria a cada
+# rodada do cron (15 min) — até 96 leituras/dia, até 35 créditos cada ────────
+
+def test_check_news_evolution_fora_nao_rele_a_mesma_materia_a_cada_rodada():
+    """3 rodadas seguidas com a entrega falhando sempre (Evolution fora do ar,
+    `send_message` sempre estoura): sem `_mark_sent` (nada TTL), a mesma
+    candidata volta a ser a nº 1 em toda rodada — e sem o cooldown por
+    `url_id`, a pré-leitura (via `web_search.read_article`, até 35 créditos de
+    ScraperAPI no caminho de render) rodava de novo em CADA uma delas. Com o
+    cooldown, só a 1ª rodada lê de verdade."""
+    import hashlib
+    leituras: list[str] = []
+    ultimo_disparo: dict[str, datetime] = {}
+
+    def fake_cooldown_ok(rule_id, hours):
+        gatilho = ultimo_disparo.get(rule_id)
+        if gatilho is None:
+            return True
+        return gatilho < datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    def fake_set_triggered(rule_id):
+        ultimo_disparo[rule_id] = datetime.now(timezone.utc)
+
+    def fake_read_article(url, timeout=30.0, url_publisher=""):
+        leituras.append(url)
+        return {"url": url, "conteudo": "Texto suficiente da matéria de teste " * 10,
+                "extrator": "trafilatura", "data_publicacao": None}
+
+    candidata = {"titulo": "materia unica", "fonte": "Farm Progress",
+                "url": "https://e.com/unica", "url_publisher": "https://e.com"}
+
+    with patch("backend.services.alert_checker._cooldown_ok", side_effect=fake_cooldown_ok), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered", side_effect=fake_set_triggered), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker._mark_sent"), \
+         patch("backend.collectors.news.collect", return_value=[dict(candidata)]), \
+         patch("backend.services.alert_checker.Anthropic") as mock_cli, \
+         patch("backend.services.alert_checker._capture_conteudo", side_effect=_capture_conteudo_real), \
+         patch("backend.services.alert_checker.web_search.read_article", side_effect=fake_read_article), \
+         patch("backend.services.alert_checker.web_search.resolve_google_news", return_value=""), \
+         patch("backend.services.alert_checker.whatsapp.send_message",
+               side_effect=RuntimeError("Evolution fora do ar")):
+        mock_cli.return_value.messages.create.return_value = _resp_nota(9, "pt 9")
+        for _ in range(3):
+            enviados = alert_checker._check_news([{"phone": "5534999000001", "name": "A"}])
+            assert enviados == 0
+
+    assert leituras == ["https://e.com/unica"]
+
+
+def test_confirma_frescor_usa_timeout_menor_que_o_prazo_externo():
+    """Achado 4 (05/09/2026): o timeout PRÓPRIO de `read_article` (chamado via
+    `_capture_conteudo`) tem que ficar ABAIXO do prazo externo da pré-leitura —
+    senão um link que ainda cai no caminho de render herda o piso de 75s por
+    dentro, MAIOR que os 40s que a rodada dá para a pré-leitura inteira."""
+    # Lista, não dict: a captura vazia da pré-leitura dispara uma 2ª chamada
+    # pós-envio (achado 3), com o timeout GRANDE de `_CONTEUDO_TIMEOUT` — só a
+    # PRIMEIRA chamada (a pré-leitura em si) é o que este teste mede.
+    timeouts_vistos = []
+
+    def fake_capture(url, url_publisher="", timeout=None):
+        timeouts_vistos.append(timeout)
+        return alert_checker._CAPTURA_VAZIA
+
+    candidatas = [{"titulo": "materia", "fonte": "F1", "url": "https://e.com/x"}]
+    with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.services.alert_checker._mark_sent"), \
+         patch("backend.collectors.news.collect", return_value=list(candidatas)), \
+         patch("backend.services.alert_checker.Anthropic") as mock_cli, \
+         patch("backend.services.alert_checker._capture_conteudo", side_effect=fake_capture), \
+         patch("backend.services.alert_checker.whatsapp") as mock_wa:
+        mock_cli.return_value.messages.create.return_value = _resp_nota(9, "pt 9")
+        mock_wa.send_message.return_value = True
+        alert_checker._check_news([{"phone": "5534999000001", "name": "A"}])
+
+    assert timeouts_vistos[0] is not None
+    assert timeouts_vistos[0] < alert_checker._PRE_LEITURA_TIMEOUT_S
+
+
+def test_confirma_frescor_teto_agregado_de_1_velha_nao_estoura_e_nao_envia(monkeypatch):
+    """Item 8 original, ajustado pelo item 2 da 3ª revisão do Apolo
+    (05/09/2026): `_MAX_PRE_LEITURAS` caiu de 2 para 1 — só a candidata de
+    MAIOR nota é lida de verdade nesta rodada. Com `_PRE_LEITURA_TIMEOUT_S`
+    baixo (defensivo contra a suíte travar se algo aqui regredir) e ela
+    confirmada velha, a rodada termina rápido e sem envio — a 2ª nem chega a
+    ser lida (orçamento já esgotado) nem marcada (não é `_mark_sent` mais
+    quem barra a candidata velha, é o cooldown de 7 dias)."""
+    monkeypatch.setattr(alert_checker, "_PRE_LEITURA_TIMEOUT_S", 1.0)
+    candidatas = [
+        {"titulo": "velha um", "fonte": "F1", "url": "https://e.com/v1"},
+        {"titulo": "nunca lida", "fonte": "F2", "url": "https://e.com/v2"},
+    ]
+    capturas = {
+        "https://e.com/v1": alert_checker.Captura("t", "read_article:trafilatura", None, _DATA_VELHA),
+    }
+    t0 = time.monotonic()
+    enviados, wa, mark, _ = _rodar_com_notas_e_capturas([9, 8], capturas, candidatas)
+    gasto = time.monotonic() - t0
+
+    assert enviados == 0
+    wa.send_message.assert_not_called()
+    mark.assert_not_called()
+    assert gasto < 3.0
+
+
+def test_classifier_prompt_penaliza_periodo_anterior_mesmo_com_publicado_em_recente():
+    """Camada 2: reforço no PRÓPRIO classificador — mesmo que a camada 1 (data
+    real da matéria) falhe aberta (sem data, timeout), o prompt já avisa que
+    <publicado_em> pode ser a data de REINDEXAÇÃO do agregador, não a de
+    publicação, e manda pontuar baixo um título/resumo de período já passado."""
+    p = alert_checker._NEWS_CLASSIFIER_SYSTEM
+    assert "REINDEXAÇÃO" in p
+    assert "<publicado_em>" in p and "<hoje>" in p
+
+
+# ── Item 3 (revisão do Apolo, 05/09/2026): link do Google não resolvido não
+# pode disparar render de 75s dentro do prazo de 40s da pré-leitura ──────────
+
+def test_confirma_frescor_link_do_google_nao_resolvido_nao_le():
+    """`url_resolvida` ainda sendo `news.google.com` significa que a resolução
+    prévia (`_link_para_mensagem`, chamada ANTES desta função) falhou. Ler
+    mesmo assim cairia no `render=true` de dentro de `read_article`, que impõe
+    um piso de 75s (`_RENDER_TIMEOUT_FLOOR`) — quase o dobro do prazo de 40s
+    que esta função tem para a leitura inteira. Não lê: falha aberta, a
+    candidata segue como se fosse fresca."""
+    candidata = {"titulo": "materia", "url": "https://news.google.com/rss/articles/abc",
+                "url_publisher": "https://exemplo.com"}
+    with patch("backend.services.alert_checker._capture_conteudo") as mock_capture:
+        velha, captura = alert_checker._confirmar_frescor(
+            candidata, "https://news.google.com/rss/articles/abc")
+    assert velha is False
+    assert captura is None
+    mock_capture.assert_not_called()
+
+
+def test_confirma_frescor_link_ja_resolvido_le_normalmente():
+    """Contraprova: link JÁ resolvido para o publicador (o caminho comum)
+    continua lendo normalmente."""
+    candidata = {"titulo": "materia", "url": "https://news.google.com/rss/articles/abc",
+                "url_publisher": "https://exemplo.com"}
+    captura_fake = alert_checker.Captura("texto", "read_article:trafilatura", None, None)
+    with patch("backend.services.alert_checker._capture_conteudo",
+               return_value=captura_fake) as mock_capture:
+        velha, captura = alert_checker._confirmar_frescor(
+            candidata, "https://www.exemplo.com/materia-real")
+    assert velha is False
+    assert captura == captura_fake
+    mock_capture.assert_called_once()
+
+
+# ── Item 5 (revisão do Apolo, 05/09/2026): cooldown de pré-leitura gravado
+# até para candidata confirmada velha era escrita morta — `_mark_sent` já a
+# barra para sempre, e a linha `preleitura_<url_id>` nunca mais seria lida.
+#
+# Reescrito no item 1b/2 (3ª revisão do Apolo, 05/09/2026): a candidata velha
+# não leva mais `_mark_sent`, e sim `preleitura_velha_<url_id>` (7 dias) —
+# provado em `test_confirma_frescor_descarta_vencedora_velha_sem_marcar_para_sempre`.
+# Com `_MAX_PRE_LEITURAS=1`, um cenário de 2 candidatas na MESMA rodada não
+# serve mais para provar que o cooldown de 6h ("já li, segue") é gravado só
+# para quem SEGUE — a 2ª nunca seria lida nesta rodada (orçamento esgotado
+# pela 1ª). Um candidato único, fresco, já prova o que importa aqui. ────────
+
+def test_preleitura_cooldown_e_gravado_para_candidata_que_segue():
+    """A candidata confirmada FRESCA (segue, é enviada) grava o cooldown de
+    6h `preleitura_<url_id>` — para não reler a MESMA matéria a cada 15 min
+    quando a entrega falha e ela nunca chega a ser marcada como enviada."""
+    import hashlib
+    candidatas = [{"titulo": "fresca", "fonte": "F1", "url": "https://e.com/fresca"}]
+    url_id_fresca = hashlib.md5("https://e.com/fresca".encode()).hexdigest()
+
+    with patch("backend.services.alert_checker._cooldown_ok", return_value=True), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered") as mock_set, \
+         patch("backend.services.alert_checker._mark_sent"), \
+         patch("backend.collectors.news.collect", return_value=list(candidatas)), \
+         patch("backend.services.alert_checker.Anthropic") as mock_cli, \
+         patch("backend.services.alert_checker._capture_conteudo",
+               return_value=alert_checker._CAPTURA_VAZIA), \
+         patch("backend.services.alert_checker.whatsapp") as mock_wa:
+        mock_cli.return_value.messages.create.return_value = _resp_nota(9, "pt 9")
+        mock_wa.send_message.return_value = True
+        alert_checker._check_news([{"phone": "5534999000001", "name": "A"}])
+
+    rule_ids = [c.args[0] for c in mock_set.call_args_list]
+    assert f"preleitura_{url_id_fresca}" in rule_ids
+    assert f"preleitura_velha_{url_id_fresca}" not in rule_ids
+
+
+# ── Item 2 (4ª revisão do Apolo, 05/09/2026): os dois gates de pré-leitura
+# (candidata confirmada velha, pré-leitura recente) não tinham try local — um
+# soluço do Supabase em QUALQUER um dos dois subia até `run_checks` e abortava
+# `_check_news` inteiro, tirando o alerta da rodada por um problema no
+# COOLDOWN, não na notícia. `_cooldown_liberado` trata falha como "pode ler",
+# mesmo padrão de `notify_admin`. ──────────────────────────────────────────
+
+def test_gate_de_velha_falha_aberta_quando_supabase_da_erro():
+    """`get_alert_last_triggered` explodindo só para o rule_id da candidata
+    velha não pode abortar a rodada: a candidata segue como se não estivesse
+    em cooldown nenhum, é lida e — sem data real capturada aqui — sai como
+    fresca."""
+    import hashlib
+    candidata = {"titulo": "materia", "fonte": "F1", "url": "https://e.com/gate-velha-erro"}
+    url_id = hashlib.md5(candidata["url"].encode()).hexdigest()
+    velha_rule_id = f"preleitura_velha_{url_id}"
+
+    def fake_get_last_triggered(rule_id):
+        if rule_id == velha_rule_id:
+            raise RuntimeError("Supabase fora do ar")
+        return None
+
+    with patch("backend.services.alert_checker.supabase.get_alert_last_triggered",
+               side_effect=fake_get_last_triggered), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.services.alert_checker.supabase.mark_news_sent"), \
+         patch("backend.services.alert_checker._capture_conteudo",
+               return_value=alert_checker._CAPTURA_VAZIA), \
+         patch("backend.collectors.news.collect", return_value=[dict(candidata)]), \
+         patch("backend.services.alert_checker.Anthropic") as mock_cli, \
+         patch("backend.services.alert_checker.whatsapp") as mock_wa:
+        mock_cli.return_value.messages.create.return_value = _resp_nota(9, "pt 9")
+        mock_wa.send_message.return_value = True
+        enviados = alert_checker._check_news([{"phone": "5534999000001", "name": "A"}])
+
+    assert enviados == 1
+
+
+def test_gate_de_preleitura_falha_aberta_quando_supabase_da_erro():
+    """Mesmo conserto, para o OUTRO gate (`preleitura_<url_id>`, cooldown de
+    6h de 'já li, segue')."""
+    import hashlib
+    candidata = {"titulo": "materia", "fonte": "F1", "url": "https://e.com/gate-preleitura-erro"}
+    url_id = hashlib.md5(candidata["url"].encode()).hexdigest()
+    preleitura_rule_id = f"preleitura_{url_id}"
+
+    def fake_get_last_triggered(rule_id):
+        if rule_id == preleitura_rule_id:
+            raise RuntimeError("Supabase fora do ar")
+        return None
+
+    with patch("backend.services.alert_checker.supabase.get_alert_last_triggered",
+               side_effect=fake_get_last_triggered), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.services.alert_checker.supabase.mark_news_sent"), \
+         patch("backend.services.alert_checker._capture_conteudo",
+               return_value=alert_checker._CAPTURA_VAZIA), \
+         patch("backend.collectors.news.collect", return_value=[dict(candidata)]), \
+         patch("backend.services.alert_checker.Anthropic") as mock_cli, \
+         patch("backend.services.alert_checker.whatsapp") as mock_wa:
+        mock_cli.return_value.messages.create.return_value = _resp_nota(9, "pt 9")
+        mock_wa.send_message.return_value = True
+        enviados = alert_checker._check_news([{"phone": "5534999000001", "name": "A"}])
+
+    assert enviados == 1
+
+
+# ── Item 3 (4ª revisão do Apolo, 05/09/2026): os testes de 2 rodadas
+# anteriores (`test_confirma_frescor_velha_libera_a_segunda_na_rodada_seguinte`,
+# `test_check_news_evolution_fora_nao_rele_a_mesma_materia_a_cada_rodada`)
+# comparavam `ultimo_disparo` contra `datetime.now(timezone.utc)` DE VERDADE —
+# como as duas chamadas de `_check_news` acontecem em microssegundos, eles só
+# provam que o cooldown segura por um instante (qualquer valor positivo já
+# bastaria), nunca que ele dura ~7 dias / ~6h de verdade, nem que EXPIRA
+# depois disso. Aqui o relógio é uma lista `[datetime]` que O TESTE desloca
+# entre as rodadas — a mesma técnica, mas com o tempo sob controle. ──────────
+
+def test_gate_de_velha_expira_apos_8_dias_e_rele():
+    """A candidata confirmada velha na rodada 1 é RELIDA na rodada 2 depois
+    do relógio avançar 8 dias (> `_PRELEITURA_VELHA_COOLDOWN_HOURS`, 168h).
+
+    Mutação verificada À MÃO (05/09/2026, `_PRELEITURA_VELHA_COOLDOWN_HOURS = 0`,
+    desfeita em seguida): este teste sozinho NÃO reprova (8 dias também passa
+    de 0h — a direção da asserção, "relê depois de esperar", é a mesma dos
+    dois lados). Quem some sob a mutação é o teste imediato (sem relógio
+    controlado) `test_confirma_frescor_velha_libera_a_segunda_na_rodada_seguinte`
+    — mas de forma INSTÁVEL: ele compara `ultimo_disparo` contra
+    `datetime.now(timezone.utc)` de verdade, então com o cooldown mutado para
+    0h o resultado vira uma corrida de microssegundos entre a gravação e a
+    checagem (rodei 5 vezes sob a mutação: reprovou em ~metade, passou na
+    outra metade). A instabilidade em si É o ponto do item 3 — nenhum teste
+    baseado só no relógio real prova a DURAÇÃO do cooldown de forma
+    confiável; só um relógio virtual desloca de propósito, sem depender de
+    corrida nenhuma."""
+    import hashlib
+    candidata = {"titulo": "WASDE de maio republicado", "fonte": "Farm Progress",
+                "url": "https://e.com/velha-relogio"}
+    url_id = hashlib.md5(candidata["url"].encode()).hexdigest()
+
+    relogio = [datetime.now(timezone.utc)]
+    ultimo_disparo: dict[str, datetime] = {}
+    leituras: list[str] = []
+
+    def fake_cooldown_ok(rule_id, hours):
+        gatilho = ultimo_disparo.get(rule_id)
+        if gatilho is None:
+            return True
+        return gatilho < relogio[0] - timedelta(hours=hours)
+
+    def fake_set_triggered(rule_id):
+        ultimo_disparo[rule_id] = relogio[0]
+
+    def fake_capture(url, url_publisher="", timeout=None):
+        leituras.append(url)
+        return alert_checker.Captura(
+            "May 11, 2026 The USDA's May WASDE report...",
+            "read_article:trafilatura", None, _DATA_VELHA)
+
+    with patch("backend.services.alert_checker._cooldown_ok", side_effect=fake_cooldown_ok), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered", side_effect=fake_set_triggered), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker._mark_sent"), \
+         patch("backend.collectors.news.collect", return_value=[dict(candidata)]), \
+         patch("backend.services.alert_checker.Anthropic") as mock_cli, \
+         patch("backend.services.alert_checker._capture_conteudo", side_effect=fake_capture), \
+         patch("backend.services.alert_checker.whatsapp") as mock_wa:
+        mock_cli.return_value.messages.create.return_value = _resp_nota(9, "pt 9")
+        mock_wa.send_message.return_value = True
+
+        enviados_1 = alert_checker._check_news([{"phone": "5534999000001", "name": "A"}])
+        assert leituras == ["https://e.com/velha-relogio"]
+        assert f"preleitura_velha_{url_id}" in ultimo_disparo
+
+        relogio[0] += timedelta(days=8)
+        enviados_2 = alert_checker._check_news([{"phone": "5534999000001", "name": "A"}])
+
+    assert enviados_1 == 0
+    assert enviados_2 == 0  # confirmada velha de novo — mas ela FOI relida
+    assert leituras == ["https://e.com/velha-relogio", "https://e.com/velha-relogio"]
+
+
+def test_gate_de_preleitura_expira_apos_7_horas_e_rele():
+    """Contraparte do teste acima para `_PRELEITURA_COOLDOWN_HOURS` (6h,
+    'já li, segue sem reler'): entrega falha sempre (Evolution fora do ar,
+    mesmo cenário de `test_check_news_evolution_fora_nao_rele_a_mesma_materia_a_cada_rodada`),
+    mas aqui o relógio avança 7h (> 6h) entre a 2ª e a 3ª rodada — a 3ª relê
+    de verdade, em vez de repetir o 'segue sem reler' das rodadas 1 e 2."""
+    import hashlib
+    candidata = {"titulo": "materia unica", "fonte": "Farm Progress",
+                "url": "https://e.com/segue-relogio", "url_publisher": "https://e.com"}
+
+    relogio = [datetime.now(timezone.utc)]
+    ultimo_disparo: dict[str, datetime] = {}
+    leituras: list[str] = []
+
+    def fake_cooldown_ok(rule_id, hours):
+        gatilho = ultimo_disparo.get(rule_id)
+        if gatilho is None:
+            return True
+        return gatilho < relogio[0] - timedelta(hours=hours)
+
+    def fake_set_triggered(rule_id):
+        ultimo_disparo[rule_id] = relogio[0]
+
+    def fake_capture(url, url_publisher="", timeout=None):
+        leituras.append(url)
+        return alert_checker.Captura(
+            "Texto fresco o bastante para não ficar vazio " * 5,
+            "read_article:trafilatura", None, None)
+
+    with patch("backend.services.alert_checker._cooldown_ok", side_effect=fake_cooldown_ok), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered", side_effect=fake_set_triggered), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker._mark_sent"), \
+         patch("backend.collectors.news.collect", return_value=[dict(candidata)]), \
+         patch("backend.services.alert_checker.Anthropic") as mock_cli, \
+         patch("backend.services.alert_checker._capture_conteudo", side_effect=fake_capture), \
+         patch("backend.services.alert_checker.whatsapp.send_message",
+               side_effect=RuntimeError("Evolution fora do ar")):
+        mock_cli.return_value.messages.create.return_value = _resp_nota(9, "pt 9")
+
+        alert_checker._check_news([{"phone": "5534999000001", "name": "A"}])
+        assert leituras == ["https://e.com/segue-relogio"]
+
+        alert_checker._check_news([{"phone": "5534999000001", "name": "A"}])
+        assert leituras == ["https://e.com/segue-relogio"]  # rodada 2: cooldown ainda ativo
+
+        relogio[0] += timedelta(hours=7)
+        alert_checker._check_news([{"phone": "5534999000001", "name": "A"}])
+
+    assert leituras == ["https://e.com/segue-relogio", "https://e.com/segue-relogio"]
+
+
+# ── Item 5 (4ª revisão do Apolo, 05/09/2026): `_link_para_mensagem` rodava
+# ANTES dos dois gates de cooldown — uma candidata em cooldown de velha (7
+# dias) pagava a resolução do link (até `_LINK_PRAZO` = 5s) a CADA rodada do
+# cron pelos 7 dias inteiros, sem nenhum uso do resultado (o `continue` do
+# gate descarta a candidata sem nunca olhar `url_alerta`). ──────────────────
+
+def test_link_nao_e_resolvido_para_candidata_em_cooldown_de_velha():
+    candidatas = [{"titulo": "velha confirmada", "fonte": "F1", "url": "https://e.com/velha-cd"}]
+
+    def cooldown(rule_id, hours):
+        return not rule_id.startswith("preleitura_velha_")
+
+    with patch("backend.services.alert_checker._cooldown_ok", side_effect=cooldown), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.collectors.news.collect", return_value=list(candidatas)), \
+         patch("backend.services.alert_checker.Anthropic") as mock_cli, \
+         patch("backend.services.alert_checker._link_para_mensagem") as mock_link, \
+         patch("backend.services.alert_checker.whatsapp") as mock_wa:
+        mock_cli.return_value.messages.create.return_value = _resp_nota(9, "pt 9")
+        enviados = alert_checker._check_news([{"phone": "5534999000001", "name": "A"}])
+
+    assert enviados == 0
+    mock_link.assert_not_called()
+
+
+def test_link_e_resolvido_para_candidata_que_segue_sem_reler():
+    """Contraprova: a candidata que passa pelo gate de velha mas está em
+    cooldown de PRÉ-LEITURA (6h, 'segue sem reler') precisa do link resolvido
+    — ela vira `melhor` e é enviada sem nunca chamar `_confirmar_frescor`."""
+    candidatas = [{"titulo": "segue sem reler", "fonte": "F1", "url": "https://e.com/segue-cd"}]
+
+    def cooldown(rule_id, hours):
+        if rule_id.startswith("preleitura_velha_"):
+            return True  # não bloqueada pela velha
+        if rule_id.startswith("preleitura_"):
+            return False  # bloqueada pela pré-leitura → "segue sem reler"
+        return True
+
+    with patch("backend.services.alert_checker._cooldown_ok", side_effect=cooldown), \
+         patch("backend.services.alert_checker.supabase.is_news_sent", return_value=False), \
+         patch("backend.services.alert_checker.supabase.get_recent_sent_titles", return_value=[]), \
+         patch("backend.services.alert_checker.supabase.set_alert_triggered"), \
+         patch("backend.services.alert_checker._mark_sent"), \
+         patch("backend.collectors.news.collect", return_value=list(candidatas)), \
+         patch("backend.services.alert_checker.Anthropic") as mock_cli, \
+         patch("backend.services.alert_checker._link_para_mensagem",
+               return_value="https://e.com/segue-cd") as mock_link, \
+         patch("backend.services.alert_checker.whatsapp") as mock_wa:
+        mock_cli.return_value.messages.create.return_value = _resp_nota(9, "pt 9")
+        mock_wa.send_message.return_value = True
+        enviados = alert_checker._check_news([{"phone": "5534999000001", "name": "A"}])
+
+    assert enviados == 1
+    mock_link.assert_called_once()

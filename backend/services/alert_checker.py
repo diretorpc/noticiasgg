@@ -3,6 +3,8 @@ import json
 import logging
 import os
 import re
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import NamedTuple
 
@@ -50,7 +52,7 @@ Use <contexto_mercado> para calibrar: notícia que confirma movimento já forte 
 Scores:
 - 6-10: urgente — decisão de juros anunciada, corte/aumento OPEC+ confirmado, escalada militar, quebra de safra confirmada, dado oficial divulgado (CPI, PPI, WASDE, estoques EIA/USDA)
 - 3-5: relevante — notícia de qualquer uma das 5 categorias com potencial de influenciar preços futuramente: projeções, previsões climáticas, negociações comerciais, sinais de demanda, declarações de autoridades monetárias
-- 1-2: fora do escopo — esportes, cultura, entretenimento, política sem impacto econômico, especulação sem fonte, tecnologia/IA sem ligação com commodities, notícias APENAS sobre a cotação diária do dólar (já coberta por alerta automático de câmbio), cobertura contínua/ao vivo ("AO VIVO", "EN DIRECT", "LIVE") de evento já em andamento sem fato novo concreto — escalada já noticiada continuar acontecendo NÃO é novidade; só desenvolvimento novo e específico (ex: fechamento de rota, sanção anunciada, produção interrompida) pontua alto
+- 1-2: fora do escopo — esportes, cultura, entretenimento, política sem impacto econômico, especulação sem fonte, tecnologia/IA sem ligação com commodities, notícias APENAS sobre a cotação diária do dólar (já coberta por alerta automático de câmbio), cobertura contínua/ao vivo ("AO VIVO", "EN DIRECT", "LIVE") de evento já em andamento sem fato novo concreto — escalada já noticiada continuar acontecendo NÃO é novidade; só desenvolvimento novo e específico (ex: fechamento de rota, sanção anunciada, produção interrompida) pontua alto. Regra ESTREITA (não confundir com citar o passado): quando o mês nomeado no título/resumo é o do PRÓPRIO relatório ou evento que a matéria está anunciando ou prevendo (ex.: "May WASDE report to reveal first look..." quando <hoje> já passou de maio) e esse mês já FICOU PARA TRÁS em relação a <hoje>, a matéria é VELHA reindexada — mesmo que o título soe futuro ("to reveal", "releasing tomorrow"): pontua 1-2 mesmo com <publicado_em> recente, porque <publicado_em> vem de agregador e pode ser a data de REINDEXAÇÃO, não de publicação. Esta regra NÃO se aplica quando a matéria só CITA um mês/período passado como contexto de um fato NOVO e atual — safra anterior, estoques ou dado histórico mencionados dentro de uma notícia de hoje (ex.: exportação recorde do mês corrente citando a safra do ano passado, ou correção/atualização de um relatório antigo) não são "relatório nomeado vencendo a redação" e pontuam pelo fato novo em si
 
 TÍTULO EM PORTUGUÊS: traduza também a SIGLA de organização quando ela tem forma
 consagrada em português — OPEC→OPEP, UN→ONU, WTO→OMC, IMF→FMI, EU→UE, NATO→OTAN. Sigla sem
@@ -107,6 +109,27 @@ def _cooldown_ok(rule_id: str, hours: float) -> bool:
     if last is None:
         return True
     return last < datetime.now(timezone.utc) - timedelta(hours=hours)
+
+
+def _cooldown_liberado(rule_id: str, hours: float, contexto: str) -> bool:
+    """Como `_cooldown_ok`, mas fail-ABERTO: uma falha do Supabase vira "pode
+    ler" (não bloqueado), nunca uma exceção que sobe.
+
+    Os dois gates de pré-leitura de `_check_news` (candidata confirmada
+    velha, pré-leitura recente) rodam DENTRO do laço da rodada de notícias,
+    sem try local ao redor deles — diferente dos gates mais antigos
+    (`_check_price_rules`, por exemplo), que já vivem dentro de um `try` por
+    regra. Sem este invólucro, um soluço do Supabase em QUALQUER um dos dois
+    propagava até `run_checks`, que aborta o `_check_news` inteiro — a rodada
+    saía SEM enviar nada, mesmo com uma candidata boa esperando (achado da 4ª
+    revisão do Apolo, 05/09/2026). Mesmo padrão de `notify_admin` (também
+    fail-aberto num soluço de cooldown)."""
+    try:
+        return _cooldown_ok(rule_id, hours)
+    except Exception as e:
+        logger.warning("news check: cooldown de %s falhou para rule_id=%s (%s), "
+                       "seguindo como se pudesse ler", contexto, rule_id, sanitize_error(e))
+        return True
 
 
 def _format_price_alert(rule: AlertRule, value: float) -> str:
@@ -352,7 +375,15 @@ class Captura(NamedTuple):
     que devolve 403 no clique) para quando `_link_para_mensagem` não conseguiu
     resolver o endereço. `fonte` diz QUAL extrator leu a matéria
     (`read_article:trafilatura` ou `read_article:html_bruto`): sem isso não dá
-    para medir se o entulho do defeito 3 voltou.
+    para medir se o entulho do defeito 3 voltou. `data_publicacao` (ISO 8601 ou
+    None, entrou em 05/09/2026) é a data REAL da matéria, lida de dentro dela —
+    `_confirmar_frescor` usa isto para não confiar na data do agregador.
+
+    Default `None` em `data_publicacao`: existem só 2 call sites em produção
+    e 9 em testes construindo `Captura(...)` — não "dezenas de sites" como o
+    comentário aqui dizia antes — mas exigir o 4º argumento ainda quebraria
+    quem constrói com 3, por um campo que a maioria dos chamadores nem tem
+    como preencher.
 
     NamedTuple e não dict: um campo com nome diz o que é sem obrigar quem lê a
     contar posições.
@@ -360,9 +391,10 @@ class Captura(NamedTuple):
     conteudo: str | None
     fonte: str | None
     url_final: str | None
+    data_publicacao: str | None = None
 
 
-_CAPTURA_VAZIA = Captura(None, None, None)
+_CAPTURA_VAZIA = Captura(None, None, None, None)
 
 
 # Orçamento da resolução do link no caminho do ALERTA, em segundos. Isto roda
@@ -407,7 +439,7 @@ def _link_para_mensagem(url: str, url_publisher: str = "") -> str:
     return resolvido if _url_exibivel(resolvido) else url
 
 
-def _capture_conteudo(url: str, url_publisher: str = "") -> Captura:
+def _capture_conteudo(url: str, url_publisher: str = "", timeout: float = _CONTEUDO_TIMEOUT) -> Captura:
     """Tenta capturar o texto da matéria para ancorar respostas futuras do
     agente. Nunca pode derrubar nem atrasar o alerta — ele já foi ENTREGUE
     quando isto roda (mesma garantia de `log_sent_news`).
@@ -418,11 +450,16 @@ def _capture_conteudo(url: str, url_publisher: str = "") -> Captura:
     `conteudo` preenchido conta), não uma verificação aqui: é lá que mora o
     piso de `_MIN_ARTICLE_CHARS`, que impede a página não renderizada do Google
     Notícias virar a âncora `"Google News"` (11 chars).
+
+    `timeout` é opcional e default para `_CONTEUDO_TIMEOUT` (75s, o caminho de
+    render pós-envio) — a pré-leitura de frescor (`_confirmar_frescor`) passa
+    um teto MENOR de propósito, porque ela roda ANTES do envio, dentro de um
+    prazo externo bem mais curto (05/09/2026).
     """
     if not url:
         return _CAPTURA_VAZIA
     try:
-        resultado = web_search.read_article(url, timeout=_CONTEUDO_TIMEOUT,
+        resultado = web_search.read_article(url, timeout=timeout,
                                             url_publisher=url_publisher)
     except Exception as e:
         logger.warning("captura de conteúdo: exceção não tratada para %s: %s", url, sanitize_error(e))
@@ -433,7 +470,174 @@ def _capture_conteudo(url: str, url_publisher: str = "") -> Captura:
             logger.warning("captura de conteúdo falhou para %s: %s", url, resultado["erro"])
         return _CAPTURA_VAZIA
     extrator = resultado.get("extrator") or "desconhecido"
-    return Captura(conteudo, f"read_article:{extrator}", resultado.get("url_final"))
+    return Captura(conteudo, f"read_article:{extrator}", resultado.get("url_final"),
+                   resultado.get("data_publicacao"))
+
+
+# Prazo ABSOLUTO da pré-leitura de frescor (camada 1, incidente WASDE de
+# 05/09/2026). Roda ANTES do envio — diferente de `_CONTEUDO_TIMEOUT` (75s),
+# que roda DEPOIS e pode gastar o tempo que quiser sem atrasar o alerta. Aqui
+# segurar demais atrasa a rodada inteira; 40s é bem menor que os 75s do
+# caminho de render, então nem toda leitura cabe — falha aberta cobre isso
+# (ver `_confirmar_frescor`).
+_PRE_LEITURA_TIMEOUT_S = 40.0
+
+# Quantas candidatas a rodada tenta LER de verdade (via `_confirmar_frescor`)
+# antes de desistir de enviar. Cada leitura pode levar até
+# `_PRE_LEITURA_TIMEOUT_S` (40s), então o teto existe para a rodada não virar
+# uma fila de leituras de 40s cada — mesmo raciocínio do `_NEWS_SCAN_CAP`:
+# freio de tempo, não de qualidade. Baixado de 2 para 1 na 3ª revisão do Apolo
+# (05/09/2026): a 2ª leitura só entrava quando a 1ª saía CONFIRMADA velha — e
+# hoje uma candidata confirmada velha fica de fora por 7 dias via cooldown
+# (`_PRELEITURA_VELHA_COOLDOWN_HOURS`), sem gastar leitura nenhuma nas
+# próximas rodadas. Com o cron rodando a cada 15 min, esperar a rodada
+# seguinte para tentar a 2ª colocada não custa nada.
+_MAX_PRE_LEITURAS = 1
+
+# `_data_publicacao` só devolve o DIA (`YYYY-MM-DD`, meia-noite) — comparado a
+# "agora" isso soma até +24h de idade artificial que a matéria não tem de
+# verdade (publicada às 23h, ela "nasce" à meia-noite e parece um dia mais
+# velha). `news._MAX_AGE` (48h) é o teto do AGREGADOR — pubDate com HORA real,
+# outro problema — e usar o mesmo valor aqui condenava notícia FRESCA (achado
+# do Apolo, 05/09/2026: 34-46h reais, com o arredondamento de dia, podiam
+# passar de 48h) para SEMPRE, porque `_mark_sent` não tem TTL. 7 dias só pega
+# o claramente velho — a doença que esta camada existe para curar é matéria de
+# MESES sendo reindexada, não uma diferença de horas.
+_IDADE_MAXIMA_REAL = timedelta(days=7)
+
+# Cooldown por matéria (chave `preleitura_<url_id>`) contra reler a MESMA
+# candidata a cada rodada do cron (15 min) quando a entrega falha (Evolution
+# fora do ar): sem isto, uma candidata nunca marcada como enviada (porque
+# `sent == 0`) volta a ser a nº 1 na rodada seguinte e paga a pré-leitura de
+# novo — até 96 leituras/dia da MESMA matéria, cada uma até 35 créditos de
+# ScraperAPI quando cai no caminho de render (achado do Apolo, 05/09/2026).
+# 6h é maior que qualquer instabilidade plausível da Evolution e ainda deixa a
+# matéria ser relida no mesmo dia se a entrega voltar a funcionar.
+_PRELEITURA_COOLDOWN_HOURS = 6.0
+
+# Cooldown do VEREDITO "confirmada velha" (chave `preleitura_velha_<url_id>`,
+# 3ª revisão do Apolo, 05/09/2026). Substitui o `_mark_sent` (sem TTL) que a
+# candidata confirmada velha levava antes: um ERRO de LEITURA — não da
+# matéria em si, ex.: `_confirmar_frescor` pegando um dateline de citação em
+# vez do byline de verdade — condenava para sempre uma matéria genuinamente
+# FRESCA, sem chance de correção. 7 dias é bem maior que qualquer
+# instabilidade plausível de extração e ainda barra reler a MESMA matéria
+# toda rodada do cron (15 min) só porque o veredito de "velha" não muda de
+# uma leitura para outra sem novo dado — depois disso ela volta a competir
+# como se nunca tivesse sido lida.
+_PRELEITURA_VELHA_COOLDOWN_HOURS = 24 * 7
+
+
+def _confirmar_frescor(candidata: dict, url_resolvida: str) -> tuple[bool, Captura | None]:
+    """Lê a matéria da candidata ANTES do envio para confirmar que a data real
+    bate com o que o agregador disse — incidente de 05/09/2026: o Google
+    Notícias carimbou `<pubDate>` de setembro numa matéria do WASDE de maio (a
+    data do carimbo é a da REINDEXAÇÃO, não da publicação), e o classificador
+    recebeu a data errada.
+
+    `url_resolvida` é o endereço JÁ resolvido pelo chamador (`_link_para_mensagem`,
+    rodada ANTES desta função) — nunca o link cru do Google. Quando a resolução
+    prévia FALHOU, `url_resolvida` ainda é o link `news.google.com` — e esta
+    função NÃO LÊ nesse caso (falha aberta, ver o `if` logo no início do
+    corpo): ler mesmo assim cairia no caminho de `render=true` de dentro de
+    `read_article`, que IMPÕE por dentro um piso de 75s
+    (`_RENDER_TIMEOUT_FLOOR`) — maior que os 40s que esta função dá à leitura
+    inteira (achado do Apolo, 05/09/2026: 3 de 4 estouravam, e o pedido ao
+    ScraperAPI continuava "em voo" gastando até 35 créditos dentro do prazo de
+    35s do `httpx`, mesmo com esta função já tendo desistido em 40s).
+
+    Devolve `(True, captura)` quando a data real existe e é mais velha que
+    `_IDADE_MAXIMA_REAL` — a candidata está CONFIRMADA velha, e `captura`
+    carrega o que foi lido (para o log de descarte). Devolve `(False,
+    captura_ou_None)` em QUALQUER outro caso — falha ABERTA de propósito: sem
+    data, com data recente, ou leitura que falhou/estourou o prazo todas
+    seguem como se a candidata fosse fresca. Perder um alerta bom por causa de
+    uma leitura ruim é pior que deixar passar uma matéria velha ocasional.
+
+    `captura`, quando não é None, é a leitura de verdade (via
+    `_capture_conteudo`) — o chamador reaproveita para não ler a MESMA matéria
+    duas vezes (uma aqui, outra na captura pós-envio) quando ela tem conteúdo.
+
+    O prazo é ABSOLUTO, não por operação (a mesma doença que `resolve_google_news`
+    já teve: `httpx.Timeout` reinicia a cada pedaço da resposta) — mesmo padrão
+    de aqui: `threading.Thread(daemon=True)` + `join(prazo)`, não
+    `ThreadPoolExecutor`. Uma thread NÃO daemon (a implementação anterior)
+    seguia rodando até terminar de verdade (até 75s) mesmo depois deste
+    prazo ter vencido — órfã, mas viva, segurando o encerramento do processo
+    (medido em 18s na 6ª revisão do Apolo, 05/09/2026). `daemon=True` morre
+    junto com o processo, como em `resolve_google_news`.
+
+    Além do prazo externo, `_capture_conteudo` recebe um timeout PRÓPRIO menor
+    (`_PRE_LEITURA_TIMEOUT_S - 5`) — mas isto NÃO é o que protege contra o
+    render: como esta função nunca chama `_capture_conteudo` com um link ainda
+    do Google (ver acima), o caminho de `render=true` simplesmente não entra
+    em jogo aqui. O timeout próprio existe só para a leitura RÁPIDA (fetch
+    simples, o caminho comum) não segurar até o prazo absoluto inteiro.
+    """
+    url_publisher = candidata.get("url_publisher") or ""
+    title = candidata.get("title", "")
+
+    if web_search._is_google_news_link(url_resolvida):
+        # A resolução prévia (`_link_para_mensagem`, chamada pelo laço em
+        # `_check_news` ANTES desta função) falhou — `url_resolvida` ainda
+        # aponta para `news.google.com`. Ler mesmo assim forçaria
+        # `read_article` a ligar `render=true`, que IMPÕE por dentro um piso
+        # de `_RENDER_TIMEOUT_FLOOR` (75s) — quase o dobro do prazo de 40s que
+        # esta função tem para a pré-leitura INTEIRA (achado do Apolo,
+        # 05/09/2026: 3 de 4 tentativas estouravam, com o pedido ao
+        # ScraperAPI seguindo "em voo" gastando crédito mesmo depois do
+        # `join` desistir). Falha aberta: não lê, segue como se fosse fresca
+        # — a captura pós-envio (`_CONTEUDO_TIMEOUT`, sem prazo curto) ainda
+        # tenta o render normalmente.
+        logger.info("news check: pré-leitura pulada (link do Google não resolveu) para '%s'",
+                    title[:60])
+        return False, None
+
+    leitura_timeout = max(_PRE_LEITURA_TIMEOUT_S - 5, 1.0)
+    caixa: list[Captura] = []
+    erro: list[BaseException] = []
+
+    def _alvo() -> None:
+        try:
+            caixa.append(_capture_conteudo(url_resolvida, url_publisher, leitura_timeout))
+        except Exception:
+            # `_capture_conteudo` já filtra toda `Exception` internamente —
+            # não deveria acontecer. Se acontecer mesmo assim, não reergue no
+            # invólucro (só o que é BaseException-mas-não-Exception reergue).
+            raise
+        except BaseException as e:
+            # A trava de rede dos testes (`RedeProibida`) herda de
+            # BaseException DE PROPÓSITO para escapar de `except Exception` —
+            # sem isto ela morreria AQUI dentro (thread sem `except`) e o
+            # invólucro devolveria falha aberta, escondendo um teste que
+            # deveria reprovar por tentar rede de verdade (mesmo conserto de
+            # `resolve_google_news`, 19/08/2026).
+            erro.append(e)
+
+    t = threading.Thread(target=_alvo, daemon=True)
+    t.start()
+    t.join(_PRE_LEITURA_TIMEOUT_S)
+    if t.is_alive():
+        logger.warning("news check: pré-leitura de frescor estourou o prazo de %.1fs para '%s'",
+                       _PRE_LEITURA_TIMEOUT_S, title[:60])
+        return False, None
+    if erro:
+        raise erro[0]
+    if not caixa:
+        return False, None
+    captura = caixa[0]
+
+    if not captura.data_publicacao:
+        return False, captura
+    try:
+        dt = datetime.fromisoformat(captura.data_publicacao)
+    except Exception:
+        return False, captura
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) - dt > _IDADE_MAXIMA_REAL:
+        return True, captura
+    return False, captura
 
 
 def _market_snapshot(market: dict | None) -> str:
@@ -680,32 +884,137 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
     if not candidatas:
         return 0
 
-    # Uma mensagem por rodada, a de MAIOR nota. A trava global é conferida uma única
-    # vez na entrada da função, então o laço antigo despejava até 5 de uma vez — em
-    # 12/08/2026 saíram 64 alertas, e em 7 dias houve 20 rajadas com 3-4 grudadas.
-    # Antes ia a PRIMEIRA acima do corte na ordem da lista, sem nunca comparar notas.
+    # Uma mensagem por rodada, a de MAIOR nota — mas só depois de confirmar que
+    # a data real da matéria não desmente o agregador (camada 1, incidente
+    # WASDE de 05/09/2026). A trava global é conferida uma única vez na entrada
+    # da função, então o laço antigo despejava até 5 de uma vez — em 12/08/2026
+    # saíram 64 alertas, e em 7 dias houve 20 rajadas com 3-4 grudadas.
     #
     # Empate é o caso COMUM, não a exceção (em 126 notícias reais, 49 tiraram 7):
-    # `max` devolve o primeiro e a lista chega ordenada por recência, então no empate
-    # ganha a mais recente. É critério defensável, mas é IMPLÍCITO — se alguém mexer
-    # em `news._ordena_por_recencia`, o desempate muda junto. Há teste prendendo isso.
+    # `sorted` é ESTÁVEL e a lista chega ordenada por recência, então no empate
+    # ganha a mais recente — o mesmo desempate implícito de antes (era `max`,
+    # que "devolve o primeiro"; `sorted` decrescente generaliza sem mudar o
+    # critério). Há teste prendendo isso.
     #
-    # As perdedoras não são marcadas: `is_news_sent` não tem prazo, então marcar aqui
-    # mataria para sempre notícia boa que só perdeu para outra melhor. Na prática elas
-    # raramente são relidas (~4/dia) — as novidades ocupam as vagas antes. O ganho é
-    # não perder sinal, não é "elas competem de novo".
-    melhor = max(candidatas, key=lambda c: c["score"])
+    # As perdedoras — por nota OU por orçamento de pré-leitura esgotado antes
+    # de chegar nelas — não são marcadas: `is_news_sent` não tem prazo, então
+    # marcar aqui mataria para sempre notícia boa que só perdeu para outra
+    # melhor ou nem chegou a ser lida. Na prática elas raramente são relidas
+    # (~4/dia) — as novidades ocupam as vagas antes.
+    candidatas_por_nota = sorted(candidatas, key=lambda c: -c["score"])
+
+    melhor = None
+    captura_pre_leitura: Captura | None = None
+    pre_leituras = 0
+    for candidata in candidatas_por_nota:
+        url_original = candidata.get("url") or ""
+        url_publisher = candidata.get("url_publisher") or ""
+        url_id = candidata.get("url_id")
+        preleitura_rule_id = f"preleitura_{url_id}" if url_id else None
+        velha_rule_id = f"preleitura_velha_{url_id}" if url_id else None
+
+        if not test_mode and velha_rule_id and not _cooldown_liberado(
+                velha_rule_id, _PRELEITURA_VELHA_COOLDOWN_HOURS, "candidata confirmada velha"):
+            # Já CONFIRMAMOS esta matéria como velha nos últimos 7 dias (3ª
+            # revisão do Apolo, 05/09/2026 — decisão que substitui o
+            # `_mark_sent` permanente de antes, ver comentário mais abaixo).
+            # Reler sem chance de veredito diferente é desperdício de até 40s
+            # — pula SEM enviar e SEM gastar orçamento de leitura: a próxima
+            # candidata da lista ainda pode competir nesta mesma rodada.
+            # NÃO resolve o link (item 5, 4ª revisão do Apolo, 05/09/2026):
+            # esta candidata não vai virar `melhor` nem `continue`; pagar
+            # `_link_para_mensagem` (até `_LINK_PRAZO` = 5s) aqui era gasto
+            # repetido a cada rodada do cron pelos 7 dias inteiros do cooldown,
+            # sem nenhum uso do resultado.
+            logger.info("news check: '%s' confirmada velha há menos de 7 dias, pulando sem reler",
+                        candidata.get("title", "")[:60])
+            continue
+
+        # DESCOBRIR o link (barato: ~0,4-0,8s, 0 crédito) só roda DEPOIS do
+        # gate de velha — as duas ramificações daqui para baixo (segue sem
+        # reler, ou lê de verdade) SÃO as únicas que usam `url_alerta` (na
+        # mensagem e no `news_log`); a candidata que cai no `continue` acima
+        # nunca chega a precisar dele.
+        url_resolvida = _link_para_mensagem(url_original, url_publisher)
+        candidata["url_alerta"] = url_resolvida
+
+        if not test_mode and preleitura_rule_id and not _cooldown_liberado(
+                preleitura_rule_id, _PRELEITURA_COOLDOWN_HOURS, "pré-leitura recente"):
+            # Já tentamos ler esta MESMA matéria nas últimas
+            # `_PRELEITURA_COOLDOWN_HOURS` (a candidata não foi marcada como
+            # enviada porque a entrega falhou — Evolution fora do ar — e por
+            # isso ainda compete de novo). Reler sem chance de veredito novo é
+            # a causa de 96 leituras/dia da mesma matéria (achado do Apolo,
+            # 05/09/2026). Sem veredito novo, falha ABERTA: segue como se
+            # fosse fresca, mas sem gastar uma nova leitura agora — e sem
+            # gastar orçamento (`pre_leituras`), pelo mesmo motivo do gate da
+            # candidata velha acima.
+            logger.info("news check: pré-leitura de '%s' em cooldown, seguindo sem reler",
+                        candidata.get("title", "")[:60])
+            melhor = candidata
+            captura_pre_leitura = None
+            break
+
+        if pre_leituras >= _MAX_PRE_LEITURAS:
+            # Orçamento de tempo esgotado (até `_MAX_PRE_LEITURAS` leituras de
+            # até 40s cada — checado só AQUI, depois dos dois gates acima, que
+            # não custam uma leitura de verdade): a rodada termina sem envio.
+            # As candidatas restantes ficam sem marca — competem de novo na
+            # próxima rodada.
+            break
+
+        pre_leituras += 1
+        velha, captura = _confirmar_frescor(candidata, url_resolvida)
+        if velha:
+            logger.warning(
+                "news check: descartada por data real %s (agregador dizia %s): '%s'",
+                captura.data_publicacao if captura else None,
+                candidata.get("publicado_em"), candidata.get("title", "")[:60])
+            # DECISÃO ATUALIZADA (3ª revisão do Apolo, 05/09/2026): a
+            # candidata confirmada velha NÃO leva mais `_mark_sent`.
+            # `is_news_sent` não tem TTL, então a marca antiga era permanente
+            # — um ERRO de LEITURA (não da matéria em si; ex.: um dateline de
+            # citação lido como se fosse o byline) condenava para sempre uma
+            # matéria genuinamente FRESCA, sem chance de correção. O veredito
+            # agora fica em `velha_rule_id`, com prazo de 7 dias
+            # (`_PRELEITURA_VELHA_COOLDOWN_HOURS`, ver o gate no topo do
+            # laço): um erro de leitura atrasa 7 dias em vez de matar.
+            if not test_mode and velha_rule_id:
+                try:
+                    supabase.set_alert_triggered(velha_rule_id)
+                except Exception as e:
+                    logger.warning(
+                        "news check: marcar veredito de velha falhou para '%s': %s",
+                        candidata.get("title", "")[:60], sanitize_error(e))
+            # O cooldown de pré-leitura de 6h (`preleitura_rule_id`) NÃO é
+            # gravado aqui: é para o caminho que SEGUE (abaixo), para não
+            # reler a mesma matéria a cada 15 min quando a entrega falha e ela
+            # nunca chega a ser marcada. Aqui quem barra a releitura é o
+            # cooldown de 7 dias gravado acima.
+            continue
+        if not test_mode and preleitura_rule_id:
+            try:
+                supabase.set_alert_triggered(preleitura_rule_id)
+            except Exception as e:
+                logger.warning("news check: marcar cooldown de pré-leitura falhou para '%s': %s",
+                               candidata.get("title", "")[:60], sanitize_error(e))
+        melhor = candidata
+        captura_pre_leitura = captura
+        break
+
+    if melhor is None:
+        logger.info("news check: %d candidatas, nenhuma sobrou fresca (ou orçamento de "
+                    "pré-leitura esgotado) — rodada sem envio", len(candidatas))
+        return 0
+
     score, result, source = melhor["score"], melhor["result"], melhor["source"]
     titulo_pt = result.get("titulo_pt") or melhor["title"]
 
-    # Duas coisas diferentes, e a ordem entre elas é o conserto do defeito 1
-    # (19/08/2026): DESCOBRIR o link é barato (0,4-0,8s, 0 crédito) e vem antes
-    # da mensagem; LER a matéria é caro (até 75s, 35 créditos no render) e vem
-    # depois da entrega. Juntar as duas colocaria a leitura na frente do envio —
-    # e um estouro dos 300s da função na Vercel deixaria de sair alerta nenhum.
+    # O link já foi resolvido no laço acima (`melhor["url_alerta"]`), antes da
+    # pré-leitura de frescor — não resolve de novo aqui.
     url_original = melhor.get("url", "")
     url_publisher = melhor.get("url_publisher") or ""
-    url_alerta = _link_para_mensagem(url_original, url_publisher)
+    url_alerta = melhor.get("url_alerta") or url_original
     msg = _format_news_alert(result, source, titulo_pt, score, test_mode,
                              url=url_alerta)
 
@@ -770,8 +1079,19 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
             # dispensa o render (1 crédito e ~6s em vez de 35 créditos e ~57s).
             # Sem `news_log_id` não há linha para atualizar — pular a captura
             # aqui evita gastar crédito de ScraperAPI sem ter onde gravar.
+            #
+            # Reaproveita a captura da pré-leitura de frescor quando ela trouxe
+            # `conteudo` de verdade: ler a MESMA matéria duas vezes gastaria o
+            # dobro do crédito de ScraperAPI à toa. `_CAPTURA_VAZIA` (erro,
+            # timeout, texto curto demais) NÃO conta como "já lida com
+            # sucesso" — sem esta distinção, a captura pós-envio nunca rodava
+            # e `conteudo` ficava NULL para sempre mesmo quando o caminho de
+            # render (mais lento, mas sem o prazo de 40s no pescoço) teria
+            # conseguido (achado do Apolo, 05/09/2026).
             if news_log_id:
-                captura = _capture_conteudo(url_alerta, url_publisher)
+                captura = (captura_pre_leitura
+                          if captura_pre_leitura is not None and captura_pre_leitura.conteudo
+                          else _capture_conteudo(url_alerta, url_publisher))
                 # A canônica da página só entra quando a resolução falhou. Ela
                 # confere HOST, não profundidade de caminho: uma página que
                 # declara `canonical` genérica (a home do veículo) sobrescrevia
@@ -817,7 +1137,14 @@ def notify_admin(errors: list[str], title: str = "check-alerts com falhas") -> N
 
 
 def run_checks(test_mode: bool = False) -> dict:
-    """Executa todos os checks de alertas. Chamado pelo endpoint /api/check-alerts."""
+    """Executa todos os checks de alertas. Chamado pelo endpoint /api/check-alerts.
+
+    `duracao_s` (item 2, 3ª revisão do Apolo, 05/09/2026): orçamento de tempo
+    da rodada inteira, medido por `time.monotonic()` (não afetado por ajuste
+    de relógio do sistema, diferente de `datetime.now()`). Existe para medir
+    de verdade o efeito de `_MAX_PRE_LEITURAS` e companhia em vez de estimar —
+    número em comentário apodrece, medição em log não."""
+    inicio = time.monotonic()
     logger.info("starting alert checks (test_mode=%s)", test_mode)
     errors: list[str] = []
     recipients = _get_recipients()
@@ -825,7 +1152,9 @@ def run_checks(test_mode: bool = False) -> dict:
     if not recipients:
         logger.error("no recipients: Supabase fora do ar ou nenhum alerts_enabled")
         notify_admin(["recipients: 0 destinatários (Supabase inacessível ou alerts_enabled vazio)"])
-        return {"status": "ok", "recipients": 0, "alerts_sent": 0}
+        duracao_s = round(time.monotonic() - inicio, 1)
+        logger.info("check-alerts: %.1fs", duracao_s)
+        return {"status": "ok", "recipients": 0, "alerts_sent": 0, "duracao_s": duracao_s}
 
     total = 0
     market_data: dict | None = None
@@ -858,8 +1187,11 @@ def run_checks(test_mode: bool = False) -> dict:
     if errors:
         notify_admin(errors)
 
+    duracao_s = round(time.monotonic() - inicio, 1)
     logger.info("alert checks done: %d alerts sent to %d recipients", total, len(recipients))
-    result = {"status": "ok", "recipients": len(recipients), "alerts_sent": total, "test_mode": test_mode}
+    logger.info("check-alerts: %.1fs", duracao_s)
+    result = {"status": "ok", "recipients": len(recipients), "alerts_sent": total,
+              "test_mode": test_mode, "duracao_s": duracao_s}
     if errors:
         result["errors"] = errors
     return result

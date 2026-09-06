@@ -570,7 +570,7 @@ def _prepara_check_news(monkeypatch, artigo, classificacao, sent: int = 1,
             atualizacoes.append((news_log_id, conteudo_, conteudo_fonte_, url_final_)),
     )
     monkeypatch.setattr(alert_checker, "_capture_conteudo",
-                        lambda url, url_publisher="": alert_checker.Captura(*conteudo))
+                        lambda url, url_publisher="", timeout=None: alert_checker.Captura(*conteudo))
     # Sem resolução por padrão: a maioria dos testes não é sobre o link, e sem
     # este stub `_link_para_mensagem` abriria conexão real com o Google (a trava
     # de rede reprova). Quem testa a resolução sobrescreve.
@@ -690,7 +690,7 @@ def test_check_news_grava_log_antes_de_marcar_dedup(monkeypatch):
     monkeypatch.setattr(alert_checker, "_broadcast_com_ids",
                         lambda msg, recipients, errors=None: [("5534999945010", "MSG_ID_TESTE")])
     monkeypatch.setattr(alert_checker, "_capture_conteudo",
-                        lambda url, url_publisher="": alert_checker._CAPTURA_VAZIA)
+                        lambda url, url_publisher="", timeout=None: alert_checker._CAPTURA_VAZIA)
     monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
                         lambda url, **k: "")
     monkeypatch.setattr("backend.collectors.news.collect", lambda *a, **k: [_ARTIGO])
@@ -709,12 +709,24 @@ def test_check_news_grava_log_antes_de_marcar_dedup(monkeypatch):
 
 @pytest.mark.unit
 def test_check_news_captura_roda_por_ultimo(monkeypatch):
-    """Conserto 1 (19/08/2026): a captura da matéria (até 75s no caminho de
-    render, e SEM teto real de tempo — `httpx.Timeout` é por OPERAÇÃO, medido
-    1,0s pedido virando 15,25s reais) tem que rodar DEPOIS de tudo que marca a
-    notícia como entregue (log, log_alert_messages, dedup, cooldown). Se a
-    função da Vercel morrer durante a captura, a pior perda é só o texto — o
-    cron de 15 min não pode reclassificar e reenviar a mesma notícia."""
+    """Conserto 1 (19/08/2026): a captura POR CIMA do dedup (log,
+    log_alert_messages, dedup, cooldown) tem que rodar DEPOIS de tudo que marca
+    a notícia como entregue. Se a função da Vercel morrer durante essa etapa, a
+    pior perda é só o texto — o cron de 15 min não pode reclassificar e
+    reenviar a mesma notícia.
+
+    Camada 1 (05/09/2026, incidente WASDE) mudou ONDE a leitura acontece: agora
+    há uma pré-leitura de frescor ANTES do broadcast (bounded a 40s,
+    `_confirmar_frescor`), que também chama `_capture_conteudo` — e essa
+    captura é REAPROVEITADA depois, sem ler a matéria de novo. O invariante que
+    importa continua de pé (dedup/log/mark nunca esperam a captura), só que
+    agora `_capture_conteudo` só é chamado UMA vez, antes do broadcast.
+
+    Item 3 (05/09/2026): a pré-leitura só lê quando o link JÁ foi resolvido —
+    por isso `resolve_google_news` aqui devolve um endereço de verdade, não
+    "". Com resolução falha, a pré-leitura nem chamaria `_capture_conteudo`
+    (ver `test_check_news_captura_pos_envio_quando_link_nao_resolve` para esse
+    caminho)."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "chave-de-teste")
     ordem: list[str] = []
     monkeypatch.setattr(alert_checker.supabase, "log_sent_news",
@@ -727,17 +739,27 @@ def test_check_news_captura_roda_por_ultimo(monkeypatch):
                         lambda *a, **k: ordem.append("set_alert_triggered"))
     monkeypatch.setattr(alert_checker.supabase, "update_news_log_conteudo",
                         lambda *a, **k: ordem.append("update_conteudo"))
-    monkeypatch.setattr(alert_checker, "_capture_conteudo",
-                        lambda url, url_publisher="": ordem.append("captura")
-                        or alert_checker._CAPTURA_VAZIA)
+    # Conteúdo NÃO-vazio de propósito: desde o achado 3 (05/09/2026),
+    # `_CAPTURA_VAZIA` não conta mais como "já lida com sucesso" e dispararia
+    # uma SEGUNDA captura pós-envio (ver
+    # test_check_news_preleitura_vazia_ainda_assim_faz_a_captura_pos_envio) —
+    # o que este teste quer provar é a ORDEM, não essa regra à parte.
+    monkeypatch.setattr(
+        alert_checker, "_capture_conteudo",
+        lambda url, url_publisher="", timeout=None: ordem.append("captura")
+        or alert_checker.Captura("Texto de teste suficiente.", "read_article:trafilatura", None, None))
     monkeypatch.setattr(alert_checker.supabase, "is_news_sent", lambda *a, **k: False)
     monkeypatch.setattr(alert_checker.supabase, "get_recent_sent_titles", lambda *a, **k: [])
     monkeypatch.setattr(alert_checker, "_cooldown_ok", lambda *a, **k: True)
     monkeypatch.setattr(alert_checker, "_broadcast_com_ids",
                         lambda msg, recipients, errors=None: ordem.append("broadcast")
                         or [("5534999945010", "MSG_ID_TESTE")])
+    # Resolvido (não ""): item 3 (05/09/2026) faz `_confirmar_frescor` recusar
+    # ler quando `url_resolvida` ainda é o link do Google — sem isto, a
+    # pré-leitura nunca chamaria `_capture_conteudo` e este teste não provaria
+    # mais a ordem que ele existe para provar.
     monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
-                        lambda url, **k: "")
+                        lambda url, **k: "https://www.farmprogress.com/corn-rated-61-percent")
     monkeypatch.setattr("backend.collectors.news.collect", lambda *a, **k: [_ARTIGO])
 
     fake_msg = MagicMock()
@@ -748,14 +770,66 @@ def test_check_news_captura_roda_por_ultimo(monkeypatch):
 
     alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
 
-    # `set_alert_triggered("newsapi_fetch")` roda ANTES do broadcast (fora do
-    # bloco de entrega) e `source` de _ARTIGO é truthy, então
-    # set_alert_triggered aparece de novo entre "mark" e "captura" — checar a
-    # partir de "broadcast" e só as duas últimas posições evita depender de
-    # quantas vezes ele roda no meio.
+    # `captura` só aparece UMA vez — a pré-leitura de frescor, ANTES do
+    # broadcast. `set_alert_triggered("newsapi_fetch")` também roda antes
+    # (fora do bloco de entrega), então checar a partir de "broadcast" evita
+    # depender de quantas vezes ele aparece no meio.
+    assert ordem.count("captura") == 1
+    assert ordem.index("captura") < ordem.index("broadcast")
     i = ordem.index("broadcast")
     assert ordem[i:i + 4] == ["broadcast", "log", "log_alert_messages", "mark"]
-    assert ordem[-2:] == ["captura", "update_conteudo"]
+    # `update_conteudo` continua por ÚLTIMO — usa a captura REAPROVEITADA da
+    # pré-leitura, sem ler a matéria de novo (daí não haver um 2º "captura" aqui).
+    assert ordem[-1] == "update_conteudo"
+
+
+@pytest.mark.unit
+def test_check_news_captura_pos_envio_quando_link_nao_resolve(monkeypatch):
+    """Item 3 (05/09/2026): quando `resolve_google_news` falha (devolve ""),
+    `url_resolvida` continua sendo o link `news.google.com` — e
+    `_confirmar_frescor` RECUSA ler nesse caso (ler cairia no piso de 75s do
+    `render=true`, maior que o prazo de 40s da pré-leitura inteira). A única
+    captura da rodada passa a acontecer DEPOIS do broadcast, no bloco que já
+    existia para isso — contraprova de `test_check_news_captura_roda_por_ultimo`,
+    que usa um link JÁ resolvido."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "chave-de-teste")
+    ordem: list[str] = []
+    monkeypatch.setattr(alert_checker.supabase, "log_sent_news",
+                        lambda entry: ordem.append("log") or 999)
+    monkeypatch.setattr(alert_checker.supabase, "log_alert_messages",
+                        lambda *a, **k: ordem.append("log_alert_messages"))
+    monkeypatch.setattr(alert_checker.supabase, "mark_news_sent",
+                        lambda *a, **k: ordem.append("mark"))
+    monkeypatch.setattr(alert_checker.supabase, "set_alert_triggered",
+                        lambda *a, **k: ordem.append("set_alert_triggered"))
+    monkeypatch.setattr(alert_checker.supabase, "update_news_log_conteudo",
+                        lambda *a, **k: ordem.append("update_conteudo"))
+    monkeypatch.setattr(
+        alert_checker, "_capture_conteudo",
+        lambda url, url_publisher="", timeout=None: ordem.append("captura")
+        or alert_checker.Captura("Texto de teste suficiente.", "read_article:trafilatura", None, None))
+    monkeypatch.setattr(alert_checker.supabase, "is_news_sent", lambda *a, **k: False)
+    monkeypatch.setattr(alert_checker.supabase, "get_recent_sent_titles", lambda *a, **k: [])
+    monkeypatch.setattr(alert_checker, "_cooldown_ok", lambda *a, **k: True)
+    monkeypatch.setattr(alert_checker, "_broadcast_com_ids",
+                        lambda msg, recipients, errors=None: ordem.append("broadcast")
+                        or [("5534999945010", "MSG_ID_TESTE")])
+    monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
+                        lambda url, **k: "")  # resolução falha: fica no link do Google
+    monkeypatch.setattr("backend.collectors.news.collect", lambda *a, **k: [_ARTIGO])
+
+    fake_msg = MagicMock()
+    fake_msg.content = [MagicMock(text=json.dumps(_CLASSIFICACAO))]
+    fake_client = MagicMock()
+    fake_client.messages.create = MagicMock(return_value=fake_msg)
+    monkeypatch.setattr(alert_checker, "Anthropic", lambda *a, **k: fake_client)
+
+    alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
+
+    # Só UMA captura, e ela é a pós-envio — a pré-leitura não leu nada.
+    assert ordem.count("captura") == 1
+    assert ordem.index("captura") > ordem.index("broadcast")
+    assert ordem[-1] == "update_conteudo"
 
 
 @pytest.mark.unit
@@ -775,8 +849,8 @@ def test_check_news_em_test_mode_nao_grava_no_log(monkeypatch):
 
 @pytest.mark.unit
 def test_capture_conteudo_sem_url_devolve_none():
-    assert alert_checker._capture_conteudo("") == (None, None, None)
-    assert alert_checker._capture_conteudo(None) == (None, None, None)
+    assert alert_checker._capture_conteudo("") == (None, None, None, None)
+    assert alert_checker._capture_conteudo(None) == (None, None, None, None)
 
 
 @pytest.mark.unit
@@ -786,7 +860,7 @@ def test_capture_conteudo_sucesso_marca_a_fonte(monkeypatch):
         lambda url, timeout=30.0, url_publisher="": {"url": url, "conteudo": "Texto completo do artigo.",
                                    "extrator": "trafilatura"},
     )
-    conteudo, fonte, _ = alert_checker._capture_conteudo("https://www.farmprogress.com/x")
+    conteudo, fonte, _, _ = alert_checker._capture_conteudo("https://www.farmprogress.com/x")
     assert conteudo == "Texto completo do artigo."
     assert fonte == "read_article:trafilatura"
 
@@ -809,12 +883,30 @@ def test_capture_conteudo_usa_o_teto_de_tempo_dedicado(monkeypatch):
 
 
 @pytest.mark.unit
+def test_capture_conteudo_aceita_timeout_explicito(monkeypatch):
+    """Achado 4 (05/09/2026): a pré-leitura de frescor precisa de um teto
+    MENOR que o da captura pós-envio (`_CONTEUDO_TIMEOUT`, 75s) — sem um
+    parâmetro opcional, `_capture_conteudo` sempre impunha o mesmo teto
+    grande, e um link que ainda caísse no caminho de render herdava um piso
+    (75s) maior que o prazo externo de 40s da pré-leitura."""
+    capturado = {}
+
+    def fake_read_article(url, timeout=30.0, url_publisher=""):
+        capturado["timeout"] = timeout
+        return {"url": url, "conteudo": "x" * 300}
+
+    monkeypatch.setattr(alert_checker.web_search, "read_article", fake_read_article)
+    alert_checker._capture_conteudo("https://www.farmprogress.com/x", timeout=12.5)
+    assert capturado["timeout"] == 12.5
+
+
+@pytest.mark.unit
 def test_capture_conteudo_erro_devolve_none_sem_estourar(monkeypatch):
     monkeypatch.setattr(
         alert_checker.web_search, "read_article",
         lambda url, timeout=30.0, url_publisher="": {"erro": "404 Not Found", "url": url},
     )
-    assert alert_checker._capture_conteudo("https://news.google.com/rss/articles/abc") == (None, None, None)
+    assert alert_checker._capture_conteudo("https://news.google.com/rss/articles/abc") == (None, None, None, None)
 
 
 @pytest.mark.unit
@@ -823,7 +915,7 @@ def test_capture_conteudo_conteudo_vazio_devolve_none(monkeypatch):
         alert_checker.web_search, "read_article",
         lambda url, timeout=30.0, url_publisher="": {"url": url, "conteudo": ""},
     )
-    assert alert_checker._capture_conteudo("https://x.com") == (None, None, None)
+    assert alert_checker._capture_conteudo("https://x.com") == (None, None, None, None)
 
 
 @pytest.mark.unit
@@ -831,7 +923,7 @@ def test_capture_conteudo_excecao_nao_tratada_nao_estoura(monkeypatch):
     def explode(url, timeout=30.0, url_publisher=""):
         raise RuntimeError("timeout")
     monkeypatch.setattr(alert_checker.web_search, "read_article", explode)
-    assert alert_checker._capture_conteudo("https://x.com") == (None, None, None)
+    assert alert_checker._capture_conteudo("https://x.com") == (None, None, None, None)
 
 
 @pytest.mark.unit
@@ -870,6 +962,30 @@ def test_check_news_sem_captura_atualiza_com_conteudo_ausente(monkeypatch):
     assert atualizacoes == [(999, None, None, None)]
 
 
+@pytest.mark.unit
+def test_check_news_preleitura_vazia_ainda_assim_faz_a_captura_pos_envio(monkeypatch):
+    """Achado 3 (05/09/2026): `_CAPTURA_VAZIA` (erro do ScraperAPI, timeout,
+    texto curto demais na pré-leitura) NÃO pode contar como "já lida com
+    sucesso" — sem esta distinção, a captura pós-envio (mais lenta, sem o
+    prazo de 40s no pescoço, e por isso capaz de conseguir o que a pré-leitura
+    não conseguiu) nunca rodava, e `conteudo` ficava NULL para sempre. As duas
+    tentativas usam o link JÁ RESOLVIDO (`_URL_REAL`), nunca o cru do Google."""
+    chamadas = []
+
+    def fake_capture(url, url_publisher="", timeout=None):
+        chamadas.append(url)
+        return alert_checker._CAPTURA_VAZIA
+
+    _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
+    monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
+                        lambda url, **k: _URL_REAL)
+    monkeypatch.setattr(alert_checker, "_capture_conteudo", fake_capture)
+
+    alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
+
+    assert chamadas == [_URL_REAL, _URL_REAL]
+
+
 # ── Parte B: id da mensagem por destinatário ─────────────────────────────
 
 @pytest.mark.unit
@@ -888,9 +1004,19 @@ def test_check_news_grava_id_da_mensagem_por_destinatario(monkeypatch):
 def test_check_news_sem_id_de_log_nao_grava_mensagens(monkeypatch):
     """log_sent_news falhou (devolveu None) — log_alert_messages não pode
     rodar com news_log_id inválido; a FK nem aceitaria. update_news_log_conteudo
-    também não: não haveria linha para atualizar. E a captura em si (até 75s,
-    35 créditos de ScraperAPI no caminho de render) nem roda — gastaria custo
-    sem ter onde gravar o resultado (Conserto 1, 19/08/2026)."""
+    também não: não haveria linha para atualizar (Conserto 1, 19/08/2026).
+
+    A captura EM SI (pré-leitura de frescor, camada 1 de 05/09/2026) roda mesmo
+    assim: ela acontece ANTES do broadcast, para decidir SE a candidata é
+    enviada — antes de sequer existir um `news_log_id` para gastar ou não
+    gastar crédito em cima. O que continua valendo é a 2ª metade do
+    invariante: sem `news_log_id`, não há UPDATE nem segunda leitura.
+
+    `resolve_google_news` aqui devolve um endereço de verdade (não ""): item 3
+    (05/09/2026) faz a pré-leitura recusar ler quando o link continua sendo o
+    do Google — com resolução falha, `capturas` ficaria vazia mesmo COM
+    `news_log_id` válido, e este teste deixaria de provar o que promete
+    (captura roda independente de `news_log_id`)."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "chave-de-teste")
     mensagens: list = []
     atualizacoes: list = []
@@ -901,10 +1027,10 @@ def test_check_news_sem_id_de_log_nao_grava_mensagens(monkeypatch):
     monkeypatch.setattr(alert_checker.supabase, "update_news_log_conteudo",
                         lambda *a, **k: atualizacoes.append((a, k)))
     monkeypatch.setattr(alert_checker, "_capture_conteudo",
-                        lambda url, url_publisher="": capturas.append(url)
+                        lambda url, url_publisher="", timeout=None: capturas.append(url)
                         or alert_checker._CAPTURA_VAZIA)
     monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
-                        lambda url, **k: "")
+                        lambda url, **k: "https://www.farmprogress.com/corn-rated-61-percent")
     monkeypatch.setattr(alert_checker.supabase, "mark_news_sent", lambda *a, **k: None)
     monkeypatch.setattr(alert_checker.supabase, "set_alert_triggered", lambda *a, **k: None)
     monkeypatch.setattr(alert_checker.supabase, "is_news_sent", lambda *a, **k: False)
@@ -922,7 +1048,9 @@ def test_check_news_sem_id_de_log_nao_grava_mensagens(monkeypatch):
     alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
 
     assert atualizacoes == []
-    assert capturas == []
+    # pré-leitura de frescor, antes do broadcast — lê o link JÁ RESOLVIDO, não
+    # o link cru do Google (`_ARTIGO["url"]`)
+    assert capturas == ["https://www.farmprogress.com/corn-rated-61-percent"]
 
     assert mensagens == []
 
@@ -998,53 +1126,78 @@ def test_check_news_sem_resolver_mantem_o_link_original(monkeypatch):
 
 
 @pytest.mark.unit
-def test_check_news_envia_antes_de_capturar_o_texto(monkeypatch):
-    """A leitura da matéria (até 75s no caminho de render) NÃO pode ficar na
-    frente do envio: se a função da Vercel estourar os 300s ali, o alerta não
-    sai. Descobrir o link é barato e vem antes; ler a matéria é caro e vem
-    depois (revisão do Apolo, 19/08/2026)."""
+def test_check_news_le_a_materia_antes_do_envio_para_confirmar_frescor(monkeypatch):
+    """Camada 1 (05/09/2026, incidente WASDE): o Google carimbou a data de
+    REINDEXAÇÃO, não a de publicação, e uma matéria de maio passou por nova em
+    setembro. A defesa é ler a matéria ANTES de mandar, com prazo BOUNDED
+    (`_PRE_LEITURA_TIMEOUT_S`, 40s — bem abaixo dos 300s da Vercel e do teto de
+    75s do caminho de render). Isto inverte de propósito o invariante antigo
+    ("envia antes de capturar"): agora uma leitura BARATA e limitada acontece
+    antes do envio, e a captura NÃO se repete depois — é a mesma leitura,
+    reaproveitada (ver `test_check_news_captura_le_a_materia_uma_unica_vez`)."""
     ordem = []
     _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
     monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
                         lambda url, **k: _URL_REAL)
     monkeypatch.setattr(alert_checker, "_capture_conteudo",
-                        lambda url, url_publisher="": ordem.append("captura") or alert_checker.Captura(*_CAPTURA_OK))
+                        lambda url, url_publisher="", timeout=None:
+                            ordem.append("captura") or alert_checker.Captura(*_CAPTURA_OK))
     monkeypatch.setattr(alert_checker, "_broadcast_com_ids",
                         lambda msg, recipients, errors=None: ordem.append("broadcast")
                         or [("5534999945010", "MSG_ID")])
 
     alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
 
-    assert ordem == ["broadcast", "captura"]
+    assert ordem == ["captura", "broadcast"]
 
 
 @pytest.mark.unit
-def test_check_news_entrega_falha_nao_gasta_credito_de_captura(monkeypatch):
-    """Evolution fora do ar: `sent == 0`, nada é gravado nem marcado. Capturar
-    aí queimaria 35 créditos do ScraperAPI a cada 15 minutos sem entregar
-    mensagem nenhuma (achado do Apolo, 19/08/2026)."""
+def test_check_news_entrega_falha_nao_gasta_2a_captura(monkeypatch):
+    """Evolution fora do ar: `sent == 0`, nada é gravado nem marcado — o
+    invariante ORIGINAL (achado do Apolo, 19/08/2026) era sobre a captura
+    PÓS-envio, que continua sem rodar aqui.
+
+    Camada 1 (05/09/2026) introduziu uma pré-leitura ANTES do broadcast, para
+    confirmar frescor — e essa roda mesmo quando a entrega depois falha,
+    porque decidir SE envia é anterior a saber se a entrega vai dar certo.
+    O que o teste original protegia (não pagar a captura DUAS vezes por causa
+    de uma entrega falha) continua valendo: só 1 chamada a `_capture_conteudo`
+    no total, não 2. A URL vista é a JÁ RESOLVIDA (`_URL_REAL`) — desde o
+    achado 4 (05/09/2026), a resolução roda ANTES da pré-leitura, não depois
+    dela."""
     capturas = []
     _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO, sent=0)
     monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
                         lambda url, **k: _URL_REAL)
     monkeypatch.setattr(alert_checker, "_capture_conteudo",
-                        lambda url, url_publisher="": capturas.append(url) or alert_checker._CAPTURA_VAZIA)
+                        lambda url, url_publisher="", timeout=None:
+                            capturas.append(url) or alert_checker._CAPTURA_VAZIA)
 
     alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
 
-    assert capturas == []
+    assert capturas == [_URL_REAL]  # pré-leitura de frescor, uma única vez, já resolvida
 
 
 @pytest.mark.unit
-def test_check_news_captura_le_o_link_ja_resolvido(monkeypatch):
-    """Resolver uma vez e reaproveitar: com o endereço real na mão a leitura
-    dispensa o render (1 crédito e ~6s em vez de 35 créditos e ~57s)."""
+def test_check_news_captura_le_a_materia_uma_unica_vez(monkeypatch):
+    """Camada 1 (05/09/2026) move a ÚNICA leitura da matéria para ANTES do
+    broadcast (pré-leitura de frescor, `_confirmar_frescor`) — ela é
+    reaproveitada depois, então `_capture_conteudo` roda exatamente 1 vez por
+    rodada, nunca 2.
+
+    Achado 4 (mesma data): a pré-leitura usa a URL JÁ RESOLVIDA
+    (`_link_para_mensagem` roda ANTES dela agora, não depois de escolher a
+    vencedora) — nunca mais o link cru do Google. Sem isso, um link
+    `news.google.com` cuja resolução interna do `read_article` falhasse caía
+    no caminho de `render=true`, com piso de 75s, maior que o prazo de 40s
+    desta pré-leitura (3 de 4 estouravam, medido pelo Apolo)."""
     lidos = []
     _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
     monkeypatch.setattr(alert_checker.web_search, "resolve_google_news",
                         lambda url, **k: _URL_REAL)
     monkeypatch.setattr(alert_checker, "_capture_conteudo",
-                        lambda url, url_publisher="": lidos.append(url) or alert_checker.Captura(*_CAPTURA_OK))
+                        lambda url, url_publisher="", timeout=None:
+                            lidos.append(url) or alert_checker.Captura(*_CAPTURA_OK))
 
     alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
 
@@ -1105,7 +1258,7 @@ def test_check_news_leva_o_publicador_ate_a_captura(monkeypatch):
     vistos = {}
     _prepara_check_news(monkeypatch, _ARTIGO, _CLASSIFICACAO)
     monkeypatch.setattr(alert_checker, "_capture_conteudo",
-                        lambda url, url_publisher="": vistos.update(pub=url_publisher)
+                        lambda url, url_publisher="", timeout=None: vistos.update(pub=url_publisher)
                         or alert_checker._CAPTURA_VAZIA)
 
     alert_checker._check_news([{"phone": "5534999945010", "name": "Matheus"}])
@@ -1173,7 +1326,7 @@ def test_check_news_nao_sobrescreve_o_link_resolvido_pela_canonica(monkeypatch):
                         lambda url, **k: _URL_REAL)
     monkeypatch.setattr(
         alert_checker, "_capture_conteudo",
-        lambda url, url_publisher="": alert_checker.Captura(
+        lambda url, url_publisher="", timeout=None: alert_checker.Captura(
             "Texto.", "read_article:trafilatura", "https://www.wisfarmer.com/"),
     )
     monkeypatch.setattr(alert_checker.supabase, "update_news_log_conteudo",
