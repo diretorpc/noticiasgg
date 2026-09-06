@@ -659,6 +659,404 @@ def test_read_article_sobrevive_a_thread_recusada(monkeypatch):
     assert "erro" in result
 
 
+# ── Camada 1 (05/09/2026): data REAL da matéria, não a de reindexação ─────
+#
+# Incidente medido: o Google carimbou `<pubDate>` de 05/09/2026 numa matéria
+# do WASDE de maio ("May 11, 2026 The USDA's May..."), e o classificador
+# recebeu essa data como se fosse a de publicação.
+
+_TEXTO_LONGO = ("Texto real da matéria sobre soja e o mercado agrícola internacional, "
+                "com bastante conteúdo para não morrer no piso de caracteres. " * 3)
+
+
+@pytest.mark.unit
+def test_data_publicacao_usa_metadado_do_trafilatura():
+    html = ('<html><head><meta property="article:published_time" '
+            'content="2026-05-11T10:00:00Z"></head><body><article><p>'
+            + _TEXTO_LONGO + '</p></article></body></html>')
+    assert web_search._data_publicacao(html, _TEXTO_LONGO) == "2026-05-11"
+
+
+@pytest.mark.unit
+def test_data_publicacao_formato_mes_ingles_dia_ano():
+    texto = "May 11, 2026 The USDA's May WASDE report was released this morning. " + _TEXTO_LONGO
+    assert web_search._data_publicacao("<html></html>", texto) == "2026-05-11"
+
+
+@pytest.mark.unit
+def test_data_publicacao_formato_dia_mes_ingles_ano():
+    texto = "11 May 2026 — the report was released this morning. " + _TEXTO_LONGO
+    assert web_search._data_publicacao("<html></html>", texto) == "2026-05-11"
+
+
+@pytest.mark.unit
+def test_data_publicacao_formato_portugues_por_extenso():
+    texto = "11 de maio de 2026 — o relatório foi divulgado hoje pela manhã. " + _TEXTO_LONGO
+    assert web_search._data_publicacao("<html></html>", texto) == "2026-05-11"
+
+
+@pytest.mark.unit
+def test_data_publicacao_formato_barra_br():
+    """Dia > 12 é INEQUÍVOCO (não existe mês 13+) — usa 20 de propósito, não
+    11: "11/05" seria ambíguo com mm/dd (ver
+    test_data_publicacao_numero_ambiguo_dd_mm_e_descartado)."""
+    texto = "20/05/2026 — o relatório foi divulgado hoje pela manhã. " + _TEXTO_LONGO
+    assert web_search._data_publicacao("<html></html>", texto) == "2026-05-20"
+
+
+@pytest.mark.unit
+def test_data_publicacao_numero_ambiguo_dd_mm_e_descartado():
+    """"09/03/2026" é 9 de março (convenção BR, dia/mês) ou 3 de setembro
+    (convenção americana, mês/dia) — indistinguível sem mais contexto. Melhor
+    None do que arriscar 6 meses de erro (achado do Apolo, 05/09/2026)."""
+    texto = "09/03/2026 CHICAGO - Corn futures fell on profit-taking. " + _TEXTO_LONGO
+    assert web_search._data_publicacao("<html></html>", texto) is None
+
+
+@pytest.mark.unit
+def test_data_publicacao_numero_com_dia_maior_que_12_nao_e_ambiguo():
+    """Contraprova: dia > 12 continua sendo aceito normalmente — só o caso
+    genuinamente ambíguo (os dois grupos ≤ 12) é descartado."""
+    texto = "25/12/2026 — o relatório foi divulgado hoje pela manhã. " + _TEXTO_LONGO
+    assert web_search._data_publicacao("<html></html>", texto) == "2026-12-25"
+
+
+@pytest.mark.unit
+def test_data_publicacao_formato_iso():
+    texto = "2026-05-11 — the report was released this morning. " + _TEXTO_LONGO
+    assert web_search._data_publicacao("<html></html>", texto) == "2026-05-11"
+
+
+@pytest.mark.unit
+def test_data_publicacao_sem_data_devolve_none():
+    assert web_search._data_publicacao("<html></html>", _TEXTO_LONGO) is None
+
+
+@pytest.mark.unit
+def test_data_publicacao_no_meio_do_texto_nao_conta():
+    """Só o INÍCIO (~200 chars) conta como data de publicação — uma data
+    citada no meio da matéria (outro evento, outro relatório) não é a data em
+    que ESTA matéria foi publicada."""
+    texto = _TEXTO_LONGO + " O relatório anterior, de 11 de maio de 2026, já mostrava sinais."
+    assert texto.index("11 de maio de 2026") >= web_search._JANELA_DATA_TEXTO
+    assert web_search._data_publicacao("<html></html>", texto) is None
+
+
+# ── Camada 2 (05/09/2026): a publicação nunca é POSTERIOR a outra data da
+# página — WASDE de maio reindexado em setembro (fixture real via ScraperAPI:
+# `farmprogress_may_wasde_20260905.html`). Nem `extract_metadata` do
+# trafilatura nem `htmldate.find_date` (nenhuma combinação de
+# `extensive_search`/`original_date`) acertam sozinhos: os dois pegam o card
+# "VerticalCard-Date" ("Sep 4, 2026") de matéria RELACIONADA na lateral. A
+# data real mora só no byline "Contributors-Date" ("May 11, 2026"), que abre o
+# corpo extraído pelo trafilatura. Conserto: colher metadado + dateline (só
+# nos primeiros `_JANELA_DATELINE` chars) como candidatas e ficar com a MAIS
+# ANTIGA. ────────────────────────────────────────────────────────────────────
+
+@pytest.mark.unit
+def test_data_publicacao_fixture_farmprogress_pega_o_byline_nao_o_card_lateral():
+    """Regressão do incidente real: a mesma extração de texto que `read_article`
+    faz (`trafilatura.extract`) traz o byline "May 11, 2026" como as primeiras
+    palavras do corpo — mas o metadado do `<head>` desta página aponta para
+    "Sep 4, 2026" (o card lateral). `_data_publicacao` tem que ficar com a mais
+    antiga das duas."""
+    import trafilatura
+    html = _fixture("farmprogress_may_wasde_20260905.html")
+    texto = trafilatura.extract(html, include_comments=False, include_tables=True) or ""
+    assert texto.startswith("May 11, 2026")
+    assert web_search._data_publicacao(html, texto) == "2026-05-11"
+
+
+@pytest.mark.unit
+def test_data_publicacao_fica_com_a_mais_antiga_quando_metadado_e_mais_novo():
+    """Metadado (2026-09-04, o card lateral reindexado) e dateline (2026-05-11,
+    o byline de verdade) divergem — vale a MAIS ANTIGA das duas."""
+    html = ('<html><head><meta property="article:published_time" '
+            'content="2026-09-04T00:00:00Z"></head><body><article><p>'
+            + _TEXTO_LONGO + '</p></article></body></html>')
+    texto = "May 11, 2026 The USDA's May WASDE report was released this morning. " + _TEXTO_LONGO
+    assert web_search._data_publicacao(html, texto) == "2026-05-11"
+
+
+@pytest.mark.unit
+def test_data_publicacao_fica_com_a_mais_antiga_quando_texto_comeca_com_data_mais_nova():
+    """Mesmo par de datas, papéis invertidos: o TEXTO começa com a data mais
+    nova (ex.: um card "matéria relacionada" vazou para o início da extração) e
+    o metadado tem a mais antiga — continua valendo a mais antiga."""
+    html = ('<html><head><meta property="article:published_time" '
+            'content="2026-05-11T00:00:00Z"></head></html>')
+    texto = "Sep 4, 2026 Related story headline goes here. " + _TEXTO_LONGO
+    assert web_search._data_publicacao(html, texto) == "2026-05-11"
+
+
+@pytest.mark.unit
+def test_data_publicacao_no_meio_da_primeira_frase_e_ignorada_mesmo_dentro_da_janela_de_200():
+    """A janela de busca no texto (`_JANELA_DATA_TEXTO`, 200 chars) é mais larga
+    que a janela do DATELINE (`_JANELA_DATELINE`, 40 chars) de propósito: uma
+    data citada no MEIO da primeira frase (posição > 40, mas < 200) não é a
+    assinatura da matéria — sem metadado, o resultado é None.
+
+    Item 6 (3ª revisão do Apolo, 05/09/2026): a versão anterior usava uma
+    preposição ("citou a divulgação DE 11 de maio de 2026") logo antes da
+    data — o None ficava ambíguo entre "bloqueado pela JANELA" (o que este
+    teste promete provar) e "bloqueado pelo separador inválido" (a mesma
+    lógica do achado 1a). Este texto usa um separador de ESTRUTURA VÁLIDO
+    (travessão) antes da data — se a janela de 40 chars não existisse, a data
+    SERIA aceita — provando que é SÓ a janela, e não o separador, que barra
+    aqui."""
+    texto = ("The weekly USDA summary cited the release — May 11, 2026 — as "
+             "the reference point for the quarter. " + _TEXTO_LONGO)
+    pos = texto.index("May 11, 2026")
+    assert web_search._JANELA_DATELINE < pos < web_search._JANELA_DATA_TEXTO
+    assert web_search._data_publicacao("<html></html>", texto) is None
+
+
+@pytest.mark.unit
+def test_data_publicacao_no_meio_da_frase_ignorada_e_metadado_prevalece():
+    """Mesmo cenário acima, mas com metadado presente: a data no meio da
+    primeira frase segue fora da disputa — só o metadado conta."""
+    texto = ("O relatório desta semana citou a divulgação de 11 de maio de 2026 "
+             "como referência principal. " + _TEXTO_LONGO)
+    html = ('<html><head><meta property="article:published_time" '
+            'content="2026-09-04T00:00:00Z"></head></html>')
+    assert web_search._data_publicacao(html, texto) == "2026-09-04"
+
+
+@pytest.mark.unit
+def test_data_publicacao_ano_absurdo_no_metadado_e_descartado():
+    html = ('<html><head><meta property="article:published_time" '
+            'content="1999-05-11T00:00:00Z"></head></html>')
+    assert web_search._data_publicacao(html, _TEXTO_LONGO) is None
+
+
+@pytest.mark.unit
+def test_data_publicacao_ano_absurdo_no_dateline_e_descartado():
+    texto = "May 11, 2090 The report says the crop outlook is strong. " + _TEXTO_LONGO
+    assert web_search._data_publicacao("<html></html>", texto) is None
+
+
+@pytest.mark.unit
+def test_data_publicacao_ano_absurdo_no_metadado_deixa_o_dateline_valido_prevalecer():
+    """Um dos dois candidatos sendo lixo não pode derrubar o outro, que é bom."""
+    html = ('<html><head><meta property="article:published_time" '
+            'content="2090-05-11T00:00:00Z"></head></html>')
+    texto = "May 11, 2026 The report says the crop outlook is strong. " + _TEXTO_LONGO
+    assert web_search._data_publicacao(html, texto) == "2026-05-11"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("texto", [
+    "On May 11, 2026, the USDA raised its corn production estimate. " + _TEXTO_LONGO,
+    "Since May 11, 2026 the outlook for corn has shifted higher. " + _TEXTO_LONGO,
+    "Em 11 de maio de 2026 o relatório foi divulgado pela manhã. " + _TEXTO_LONGO,
+    "Desde 11 de maio de 2026 as previsões de safra mudaram. " + _TEXTO_LONGO,
+])
+def test_data_publicacao_data_citada_apos_preposicao_e_ignorada(texto):
+    """"On May 11, 2026, the USDA raised..." cita uma data como REFERÊNCIA
+    dentro da prosa, não como assinatura da matéria — byline de verdade não
+    tem preâmbulo. Sem metadado, o resultado é None (achado do Apolo,
+    05/09/2026)."""
+    assert web_search._data_publicacao("<html></html>", texto) is None
+
+
+@pytest.mark.unit
+def test_data_publicacao_byline_sem_preposicao_continua_aceito():
+    """Contraprova: byline de verdade, sem preâmbulo, continua aceito."""
+    texto = "September 5, 2026 The USDA raised its estimate for corn production. " + _TEXTO_LONGO
+    assert web_search._data_publicacao("<html></html>", texto) == "2026-09-05"
+
+
+# ── Item 1a (3ª revisão do Apolo, 05/09/2026): lista NEGRA de preposição
+# trocada por lista BRANCA de separador — a negra vazava. Incidente medido:
+# "As of Aug. 20, 2026, U.S. corn stocks..." tinha `article:published_time`
+# CORRETO de hoje, mas `min()` escolhia a data da PROSA porque "as of " não
+# estava na lista negra — matéria FRESCA condenada e morta para sempre
+# (`_mark_sent` sem TTL, ver test_alert_checker.py). ─────────────────────────
+
+@pytest.mark.unit
+@pytest.mark.parametrize("texto", [
+    "As of Aug. 20, 2026, U.S. corn stocks were estimated higher than expected. " + _TEXTO_LONGO,
+    "By Aug. 20, 2026, U.S. corn stocks were estimated higher than expected. " + _TEXTO_LONGO,
+    "From Aug. 20, 2026, U.S. corn stocks were estimated higher than expected. " + _TEXTO_LONGO,
+    "Through Aug. 20, 2026, U.S. corn stocks were estimated higher than expected. " + _TEXTO_LONGO,
+    "No dia 20 de agosto de 2026, os estoques de milho dos EUA surpreenderam. " + _TEXTO_LONGO,
+])
+def test_data_publicacao_vazamentos_da_lista_negra_sao_barrados_pela_lista_branca(texto):
+    """Nenhuma destas cinco palavras ("As of", "By", "From", "Through", "No
+    dia") estava em `_PREPOSICOES_ANTES_DA_DATA` (a lista negra antiga) — uma
+    lista negra por definição nunca cobre toda palavra que pode preceder uma
+    data citada em prosa. A lista BRANCA de separador
+    (`_SEPARADORES_VALIDOS_ANTES_DA_DATA`) barra os cinco porque nenhum deles
+    termina num separador de estrutura válido."""
+    assert web_search._data_publicacao("<html></html>", texto) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("texto,esperado", [
+    ("May 11, 2026 The USDA's May WASDE report was released this morning. " + _TEXTO_LONGO,
+     "2026-05-11"),
+    ("Sept. 4, 2026 The USDA report was released this morning. " + _TEXTO_LONGO,
+     "2026-09-04"),
+])
+def test_data_publicacao_datelines_validos_continuam_aceitos_pela_lista_branca(texto, esperado):
+    """Contraprova dos cinco vazamentos acima: byline sem preâmbulo (posição
+    0) continua valendo — a lista branca não pode ficar restritiva demais a
+    ponto de recusar dateline de verdade."""
+    assert web_search._data_publicacao("<html></html>", texto) == esperado
+
+
+# ── Item 1 (4ª revisão do Apolo, 05/09/2026): `,` e `:` na lista branca
+# reabriam o buraco. "Since Thursday, Aug. 20, 2026, corn futures..." e
+# "Correction: Aug. 20, 2026 WASDE..." tinham metadado/`<publicado_em>`
+# corretos de HOJE, mas a vírgula e os dois-pontos contavam como separador de
+# ESTRUTURA — a data de dentro da PROSA vencia `min()` e condenava matéria
+# FRESCA para sempre. Conserto: `,`, `:`, `/` e `-` (hífen simples) saem da
+# lista de separador; entram um prefixo de BYLINE exato ("Published",
+# "Posted on"...) e o en dash "–" (distinto do em dash "—" que já valia). ────
+
+@pytest.mark.unit
+@pytest.mark.parametrize("texto", [
+    "Since Thursday, Aug. 20, 2026, corn futures continued their rally into "
+    "the close. " + _TEXTO_LONGO,
+    "Correction: Aug. 20, 2026 WASDE corn stocks figure was misstated. " + _TEXTO_LONGO,
+])
+def test_data_publicacao_virgula_e_dois_pontos_nao_contam_mais_como_separador(texto):
+    """Os dois casos do incidente: vírgula ("Thursday,") e dois-pontos
+    ("Correction:") não são marca de ESTRUTURA, são pontuação de PROSA — sem
+    metadado, o resultado tem que ser None, não a data citada no meio da
+    frase."""
+    assert web_search._data_publicacao("<html></html>", texto) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("texto,esperado", [
+    ("Published May 11, 2026 The USDA's May WASDE report was released this "
+     "morning. " + _TEXTO_LONGO, "2026-05-11"),
+    ("Posted on May 11, 2026 The USDA's May WASDE report was released this "
+     "morning. " + _TEXTO_LONGO, "2026-05-11"),
+])
+def test_data_publicacao_prefixo_de_byline_e_aceito(texto, esperado):
+    """"Published"/"Posted on" não são separador de pontuação — são o RÓTULO
+    da própria assinatura, e por isso entram na lista branca por igualdade
+    exata (não substring), case-insensitive."""
+    assert web_search._data_publicacao("<html></html>", texto) == esperado
+
+
+@pytest.mark.unit
+def test_data_publicacao_agencia_antes_da_virgula_vira_falso_negativo_aceito():
+    """"Reuters, May 11, 2026 ..." — a agência de notícias antes da vírgula
+    era o único ganho real da vírgula na lista antiga, e sai como custo
+    aceito do conserto: falso NEGATIVO (perde uma data boa) é mais barato que
+    o falso POSITIVO que a vírgula reabria (matéria velha lida como fresca).
+    Documentado aqui de propósito — não é regressão a "consertar de volta"."""
+    texto = "Reuters, May 11, 2026 The USDA's report was released this morning. " + _TEXTO_LONGO
+    assert web_search._data_publicacao("<html></html>", texto) is None
+
+
+@pytest.mark.unit
+def test_data_publicacao_autor_por_extenso_antes_da_data_continua_none():
+    """"By Jacqueline Holland May 11, 2026" — nome de autor não é nenhum
+    prefixo de byline da lista branca (igualdade exata, não substring) nem
+    termina em separador de estrutura: continua None, como antes do
+    conserto."""
+    texto = "By Jacqueline Holland May 11, 2026 The USDA's report was released. " + _TEXTO_LONGO
+    assert web_search._data_publicacao("<html></html>", texto) is None
+
+
+@pytest.mark.unit
+def test_data_publicacao_mes_sem_dia_continua_none():
+    """Guarda de regressão: "The May 2026 WASDE report" não tem dia — nenhum
+    padrão de `_PADROES_DATA_TEXTO` exige só mês+ano, então já era None antes
+    desta mudança e continua sendo."""
+    texto = "The May 2026 WASDE report showed strong demand for corn. " + _TEXTO_LONGO
+    assert web_search._data_publicacao("<html></html>", texto) is None
+
+
+# ── Item 2 (revisão do Apolo, 05/09/2026): mês ABREVIADO não era reconhecido
+# no dateline — "Sep 4, 2026", "Sept. 4, 2026", "Aug 12, 2026", "Jan. 3, 2026"
+# devolviam None (medido: 4 de 4 datelines abreviados testados). Sem ano
+# continua fora de propósito — não inferir ano nunca foi o comportamento. ────
+
+@pytest.mark.unit
+@pytest.mark.parametrize("texto,esperado", [
+    ("Sep 4, 2026 The USDA report was released this morning. ", "2026-09-04"),
+    ("Sept. 4, 2026 The USDA report was released this morning. ", "2026-09-04"),
+    ("Aug 12, 2026 The USDA report was released this morning. ", "2026-08-12"),
+    ("Jan. 3, 2026 The USDA report was released this morning. ", "2026-01-03"),
+])
+def test_data_publicacao_mes_abreviado_em_ingles(texto, esperado):
+    assert web_search._data_publicacao("<html></html>", texto + _TEXTO_LONGO) == esperado
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("texto,esperado", [
+    ("4 set. 2026 — o relatório foi divulgado hoje pela manhã. ", "2026-09-04"),
+    ("4 de set. de 2026 — o relatório foi divulgado hoje pela manhã. ", "2026-09-04"),
+])
+def test_data_publicacao_mes_abreviado_em_portugues(texto, esperado):
+    assert web_search._data_publicacao("<html></html>", texto + _TEXTO_LONGO) == esperado
+
+
+@pytest.mark.unit
+def test_data_publicacao_mes_abreviado_sem_ano_continua_none():
+    """Guarda de regressão: mês abreviado SEM ano não vira candidato — o
+    comportamento de "não inferir ano" vale para abreviação como já valia
+    para nome por extenso (`test_data_publicacao_mes_sem_dia_continua_none`)."""
+    texto = "The Sep WASDE report showed strong demand for corn. " + _TEXTO_LONGO
+    assert web_search._data_publicacao("<html></html>", texto) is None
+
+
+@pytest.mark.unit
+def test_data_publicacao_byline_abreviado_nao_cai_no_card_lateral():
+    """Regressão do incidente real, mas com o byline em formato ABREVIADO:
+    sem suporte a mês abreviado, o dateline não bateria em nenhum padrão de
+    `_PADROES_DATA_TEXTO` e só sobraria o metadado (o "card lateral", mais
+    novo) como candidato único — a mesma armadilha do incidente de
+    05/09/2026, agora com "Aug." no lugar do nome do mês por extenso.
+
+    Item 5 (3ª revisão do Apolo, 05/09/2026): o docstring desta versão do
+    teste sempre CITOU a fixture real (`farmprogress_may_wasde_20260905.html`),
+    mas o HTML usado era sintético — o teste provava a REGRA, não o
+    INCIDENTE. Usa a fixture de verdade com o byline "May 11, 2026" trocado
+    por "Aug. 12, 2026" no texto extraído (o metadado do card lateral da
+    própria página é 2026-09-04, ver `test_data_publicacao_fixture_farmprogress_pega_o_byline_nao_o_card_lateral`).
+    Byline (2026-08-12) é mais antigo que o metadado, então a resposta certa
+    continua sendo o byline. Mutação verificada à mão (05/09/2026):
+    `_JANELA_DATELINE = 0` faz este teste reprovar (o dateline abreviado
+    deixa de contar e a resposta vira o metadado, 2026-09-04)."""
+    import trafilatura
+    html_original = _fixture("farmprogress_may_wasde_20260905.html")
+    assert html_original.count("May 11, 2026") == 1  # guarda: a troca abaixo é única
+    html = html_original.replace("May 11, 2026", "Aug. 12, 2026")
+    texto = trafilatura.extract(html, include_comments=False, include_tables=True) or ""
+    assert texto.startswith("Aug. 12, 2026")
+    assert web_search._data_publicacao(html, texto) == "2026-08-12"
+
+
+@pytest.mark.unit
+def test_read_article_devolve_data_publicacao(monkeypatch):
+    """`read_article` repassa a data encontrada no HTML pelo metadado do
+    trafilatura — é o caminho barato, sem precisar do fallback textual."""
+    monkeypatch.setenv("SCRAPER_API_KEY", "chave-de-teste")
+    html = ('<html><head><meta property="article:published_time" '
+            'content="2026-05-11T10:00:00Z"></head><body><article><p>'
+            + _TEXTO_LONGO + '</p></article></body></html>')
+    with patch("backend.services.web_search.httpx.get", return_value=_resp_html(html)):
+        result = web_search.read_article("https://www.farmprogress.com/artigo")
+    assert result["data_publicacao"] == "2026-05-11"
+
+
+@pytest.mark.unit
+def test_read_article_sem_data_devolve_none_no_campo(monkeypatch):
+    """O campo tem que estar PRESENTE mesmo quando não há data — ausência de
+    chave e chave com None significam coisas diferentes para quem consome."""
+    monkeypatch.setenv("SCRAPER_API_KEY", "chave-de-teste")
+    with patch("backend.services.web_search.httpx.get",
+               return_value=_resp_html(_fixture("artigo_com_entulho.html"))):
+        result = web_search.read_article("https://energynow.ca/artigo")
+    assert "data_publicacao" in result
+
+
 @pytest.mark.unit
 def test_resolve_google_news_aceita_apostrofo_no_endereco():
     """Apóstrofo é sub-delim LEGAL em URL (RFC 3986) — recusar custa o 🔗 (403)

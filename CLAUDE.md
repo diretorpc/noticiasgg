@@ -171,8 +171,11 @@ uvicorn backend.api.main:app --reload
 ## Testes
 
 ```bash
-pytest backend/tests/ -v
+pytest backend/tests -m unit -v
 ```
+
+`-m unit` é o portão do CI (sem rede). Sem o marcador, `pytest backend/tests` também roda os
+`smoke` (chamadas reais ao Claude, custam crédito) e testes que batem em fornecedor real.
 
 ## Deploy (Vercel) — DOIS projetos do MESMO repo
 

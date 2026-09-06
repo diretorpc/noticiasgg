@@ -12,6 +12,7 @@ import os
 import pytest
 
 from backend.tests import _trava_rede
+from backend.tests._constantes import CHAVE_ANTHROPIC_PLACEHOLDER
 
 _trava_rede.instalar()
 
@@ -59,7 +60,7 @@ def _chave_anthropic_de_teste(monkeypatch):
     Cuidado com a diferença que me pegou: variável AUSENTE estoura,
     variável VAZIA não. Simular o CI com `X=""` é mais fraco que a realidade."""
     if not os.getenv("ANTHROPIC_API_KEY"):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "chave-de-teste-sem-valor-real")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", CHAVE_ANTHROPIC_PLACEHOLDER)
 
 
 def pytest_collection_modifyitems(config, items):

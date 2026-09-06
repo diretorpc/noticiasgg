@@ -129,6 +129,38 @@ Fretes derivados da mensagem dele (Porto − praça): **Pontal 9,00 · Uberaba 1
    para `services/date_brt.py`.
 5. Apolo antes do merge. Prova de campo: comparar com a mensagem que o primo manda no dia.
 
+## Incidente 05/09/2026 — alerta de notícia de MAIO enviado em setembro (Google reindexou)
+
+Enviada às 19:46 UTC: "May WASDE report to reveal first look at new crop outlook" (farmprogress),
+`news_log` id 226, nota 7. Causa medida: veio da busca "GN USDA/WASDE" do Google Notícias, cujo
+`pubDate` é a hora da REINDEXAÇÃO (05/09 14:47Z), não da publicação; `news._is_fresh` confia
+nele; o classificador recebeu `<publicado_em>` de hoje e deu 7. A matéria só era lida DEPOIS do
+envio (decisão de 19/08, teto de 300 s). A página não declara data; `trafilatura`/`htmldate`
+chutam 04/09 pelos cards laterais; a data real ("May 11, 2026") abre o texto extraído.
+
+Conserto (branch `fix/alert-stale-news-date`, 5 rodadas do Apolo):
+- `web_search.read_article` devolve `data_publicacao` = a MAIS ANTIGA entre o metadado e a
+  dateline no início do texto (posição 0, após quebra/travessão/`|`/`·`, ou após prefixo de
+  byline como "Published"). Vírgula/dois-pontos NÃO valem (prosa "Thursday, Aug. 20, 2026"
+  condenava matéria fresca). Mês abreviado EN/PT aceito; `dd/mm` ambíguo descartado.
+- `alert_checker._confirmar_frescor`: a vencedora é lida ANTES do envio (1 pré-leitura por
+  rodada, prazo absoluto 40 s em thread daemon, link já resolvido; link do Google não
+  resolvido → não lê). Data real > 7 dias → veredito "velha" em `alert_state`
+  (`preleitura_velha_<url_id>`, 7 dias) e passa à próxima; NÃO `_mark_sent` (erro de leitura
+  atrasa, não mata). "Já li, segue" = `preleitura_<url_id>` 6 h (Evolution fora não relê).
+  Gates falham abertos. Captura reaproveitada no pós-envio. `run_checks` devolve `duracao_s`.
+- Prompt: mês do PRÓPRIO relatório/evento anunciado já passado → nota 1-2. Smoke real
+  (`test_alert_checker_smoke.py`, fora do CI): incidente [1,1,1], controles 7-8.
+Medir: `python -m pytest backend/tests/test_web_search.py backend/tests/test_alert_checker.py -q`
+e o smoke `python -m pytest backend/tests/test_alert_checker_smoke.py -m smoke -q -s` (custa centavos).
+
+Acompanhamento (Apolo, 5ª rodada, nada bloqueante): (1) `data_publicacao` vai ao agente de chat
+sem estar no schema da ferramenta; (2) `min()` é assimétrico — dateline velha vence metadado
+correto (só 7 dias fora, não morte); (3) veredito "velha" só em log, nada durável para auditar;
+(4) cooldown de velha se renova a cada releitura; (5) `_JANELA_DATA_TEXTO=200` só serve a
+testes; (6) só o 1º match de dateline é visto; (7) `12 Aug 2026` (day-first EN) não é lido;
+(8) smoke `controle_exportacao` ainda crava "August"/"25/26".
+
 ## Estado em 04/09/2026 — bot MUDO por ~35 h: a VPS reiniciou e a versão VELHA ganhou a porta
 
 Descoberto por acidente, ao tentar mandar uma mensagem pelo bot. `/api/health` marcava
