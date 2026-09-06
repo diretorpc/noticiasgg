@@ -123,7 +123,9 @@ Fretes derivados da mensagem dele (Porto − praça): **Pontal 9,00 · Uberaba 1
    Prova de campo: `curl -H "x-cron-secret: $CRON_SECRET" "https://noticiasgg.vercel.app/api/cron/soja?test=true"`
    (manda só ao admin, texto idêntico ao real). **`CRON_SECRET` é variável SENSÍVEL na Vercel:**
    `vercel env pull` devolve vazio e o `.env` local tem outro valor (401) — o teste só roda com o
-   valor copiado do painel da Vercel. 1º envio real à lista: 05/09 12:00 BRT (cron).
+   valor copiado do painel da Vercel (sensível: nem o dashboard mostra). 1º envio real à lista
+   SAIU em 05/09 12:01 BRT (trava `soja_disponivel_20260905` gravada 15:01:56Z). Conferir amanhã:
+   `python -c` chamando `supabase.get_alert_last_triggered('soja_disponivel_<AAAAMMDD>')`.
    **Acompanhamento (Apolo, 05/09):** aviso ao admin quando `porto_data_ref` for mais velho que o
    último dia útil (fonte congelada passa como dado do dia); migrar as 7 cópias de `hours=-3`
    para `services/date_brt.py`.
@@ -138,7 +140,7 @@ nele; o classificador recebeu `<publicado_em>` de hoje e deu 7. A matéria só e
 envio (decisão de 19/08, teto de 300 s). A página não declara data; `trafilatura`/`htmldate`
 chutam 04/09 pelos cards laterais; a data real ("May 11, 2026") abre o texto extraído.
 
-Conserto (branch `fix/alert-stale-news-date`, 5 rodadas do Apolo):
+Conserto EM PROD (PR #31 mergeada 06/09 09:00; 5 rodadas do Apolo):
 - `web_search.read_article` devolve `data_publicacao` = a MAIS ANTIGA entre o metadado e a
   dateline no início do texto (posição 0, após quebra/travessão/`|`/`·`, ou após prefixo de
   byline como "Published"). Vírgula/dois-pontos NÃO valem (prosa "Thursday, Aug. 20, 2026"
