@@ -44,3 +44,16 @@ def test_put_schedules_replaces_and_sets_flag(monkeypatch):
     assert captured["phone"] == "555"
     assert captured["flag"] is True
     assert captured["rows"][0]["section"] == "bolsas"
+
+
+@pytest.mark.unit
+def test_put_schedules_grade_invalida_devolve_422_sem_tocar_no_banco(monkeypatch):
+    chamadas = []
+    monkeypatch.setattr(schedules, "replace_for_phone",
+                        lambda phone, rows: chamadas.append(rows))
+    monkeypatch.setattr(schedules, "set_engine_flag",
+                        lambda phone, enabled: chamadas.append(enabled))
+    r = client.put("/api/admin/schedules/555",
+                   json={"use_new_engine": True, "schedule": {"bolsas": {"0": [24]}}})
+    assert r.status_code == 422
+    assert chamadas == []
