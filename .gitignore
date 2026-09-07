@@ -40,3 +40,6 @@ htmlcov/
 
 .vercel
 .env*.local
+
+# pasta de descarte (regra: nunca rm -rf)
+_deprecated/

@@ -27,7 +27,7 @@ WhatsApp do agente: +55 34 99659-2975
 | Mensageria | Evolution API v2.3.7 + PostgreSQL + Redis (WhatsApp, self-hosted na VPS Hostinger) |
 | Banco de dados | Supabase (histórico de mensagens) |
 | Frontend | Next.js, React, Tailwind CSS, TypeScript (planejado) |
-| Automação | n8n (workflows configurados — NÃO MEXER) |
+| Automação | Vercel Cron no próprio backend (`vercel.json`). n8n **desativado** — ver Convenções |
 | Deploy | Vercel Serverless Functions |
 
 ---
@@ -91,7 +91,7 @@ c:\noticiasgg\
 - **Sem comentários desnecessários** — apenas quando o "porquê" não é óbvio.
 - **Sem mock de banco em testes** — testes de integração usam APIs reais onde possível.
 - **YAGNI** — sem features fora do escopo.
-- **n8n:** PROIBIDO usar qualquer ferramenta MCP do n8n (`mcp__n8n-mcp__update_workflow`, `mcp__n8n-mcp__create_workflow_from_code`, etc.) para modificar workflows existentes. Em mai/2026 um subagente usou `update_workflow` para corrigir um system prompt, não leu o arquivo inteiro, alucionou números de telefone e enviou mensagens para estranhos. Apenas leitura (`search_workflows`, `get_workflow_details`) é permitida.
+- **n8n: DESATIVADO.** Matheus confirmou em 07/09/2026 que não usa mais n8n neste projeto. Não há workflow ativo: não investigar, pausar, consultar nem citar n8n como dependência. Referências a n8n em docs antigos (`docs/`, `ESTADO.md`) são históricas. A lição do incidente de mai/2026 continua valendo para QUALQUER automação remota: um subagente usou `update_workflow` para corrigir um system prompt, não leu o arquivo inteiro, alucionou números de telefone e enviou mensagens para estranhos. Regra que fica: ferramenta MCP que altera coisa remota só depois de ler o alvo inteiro, nunca por subagente sem supervisão.
 
 ---
 
@@ -156,7 +156,7 @@ Squad de IA disponível neste projeto. Invocação por prefixo: `Zeus:`, `Atlas:
 - **Atlas** — Python 3.12 + FastAPI é a linguagem primária aqui. TypeScript/Next.js apenas para o frontend planejado.
 - **Apolo** — testes com `pytest` em `backend/tests/`; foco em collectors e webhook `/api/webhook`.
 - **Gaia** — relevante para o módulo `plant_id.py`: identificação de plantas, pragas e doenças via foto. Domínio agro presente mesmo fora do agromouro-base.
-- **n8n:** NUNCA modificar workflows via MCP — apenas leitura (`search_workflows`, `get_workflow_details`). Ver regra completa em Convenções.
+- **n8n:** desativado desde set/2026. Ver Convenções.
 
 ---
 
