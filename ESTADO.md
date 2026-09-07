@@ -13,6 +13,31 @@
 
 ---
 
+## 07/09/2026 — achados do Codex conferidos e corrigidos (PR #32)
+
+Codex (06–07/09) apontou 4 defeitos e propôs migrations com RPC e advisory lock.
+Diagnóstico estava certo, remédio era grande demais; o lote dele foi descartado
+(`_deprecated/codex-2026-09-06/`, fora do git) e refeito enxuto com TDD:
+
+- `POST /api/save-polls` **removida**: sobra da era n8n, aberta na internet sem
+  token, gravava no `polls_cache` que é fallback do relatório.
+- Grade de agendamento não some mais: `grid_to_rows` valida seção/dia/hora e
+  deduplica ANTES do DELETE+INSERT; rotas devolvem 422. RPC atômica no banco foi
+  recusada de propósito (acoplaria migration a deploy; 1 usuário).
+- `save_polls` levanta erro do banco no fim (grava as demais); coletor loga.
+- Policy `authenticated full access report_schedules` **derrubada em produção
+  em 07/09/2026 ~01:55 BRT** via `supabase db query --linked -f
+  backend/migrations/010_drop_open_policy_report_schedules.sql` (link feito em
+  pasta de rascunho, nada no repo). Medido antes: cadastro desligado, 1 conta.
+  Conferir hoje: `select count(*) from pg_policies where tablename='report_schedules'`
+  → 0, e `relrowsecurity` → true. Reversão está comentada no próprio SQL.
+
+Fica de fora, anotado: `REVOKE` de grants de anon/authenticated na tabela
+(defesa em profundidade se alguém desligar RLS pelo Studio); consumidor externo
+de `/api/save-polls` não comprovado inexistente, só não achado no repo.
+
+---
+
 ## O que é
 
 Agente de IA multi-domínio, backend em Python/FastAPI:

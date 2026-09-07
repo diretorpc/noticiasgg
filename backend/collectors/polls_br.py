@@ -1,3 +1,4 @@
+import logging
 import asyncio
 import concurrent.futures
 import os
@@ -308,7 +309,7 @@ async def collect_async() -> list[dict]:
         try:
             supa.save_polls(resultados)
         except Exception:
-            pass
+            logging.getLogger(__name__).exception("save_polls falhou; cache de pesquisas pode ficar velho")
     else:
         try:
             resultados = supa.get_polls()

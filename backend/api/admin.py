@@ -147,7 +147,10 @@ def get_schedules(phone: str, user: dict = Depends(auth.require_admin)) -> dict:
 def put_schedules(phone: str, body: ScheduleBody,
                   user: dict = Depends(auth.require_admin)) -> dict:
     """Substitui a grade do usuário e seta a flag do motor novo."""
-    rows = schedules.grid_to_rows(phone, body.schedule)
+    try:
+        rows = schedules.grid_to_rows(phone, body.schedule)
+    except (ValueError, TypeError, AttributeError) as e:
+        raise HTTPException(status_code=422, detail=f"grade inválida: {e}")
     schedules.replace_for_phone(phone, rows)
     schedules.set_engine_flag(phone, body.use_new_engine)
     return {"ok": True}

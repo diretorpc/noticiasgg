@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from backend.services import selflink, supabase, schedules
@@ -53,6 +53,9 @@ class MeScheduleBody(BaseModel):
 
 @router.put("/api/me/schedule")
 def put_me_schedule(body: MeScheduleBody, phone: str = Depends(selflink.selflink_phone)) -> dict:
-    rows = schedules.grid_to_rows(phone, body.schedule)
+    try:
+        rows = schedules.grid_to_rows(phone, body.schedule)
+    except (ValueError, TypeError, AttributeError) as e:
+        raise HTTPException(status_code=422, detail=f"grade inválida: {e}")
     schedules.replace_for_phone(phone, rows)
     return {"ok": True}

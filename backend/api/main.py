@@ -63,15 +63,6 @@ async def health_endpoint():
     return health.collect_status()
 
 
-@app.post("/api/save-polls")
-async def save_polls(request: Request):
-    body = await request.json()
-    polls = body.get("data", [])
-    if polls:
-        supabase.save_polls(polls)
-    return {"status": "ok", "saved": len(polls)}
-
-
 def _extract_message(message: dict) -> dict:
     """Detecta o tipo da mensagem e retorna metadados para o webhook processar.
 

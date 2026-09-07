@@ -40,3 +40,38 @@ def test_roundtrip_grid_rows_grid():
     rows = schedules.grid_to_rows("p", grid)
     back = schedules.rows_to_grid([{k: r[k] for k in ("section", "weekday", "hour")} for r in rows])
     assert back == grid
+
+
+@pytest.mark.unit
+def test_grid_to_rows_deduplica_horas_repetidas():
+    """Hora repetida virava duas linhas com a mesma chave primária: o DELETE
+    rodava, o INSERT dava 409 e a grade do usuário sumia."""
+    rows = schedules.grid_to_rows("p", {"bolsas": {"0": [7, 7, 12]}})
+    assert len(rows) == 2
+    assert sorted(r["hour"] for r in rows) == [7, 12]
+
+
+@pytest.mark.unit
+def test_grid_to_rows_rejeita_dia_fora_da_faixa():
+    with pytest.raises(ValueError):
+        schedules.grid_to_rows("p", {"bolsas": {"7": [7]}})
+
+
+@pytest.mark.unit
+def test_grid_to_rows_rejeita_hora_fora_da_faixa():
+    with pytest.raises(ValueError):
+        schedules.grid_to_rows("p", {"bolsas": {"0": [24]}})
+
+
+@pytest.mark.unit
+def test_grid_to_rows_mesma_hora_em_secoes_diferentes_gera_duas_linhas():
+    rows = schedules.grid_to_rows("p", {"bolsas": {"0": [7]}, "analise": {"0": [7]}})
+    assert len(rows) == 2
+
+
+@pytest.mark.unit
+def test_grid_to_rows_rejeita_secao_desconhecida():
+    """Seção que o motor não conhece vira agendamento fantasma: aparece no
+    painel como agendado e nunca dispara."""
+    with pytest.raises(ValueError):
+        schedules.grid_to_rows("p", {"secao_inventada": {"0": [7]}})

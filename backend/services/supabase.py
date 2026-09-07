@@ -237,9 +237,12 @@ def delete_preferences(phone: str) -> None:
 
 
 def save_polls(polls: list[dict]) -> None:
+    """Grava todas; uma rejeitada não descarta as seguintes (o cache é o
+    fallback do relatório). Levanta a primeira falha só no fim."""
+    falha: Exception | None = None
     with _client() as c:
         for poll in polls:
-            c.post(
+            r = c.post(
                 "/polls_cache",
                 json={
                     "instituto": poll["instituto"],
@@ -251,6 +254,12 @@ def save_polls(polls: list[dict]) -> None:
                 },
                 headers={"Prefer": "resolution=merge-duplicates,return=representation"},
             )
+            try:
+                r.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                falha = falha or e
+    if falha:
+        raise falha
 
 
 def get_polls() -> list[dict]:

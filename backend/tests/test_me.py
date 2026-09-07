@@ -80,3 +80,20 @@ def test_me_requires_valid_token():
     app.dependency_overrides.clear()
     r = client.get("/api/me")
     assert r.status_code == 401
+
+
+@pytest.mark.unit
+def test_put_me_schedule_grade_invalida_devolve_422_sem_tocar_no_banco(monkeypatch):
+    chamadas = []
+    monkeypatch.setattr(schedules, "replace_for_phone",
+                        lambda phone, rows: chamadas.append(rows))
+    r = client.put("/api/me/schedule?token=x", json={"schedule": {"bolsas": {"9": [7]}}})
+    assert r.status_code == 422
+    assert chamadas == []
+
+
+@pytest.mark.unit
+def test_put_me_schedule_payload_malformado_devolve_422(monkeypatch):
+    monkeypatch.setattr(schedules, "replace_for_phone", lambda phone, rows: None)
+    r = client.put("/api/me/schedule?token=x", json={"schedule": {"bolsas": {"0": 7}}})
+    assert r.status_code == 422
