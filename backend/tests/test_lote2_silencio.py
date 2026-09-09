@@ -6,6 +6,8 @@ coloca o arquivo no portao do CI, que roda `pytest backend -m unit`.
 import json
 import os
 from concurrent.futures import TimeoutError as FuturesTimeout
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
 from unittest.mock import patch
 
 import httpx
@@ -60,6 +62,26 @@ def test_cron_report_relata_secoes_pedidas_e_geradas():
     assert body["sections_generated"] == 1
 
 
+@pytest.mark.unit
+def test_cron_report_loga_aviso_quando_a_falha_e_parcial(caplog):
+    """Numero no corpo do JSON da invocacao nao chega a ninguem. Falha parcial
+    precisa aparecer no log, que e o que o boletim de saude le."""
+    rows = [{"phone": "555", "section": "bolsas"}, {"phone": "555", "section": "analise"}]
+    with (
+        patch("backend.api.cron_report.schedules.due_now", return_value=rows),
+        patch("backend.api.cron_report.schedules.phones_with_engine_enabled", return_value={"555"}),
+        patch("backend.api.cron_report.supabase.get_authorized_by_phone",
+              return_value={"phone": "555", "name": "M"}),
+        patch("backend.api.cron_report.report_engine.generate_sections", return_value=["so uma"]),
+        patch("backend.api.cron_report.whatsapp.send_message"),
+        patch.dict(os.environ, {"CRON_SECRET": _SECRET}),
+        caplog.at_level("WARNING", logger="noticiasgg"),
+    ):
+        client.get("/api/cron/report", headers={"x-cron-secret": _SECRET})
+    assert any("parcial" in r.message.lower() or "1/2" in r.getMessage()
+               for r in caplog.records)
+
+
 # -- 2. EIA marcava divulgacao como enviada mesmo com zero entregas ----------
 
 _EIA_DATA = {"Petroleo bruto": {"valor": 420000.0, "data": "2026-09-03",
@@ -92,10 +114,20 @@ def test_eia_com_entrega_marca_normalmente():
 
 # -- 3. Falha da NewsAPI derrubava os RSS gratis -----------------------------
 
-_RSS_XML = b"""<?xml version="1.0"?><rss><channel>
-<item><title>Feed vivo</title><link>https://exemplo.com/a</link>
-<pubDate>Wed, 09 Sep 2026 12:00:00 GMT</pubDate><description>ok</description></item>
-</channel></rss>"""
+def _rss_fresco() -> bytes:
+    """Data relativa ao relogio, nunca cravada: news._MAX_AGE e de 48h, entao
+    fixture com data fixa faz o portao do CI ficar vermelho dois dias depois
+    por motivo falso. Mesmo padrao de _fresh_rss em test_news.py."""
+    quando = format_datetime(datetime.now(timezone.utc) - timedelta(hours=1))
+    return (
+        '<?xml version="1.0"?><rss><channel>'
+        '<item><title>Feed vivo</title><link>https://exemplo.com/a</link>'
+        f"<pubDate>{quando}</pubDate><description>ok</description></item>"
+        "</channel></rss>"
+    ).encode("utf-8")
+
+
+_RSS_XML = _rss_fresco()
 
 
 def _transporte_falso(newsapi_erro):
@@ -231,11 +263,17 @@ def test_secoes_vazias_do_painel_continuam_gravando(monkeypatch):
 
 # -- Achados da revisao do Apolo sobre este proprio lote ---------------------
 
-def _tudo_falha(erro_newsapi=None, status_newsapi=None):
+def _tudo_falha(erro_newsapi=None, status_newsapi=None, primeira_ok=False):
     """Handler em que os RSS tambem morrem: articles fica [] e _check_news
-    volta cedo, sem chamar o classificador."""
+    volta cedo, sem chamar o classificador. Com primeira_ok, a 1a chamada a
+    NewsAPI responde e as seguintes estouram (caso misto)."""
+    chamadas = {"n": 0}
+
     def handler(request):
         if "newsapi.org" in str(request.url):
+            chamadas["n"] += 1
+            if primeira_ok and chamadas["n"] == 1:
+                return httpx.Response(200, json={"articles": []})
             if erro_newsapi:
                 raise erro_newsapi
             return httpx.Response(status_newsapi or 200, json={"articles": []})
@@ -251,6 +289,10 @@ def _rodar_check_news(monkeypatch, transporte):
     with (
         patch.object(alert_checker, "_cooldown_ok", return_value=True),
         patch.object(alert_checker.supabase, "set_alert_triggered") as marca,
+        # Contrato explicito, nao consequencia: se algum dia articles deixar de
+        # ficar vazio, o teste falha aqui em vez de chamar o Claude de verdade.
+        patch.object(alert_checker, "Anthropic",
+                     side_effect=AssertionError("classificador nao pode ser chamado")),
     ):
         alert_checker._check_news([{"phone": "555"}], test_mode=False, errors=erros)
     return [c.args[0] for c in marca.call_args_list], erros
@@ -272,6 +314,17 @@ def test_contrato_real_http_429_freia_o_fornecedor(monkeypatch):
     """429/401 sao o fornecedor RESPONDENDO: a cota foi gasta e a janela de
     45 min tem que valer, senao a tentativa sobe de 1x para 4x por hora."""
     marcados, _ = _rodar_check_news(monkeypatch, _tudo_falha(status_newsapi=429))
+    assert "newsapi_fetch" in marcados
+
+
+@pytest.mark.unit
+def test_contrato_real_falha_parcial_ainda_freia_o_fornecedor(monkeypatch):
+    """Duas chamadas por coleta. Se a primeira responde (cota gasta) e a
+    segunda cai, o freio tem que valer: dispensar por causa de UMA falha fazia
+    o ciclo de 15 min bater de novo com a cota ja consumida."""
+    marcados, _ = _rodar_check_news(
+        monkeypatch,
+        _tudo_falha(erro_newsapi=httpx.ConnectTimeout("estourou"), primeira_ok=True))
     assert "newsapi_fetch" in marcados
 
 

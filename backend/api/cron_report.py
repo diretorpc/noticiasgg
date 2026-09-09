@@ -42,6 +42,11 @@ async def cron_report(request: Request):
             for msg in messages:
                 whatsapp.send_message(phone, msg)
             geradas += len(messages)
+            if len(messages) < len(sections):
+                # Numero no corpo do JSON da invocacao nao chega a ninguem;
+                # o log e o que o boletim de saude e a Vercel mostram.
+                logger.warning("cron_report: envio parcial para %s - %d de %d secoes",
+                               phone, len(messages), len(sections))
             sent += 1
         except Exception:
             logger.exception("cron_report falhou para %s", phone)

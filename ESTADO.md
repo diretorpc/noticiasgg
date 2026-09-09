@@ -106,9 +106,25 @@ anterior do teste inventava a string e não pegaria a quebra.
 
 Medir: `python -m pytest backend/tests/test_lote2_silencio.py -m unit -q`
 
+Terceira rodada de revisão achou mais duas: (a) fixture de RSS com data CRAVADA
+(`_MAX_AGE` é 48h, então o portão do CI ficaria vermelho em dois dias por motivo
+falso) — agora a data é relativa ao relógio, padrão de `_fresh_rss` em
+`test_news.py`; (b) falha PARCIAL da NewsAPI (uma chamada responde, outra cai)
+dispensava o freio mesmo com cota gasta — agora a decisão vem de telemetria
+(`chamadas` vs `sem_resposta`), e só dispensa quando NENHUMA respondeu.
+Falha parcial do cron passou a sair no log, porque número no corpo do JSON da
+invocação não chega a ninguém.
+
 Dívidas registradas pelo Apolo, fora do lote: painel sem vitest (a trava da grade é
 o pior estrago do lote e não tem teste); `timeout=50` do fallback não limita relógio
-nenhum, porque o executor espera todos os futures na saída (pré-existente).
+nenhum, porque o executor espera todos os futures na saída (pré-existente);
+`replace_for_phone` ainda apaga antes de gravar (decisão consciente de 07/09).
+
+⚠️ **O achado 12 da review ficou pela METADE**: a parte "voz apaga campos" foi
+consertada aqui, mas a outra — usuário confirma horário pelo WhatsApp, grava em
+`user_preferences`, e o cron lê `report_schedules`, ou seja, confirma sucesso sem
+efeito — segue de pé. Não tirar da lista como se estivesse fechado; é decisão do
+lote 4 (mapear as seções ou responder apontando o painel).
 Lotes 3 e 4 da review continuam pendentes de decisão.
 
 ---
