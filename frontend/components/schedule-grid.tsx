@@ -37,6 +37,15 @@ export function ScheduleGridEditor({
   const [useNew, setUseNew] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // O estado inicial e uma grade VAZIA. Sem esta trava, um GET que falha ou
+  // demora deixava o Salvar clicavel: o PUT mandava grade vazia, o backend
+  // apagava os horarios e desligava o motor, e a tela dizia "Agendamento
+  // salvo". So salva depois que o carregamento confirmou o que existe hoje.
+  // Derivado, nao escrito: trocar de usuario (reloadKey) volta a travar
+  // sozinho, sem setState dentro do efeito.
+  const [chaveCarregada, setChaveCarregada] = useState<string | null>(null);
+  const [tentativa, setTentativa] = useState(0);
+  const carregado = chaveCarregada === reloadKey;
 
   useEffect(() => {
     let alive = true;
@@ -52,11 +61,14 @@ export function ScheduleGridEditor({
       }
       setCells(next);
       setUseNew(res.use_new_engine);
-    }).catch(() => setStatus("Erro ao carregar agendamento."));
+      setChaveCarregada(reloadKey);
+    }).catch(() => {
+      if (alive) setStatus("Erro ao carregar agendamento — nada foi alterado.");
+    });
     return () => { alive = false; };
     // reloadKey é a dep estável; load é arrow inline (muda toda render) de propósito
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reloadKey]);
+  }, [reloadKey, tentativa]);
 
   function setCell(sec: string, wd: number, value: string) {
     setCells((c) => ({ ...c, [sec]: { ...c[sec], [wd]: value } }));
@@ -127,7 +139,13 @@ export function ScheduleGridEditor({
       </div>
       <p className="mt-2 text-xs text-muted-foreground">Horas BRT separadas por vírgula (ex: 7,12). Vazio = não envia.</p>
       {status && <p className="mt-2 text-sm text-primary">{status}</p>}
-      <button onClick={onSave} disabled={busy}
+      {!carregado && (
+        <button onClick={() => { setStatus(null); setTentativa((t) => t + 1); }}
+          className="mt-2 mr-2 rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-muted">
+          Tentar carregar de novo
+        </button>
+      )}
+      <button onClick={onSave} disabled={busy || !carregado}
         className="mt-3 rounded-md bg-primary px-4 py-2 font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
         Salvar agendamento
       </button>

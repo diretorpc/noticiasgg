@@ -305,8 +305,12 @@ def _check_eia(recipients: list[dict], errors: list[str] | None = None) -> int:
         "━━━━━━━━━━━━━━\n" + "\n".join(lines)
     )
     sent = _broadcast(msg, recipients, errors)
-    for rule_id in new_rule_ids:
-        supabase.set_alert_triggered(rule_id)
+    if sent > 0:
+        # A janela de bloqueio e de 30 dias: marcar sem entregar perdia a
+        # divulgacao da semana inteira. Mesma regra de _check_price_rules e
+        # _check_copom, que so marcam quando alguem recebeu.
+        for rule_id in new_rule_ids:
+            supabase.set_alert_triggered(rule_id)
     logger.info("eia alert: %d series, %d sent", len(lines), sent)
     return sent
 
@@ -763,8 +767,11 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
     # NewsAPI no máximo a cada 45 min (independente de alerta enviado); RSS é grátis,
     # roda sempre. IA/tech fica fora — o classificador descarta (score 1-2) de qualquer forma.
     use_newsapi = test_mode or _cooldown_ok("newsapi_fetch", _NEWSAPI_FETCH_COOLDOWN_HOURS)
+    coleta_erros: list[str] = errors if errors is not None else []
+    erros_antes = len(coleta_erros)
     try:
-        articles = news_collector.collect(include_ai=False, include_newsapi=use_newsapi, errors=errors)
+        articles = news_collector.collect(include_ai=False, include_newsapi=use_newsapi,
+                                          errors=coleta_erros)
     except Exception as e:
         # Sem vazamento vivo hoje (politics_br.py:40 usa `continue` em vez de
         # raise_for_status(), então news.collect() nunca propaga
@@ -776,7 +783,15 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
         if errors is not None:
             errors.append(f"news: {err}")
         return 0
-    if use_newsapi and not test_mode:
+    # So marca a janela de 45 min quando a NewsAPI realmente respondeu. Desde
+    # que o erro de transporte parou de derrubar o collect() inteiro, marcar
+    # aqui tirava o fornecedor do ar por 45 min em vez dos 15 do proximo ciclo.
+    # Resposta ruim (429, 401, corpo quebrado) NAO entra aqui de proposito:
+    # o fornecedor respondeu, a cota foi gasta, e insistir a cada 15 min
+    # impediria a janela diaria de drenar.
+    newsapi_respondeu = not any(e.startswith(news_collector.PREFIXO_SEM_RESPOSTA)
+                                for e in coleta_erros[erros_antes:])
+    if use_newsapi and not test_mode and newsapi_respondeu:
         supabase.set_alert_triggered("newsapi_fetch")
     if not isinstance(articles, list) or not articles:
         return 0

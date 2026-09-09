@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import logging
 import math
 import os
 import urllib.parse
@@ -8,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 
 from backend.services.secrets_mask import sanitize_error
 
+logger = logging.getLogger("noticiasgg")
 router = APIRouter()
 
 SYMBOLS = {
@@ -135,12 +137,29 @@ def _fetch_all_scraperapi(missing_symbols: dict) -> dict:
             ex.submit(_fetch_via_scraperapi, sym): (sym, cat, nom)
             for sym, (cat, nom) in missing_symbols.items()
         }
-        for future in as_completed(futures, timeout=50):
-            sym, cat, nom = futures[future]
-            try:
-                resultado[(cat, nom)] = future.result()
-            except Exception as e:
-                resultado[(cat, nom)] = {"preco": None, "variacao_pct": None, "erro": sanitize_error(e)}
+        try:
+            for future in as_completed(futures, timeout=50):
+                sym, cat, nom = futures[future]
+                try:
+                    resultado[(cat, nom)] = future.result()
+                except Exception as e:
+                    resultado[(cat, nom)] = {"preco": None, "variacao_pct": None, "erro": sanitize_error(e)}
+        except FuturesTimeout:
+            # Prazo agregado estourou. Antes a excecao subia e derrubava o
+            # collect() inteiro, jogando fora ate as cotacoes que o Yahoo
+            # direto ja tinha entregue. Agora o que chegou fica.
+            logger.warning("fallback ScraperAPI: prazo agregado estourou")
+    # Fora do `with`: o executor ja esperou todo mundo terminar, entao o que
+    # o prazo agregado deixou de fora tem resultado valido na mao. Descartar
+    # isso jogaria fora cotacao ja paga e ja entregue.
+    for future, (sym, cat, nom) in futures.items():
+        if (cat, nom) in resultado:
+            continue
+        try:
+            resultado[(cat, nom)] = future.result(timeout=0)
+        except Exception as e:
+            resultado[(cat, nom)] = {"preco": None, "variacao_pct": None,
+                                     "erro": sanitize_error(e) or type(e).__name__}
     return resultado
 
 

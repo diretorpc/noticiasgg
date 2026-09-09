@@ -316,16 +316,47 @@ def _collect_rss(client: httpx.Client, feeds: list[tuple[str, str]], vistos: set
     return artigos
 
 
+# Prefixo reservado para a NewsAPI NAO ter respondido (erro de transporte).
+# `alert_checker` importa esta constante para decidir se queima a janela de 45
+# min: fornecedor que respondeu 429/401 gastou cota e merece o freio; quem nem
+# respondeu, nao. Repetir a string nos dois lados deixava o contrato quebrar calado.
+PREFIXO_SEM_RESPOSTA = "newsapi-sem-resposta"
+
+
 def _fetch_newsapi(client: httpx.Client, url: str, params: dict, vistos: set,
                    errors: list[str] | None, label: str) -> list[dict]:
-    resp = client.get(url, params=params)
+    try:
+        resp = client.get(url, params=params)
+    except httpx.HTTPError as e:
+        # Erro de transporte do fornecedor pago nao pode derrubar o collect()
+        # inteiro: os RSS gratis vem depois e continuam funcionando sozinhos.
+        if errors is not None:
+            errors.append(f"{PREFIXO_SEM_RESPOSTA} {label}: {type(e).__name__}")
+        return []
     if resp.status_code != 200:
         # 429 = limite diário do free tier estourado — reportar para o auto-alerta
         if errors is not None:
             errors.append(f"newsapi {label}: HTTP {resp.status_code}")
         return []
+    # 200 com corpo quebrado ou com forma inesperada: JSONDecodeError nao e
+    # httpx.HTTPError, e lista no lugar de objeto estourava AttributeError.
+    # Os dois escapavam do except acima e derrubavam os RSS junto. Nao usam o
+    # prefixo de sem-resposta: o fornecedor respondeu e a cota foi gasta.
+    try:
+        payload = resp.json()
+    except ValueError:
+        if errors is not None:
+            errors.append(f"newsapi {label}: resposta ilegivel")
+        return []
+    lista = payload.get("articles") if isinstance(payload, dict) else None
+    if not isinstance(lista, list):
+        if errors is not None:
+            errors.append(f"newsapi {label}: resposta em formato inesperado")
+        return []
     artigos = []
-    for a in resp.json().get("articles", []):
+    for a in lista:
+        if not isinstance(a, dict):
+            continue
         article_url = a.get("url", "")
         published_at = a.get("publishedAt")
         if article_url in vistos or not _is_fresh(published_at):
@@ -344,7 +375,7 @@ def _fetch_newsapi(client: httpx.Client, url: str, params: dict, vistos: set,
 def collect(include_ai: bool = True, include_newsapi: bool = True,
             errors: list[str] | None = None) -> list[dict]:
     api_key = os.getenv("NEWS_API_KEY", "")
-    if not api_key:
+    if include_newsapi and not api_key:
         raise ValueError("NEWS_API_KEY não configurada")
 
     artigos = []

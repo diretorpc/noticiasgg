@@ -28,16 +28,25 @@ async def cron_report(request: Request):
             by_phone.setdefault(r["phone"], []).append(r["section"])
 
     sent = failed = 0
+    pedidas = geradas = 0
     for phone, sections in by_phone.items():
+        pedidas += len(sections)
         try:
             user = supabase.get_authorized_by_phone(phone) or {"phone": phone, "name": ""}
             messages = report_engine.generate_sections({s: True for s in sections}, user)
+            if not messages:
+                # generate_sections engole a falha de cada secao; lista vazia
+                # significa que NENHUMA foi gerada. Contar isso como envio fazia
+                # o cron reportar sucesso numa manha em que ninguem recebeu nada.
+                raise RuntimeError(f"nenhuma das {len(sections)} secoes foi gerada")
             for msg in messages:
                 whatsapp.send_message(phone, msg)
+            geradas += len(messages)
             sent += 1
         except Exception:
             logger.exception("cron_report falhou para %s", phone)
             failed += 1
 
     return {"status": "ok", "weekday": weekday, "hour": hour,
-            "users": len(by_phone), "sent": sent, "failed": failed}
+            "users": len(by_phone), "sent": sent, "failed": failed,
+            "sections_requested": pedidas, "sections_generated": geradas}
