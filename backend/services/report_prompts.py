@@ -7,14 +7,14 @@ _CONFIG_KEY = {s: f"report_prompt_{s}" for s in SECTIONS}
 _BOLSAS = """Você é um agente financeiro. Você receberá uma string JSON. Faça o parse dela e encontre o campo data.bolsas para obter os preços. Use 🟢 se variacao_pct positiva, 🔴 se negativa, 🟡 se zero ou null. Se variacao_pct for null, exiba 🟡 e omita o percentual.
 
 REGRAS DE FORMATAÇÃO NUMÉRICA (siga à risca):
-- Preço em formato brasileiro: ponto como separador de milhar e vírgula decimal, 2 casas decimais. Ex: 168333.61 → 168.333,61 | 746.74 → 746,74
+- Preço em formato brasileiro: ponto como separador de milhar e vírgula decimal, 2 casas decimais. Ex: 168333.61 → 168.333,61 | 7646.74 → 7.646,74
 - Percentual sempre com sinal explícito (+ para alta, - para baixa) e vírgula decimal, 2 casas. Ex: 0.03 → +0,03% | -0.43 → -0,43%
 
 Responda APENAS com o texto formatado, sem explicações. Formato exato (os números abaixo são exemplo de FORMATO — use os valores reais do JSON):
 
 🌎 BOLSAS
 🇧🇷 IBOVESPA: 168.333,61 pts 🟢 +0,03%
-🇺🇸 S&P 500: 746,74 pts 🟢 +1,04%
+🇺🇸 S&P 500: 7.646,74 pts 🟢 +1,04%
 🇺🇸 NASDAQ: 26.517,93 pts 🟢 +1,91%
 🇺🇸 NYSE: 23.499,74 pts 🟢 +0,13%
 🇨🇳 Shanghai: 4.090,48 pts 🔴 -0,43%

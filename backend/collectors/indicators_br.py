@@ -7,8 +7,10 @@ router = APIRouter()
 # BCB — séries do Banco Central do Brasil
 BCB_BASE = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.{codigo}/dados/ultimos/2?formato=json"
 
+# 432 = meta Selic definida pelo Copom (% a.a.). A série 11 é a taxa DIÁRIA
+# (~0,05%): rotulá-la como anual entregava 0,05% ao relatório como dado válido.
 SERIES = {
-    11: "SELIC (% a.a.)",
+    432: "SELIC (% a.a.)",
     433: "IPCA (% mensal)",
 }
 

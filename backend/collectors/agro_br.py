@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import math
+import re
 import httpx
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, HTTPException
@@ -49,7 +50,7 @@ def _safe_float(val):
 
 def _parse_br_float(texto: str) -> float | None:
     try:
-        return float(texto.strip().replace(".", "").replace(",", ".").replace("+", ""))
+        return float(texto.strip().replace(".", "").replace(",", ".").replace("+", "").replace("%", ""))
     except Exception:
         return None
 
@@ -63,8 +64,40 @@ def _header_columns(tabela) -> tuple[int | None, int | None]:
         return None, None
     headers = [th.get_text(strip=True).lower() for th in header_row.find_all("th")]
     col_preco = next((i for i, h in enumerate(headers) if "r$" in h or "preço" in h or "valor" in h), None)
-    col_var = next((i for i, h in enumerate(headers) if "varia" in h), None)
+    col_var = next((i for i, h in enumerate(headers) if "varia" in h or h.startswith("var")), None)
     return col_preco, col_var
+
+
+def _unidade_divergente(tabela, unidade: str, cells: list[str]) -> str | None:
+    """Compara a unidade que a fonte declara (no cabeçalho ou na célula de
+    'unidade' da linha lida) com a configurada. Já entregamos ovos 30x inflados
+    (R$/30 dz lido como R$/dz), algodão em centavos/lb rotulado R$/@ e amendoim
+    por kg rotulado por saca: número errado com cara de certo. Divergência vira
+    erro visível, não preço. Palavra inteira, não substring: 'Percentual' e
+    'média 30 dias' não são unidade."""
+    header_row = next((tr for tr in tabela.find_all("tr") if tr.find("th")), None)
+    if header_row is None:
+        return None
+    headers = [th.get_text(strip=True).lower() for th in header_row.find_all("th")]
+    header = " ".join(headers)
+    u = unidade.lower()
+    if bool(re.search(r"\bcents?\b", header)) != bool(re.search(r"\bcent", u)):
+        return header
+    if re.search(r"\b30\s*(dz|d[uú]zias)\b", header) and "30" not in u:
+        return header
+    col_unid = next((i for i, h in enumerate(headers) if "unidade" in h), None)
+    if col_unid is not None and col_unid < len(cells):
+        cell = cells[col_unid].lower()
+        if "saca" in cell and "sc" not in u:
+            return cell
+        if re.search(r"/\s*kg\b", cell) and "saca" not in cell and "/kg" not in u.replace(" ", ""):
+            return cell
+    return None
+
+
+def _texto_seguro(s: str, limite: int = 80) -> str:
+    """Texto raspado de terceiro vai parar no contexto do modelo: corta e tira markup."""
+    return re.sub(r"[<>]", "", s)[:limite]
 
 
 def _fetch_noticias_agro(
@@ -85,6 +118,9 @@ def _fetch_noticias_agro(
         if linha_idx < 1 or linha_idx > len(linhas):
             return {**base, "erro": "linha não encontrada"}
         cols = [c.get_text(strip=True) for c in linhas[linha_idx - 1].find_all("td")]
+        divergencia = _unidade_divergente(tabela, unidade, cols)
+        if divergencia:
+            return {**base, "erro": f"unidade divergente: fonte diz '{_texto_seguro(divergencia)}', configurada '{unidade}'"}
         preco = _parse_br_float(cols[col_preco]) if col_preco < len(cols) else None
         variacao = _parse_br_float(cols[col_var]) if col_var < len(cols) else None
         return {**base, "preco": preco, "variacao_pct": variacao, "estado": estado}
@@ -100,13 +136,13 @@ NOTICIAS_AGRO_COMMODITIES = {
     "Milho SP":        ("/cotacoes/milho",           "R$/sc 60kg",  "SP", 1),
     "Trigo PR":        ("/cotacoes/trigo",           "R$/ton",      "PR", 1),
     "Cafe Arabica SP": ("/cotacoes/cafe",            "R$/sc 60kg",  "SP", 1),
-    "Algodao SP":      ("/cotacoes/algodao",         "R$/@ 15kg",   "SP", 1),
+    "Algodao SP":      ("/cotacoes/algodao",         "cent R$/lb",  "SP", 1),  # indicador Cepea, 1ª tabela
     "Acucar SP":       ("/cotacoes/sucroenergetico", "R$/sc 50kg",  "SP", 1),
     "Arroz RS":        ("/cotacoes/arroz",           "R$/sc 50kg",  "RS", 1),
-    "Feijao PR":       ("/cotacoes/feijao",          "R$/sc 60kg",  "PR", 1),
+    "Feijao SP":       ("/cotacoes/feijao",          "R$/sc 60kg",  "SP", 2),  # linha 1 (Curitiba) vive "s/ cotação"; Itapeva é SP
     "Sorgo RS":        ("/cotacoes/sorgo",           "R$/sc 60kg",  "RS", 1),
     "Mandioca MS":     ("/cotacoes/mandioca",        "R$/ton",      "MS", 1),
-    "Amendoim SP":     ("/cotacoes/amendoim",        "R$/sc 25kg",  "SP", 2),
+    "Amendoim SP":     ("/cotacoes/amendoim",        "R$/kg",       "SP", 2),  # Ceasa Campinas, linha "Com casca / kg"
 }
 
 # URLs verificadas em 2026-05-15: bezerro/vaca-gorda → 404; boi-gordo/frango/suinos já validados
@@ -115,7 +151,7 @@ NOTICIAS_AGRO_GADO = {
     "Frango SP":     ("/cotacoes/frango",    "R$/kg",  "SP", 1),
     "Suino PR":      ("/cotacoes/suinos",    "R$/kg",  "PR", 2),
     "Leite SP":      ("/cotacoes/leite",     "R$/L",   "SP", 4),
-    "Ovos SP":       ("/cotacoes/ovos",      "R$/dz",  "SP", 2),
+    "Ovos SP":       ("/cotacoes/ovos",      "R$/30 dz", "SP", 2),  # Cepea Bastos, caixa de 30 dz
 }
 
 # URLs verificadas em 2026-05-15: ureia/map/kcl → 404; sem entradas válidas

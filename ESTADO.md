@@ -38,6 +38,37 @@ de `/api/save-polls` não comprovado inexistente, só não achado no repo.
 
 ---
 
+## 09/09/2026 — review externa conferida (19/19 reais) e lote 1 "números errados" (PR #33)
+
+O Codex entregou `docs/REVIEW-2026-09-09.md` com 19 achados. Conferidos por 4
+revisores independentes + spot-check: **18 confirmados, 1 parcial (HTTPS do
+fallback), nenhum refutado**. Dois eram piores que o relato (Copom, validador).
+Lote 1 = número errado com cara de certo, feito com TDD (17 testes vistos falhar):
+
+- **Copom:** as 8 datas de 2026 eram quintas (calendário de 2025). Trocadas pelo
+  oficial (BCB via InfoMoney/B3/CNN; página do BCB é JS). Teste exige quarta-feira
+  e ano corrente: **o CI quebra de propósito em jan/2027** para forçar atualização.
+- **Selic:** série SGS 11 é a taxa DIÁRIA (~0,05). Agora 432 (meta, 14,00), rótulo
+  mantido. `variacao` vira 0 fora de dia de Copom, e está certo.
+- **S&P 500:** `SPY` (cota do ETF, ~760) → `^GSPC` (índice, ~7.640). Exemplo do
+  prompt de bolsas ajustado para a escala certa.
+- **Scraper Notícias Agrícolas** (`agro_br.py`): ovos `R$/dz`→`R$/30 dz` (30×),
+  algodão `R$/@`→`cent R$/lb` (3,2×), amendoim `R$/sc 25kg`→`R$/kg` (31×, achado
+  do Apolo), feijão morto (cabeçalho "Var./Dia" + praça "s/ cotação") → `Feijao SP`
+  linha Itapeva. Guarda `_unidade_divergente`: cabeçalho ou célula de unidade que
+  contradiz a configurada vira `erro` visível, não preço. `%` na célula de variação
+  não derruba mais o parse.
+- **ScraperAPI** do fallback de mercado ia por `http://` com a chave na query.
+  Agora HTTPS. ⚠️ **A chave trafegou em claro até hoje: rotacionar `SCRAPER_API_KEY`**
+  (3ª vez; ver memória). Não feito neste lote, é ação no painel do fornecedor.
+- Medir: `python -m pytest backend/tests/test_agro_br_unidades.py backend/tests/test_alert_rules_copom.py backend/tests/test_indicators_br_contrato.py backend/tests/test_market_contrato.py -m unit -q`
+
+Dívidas registradas pelo Apolo, fora do lote: `commodities_br.py` é gêmeo sem a
+guarda de unidade (DRY); `test_indicators_br_contrato.py` substitui `httpx.Client`
+global (inócuo, pytest serial). Lotes 2-4 da review continuam pendentes de decisão.
+
+---
+
 ## O que é
 
 Agente de IA multi-domínio, backend em Python/FastAPI:
