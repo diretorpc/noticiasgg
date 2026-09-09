@@ -12,7 +12,7 @@ router = APIRouter()
 
 SYMBOLS = {
     "^BVSP":    ("bolsas", "IBOVESPA"),
-    "SPY":      ("bolsas", "S&P 500"),
+    "^GSPC":    ("bolsas", "S&P 500"),
     "^IXIC":    ("bolsas", "NASDAQ"),
     "^NYA":     ("bolsas", "NYSE"),
     "000001.SS":("bolsas", "Shanghai (SSE)"),
@@ -114,7 +114,7 @@ def _fetch_via_scraperapi(symbol: str) -> dict:
         return {"preco": None, "variacao_pct": None, "erro": "sem chave ScraperAPI"}
     sym_enc = urllib.parse.quote(symbol, safe="")
     target = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym_enc}?interval=1d&range=1d"
-    url = f"http://api.scraperapi.com?api_key={key}&premium=true&url={urllib.parse.quote(target)}"
+    url = f"https://api.scraperapi.com/?api_key={key}&premium=true&url={urllib.parse.quote(target)}"
     try:
         r = httpx.get(url, headers=HEADERS, timeout=25)
         r.raise_for_status()

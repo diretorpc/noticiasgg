@@ -26,8 +26,10 @@ RULES: list[AlertRule] = [
 
 # Datas das reuniões do COPOM 2026 (dia da decisão).
 # Atualizar anualmente com o calendário oficial do Banco Central.
+# Conferido em 09/09/2026 contra o calendário divulgado pelo BCB. Decisão sai
+# sempre na quarta; o conjunto anterior era o calendário de 2025 (todas quintas).
 COPOM_DATES_2026: set[str] = {
-    "2026-01-29", "2026-03-19", "2026-05-07",
-    "2026-06-18", "2026-07-30", "2026-09-17",
-    "2026-11-05", "2026-12-10",
+    "2026-01-28", "2026-03-18", "2026-04-29",
+    "2026-06-17", "2026-08-05", "2026-09-16",
+    "2026-11-04", "2026-12-09",
 }
