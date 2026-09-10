@@ -18,13 +18,17 @@ Regras:
 - Se houver resumo anterior, integre com as novas mensagens sem repetir o que já está resumido"""
 
 
-def summarize(messages: list[dict], existing_summary: str | None = None) -> str:
+def summarize(messages: list[dict], existing_summary: str | None = None) -> str | None:
     """Comprime mensagens antigas em um resumo via Claude Haiku.
 
-    Retorna o resumo atualizado; em caso de falha retorna o resumo anterior (ou string vazia).
+    Devolve o resumo novo, ou **None** quando não conseguiu produzir um. O None
+    é o que separa falha de sucesso: antes esta função devolvia o resumo
+    anterior quando o Haiku caía, quem chamava não tinha como perceber, gravava
+    o resumo velho por cima e apagava as mensagens antigas em seguida. Uma
+    conversa de 22 mensagens perdia 16 sem nada ter sido resumido.
     """
     if not messages:
-        return existing_summary or ""
+        return None
 
     parts: list[str] = []
     if existing_summary:
@@ -53,4 +57,4 @@ def summarize(messages: list[dict], existing_summary: str | None = None) -> str:
                 return block.text.strip()
     except Exception:
         pass
-    return existing_summary or ""
+    return None

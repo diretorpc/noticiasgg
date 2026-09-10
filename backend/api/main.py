@@ -456,16 +456,22 @@ def _maybe_summarize(phone: str) -> None:
         total = supabase.count_history(phone)
         if total <= _SUMMARY_THRESHOLD:
             return
-        batch_size = min(total, 50)
-        all_msgs = supabase.get_history(phone, limit=batch_size)
-        old_msgs = all_msgs[:-_KEEP_RECENT] if len(all_msgs) > _KEEP_RECENT else []
-        if not old_msgs:
+        antigas = supabase.get_history_for_summary(
+            phone, keep_recent=_KEEP_RECENT, limit=50, total=total)
+        if not antigas:
             return
         from backend.services import summarizer
         existing = supabase.get_summary(phone)
-        new_summary = summarizer.summarize(old_msgs, existing)
-        supabase.save_summary(phone, new_summary)
-        supabase.delete_old_history(phone, keep_recent=_KEEP_RECENT)
+        msgs = [{"role": m["role"], "content": m["content"]} for m in antigas]
+        novo = summarizer.summarize(msgs, existing)
+        if not novo:
+            # Falha do Haiku não pode custar histórico. Sem resumo novo, nada é
+            # apagado e o próximo turno tenta de novo.
+            logger.warning("resumo falhou para %s — histórico preservado", phone)
+            return
+        supabase.save_summary(phone, novo)
+        # Corte exato: só o que entrou no resumo.
+        supabase.delete_history_until(phone, antigas[-1]["created_at"])
     except Exception:
         logger.warning("summarization failed for %s", phone, exc_info=True)
 

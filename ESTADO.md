@@ -129,6 +129,52 @@ Lotes 3 e 4 da review continuam pendentes de decisão.
 
 ---
 
+## 10/09/2026 — lote 3 da review: perda de dado (PR #35)
+
+Os dois caminhos que perdiam dado calados. TDD (16 testes, 11 vistos falhar):
+
+- **Mensagem que sumia.** O cliente HTTP repete um POST que estourou o tempo.
+  Quando a reserva já tinha gravado e só a RESPOSTA se perdeu, a repetição batia
+  na chave primária e voltava 409; o código lia 409 como reenvio da Evolution e
+  descartava a mensagem. Os reenvios seguintes batiam no mesmo 409, então a
+  pergunta ficava sem resposta **para sempre**, sem erro no log.
+  Agora `claim_message` grava um token aleatório (`processed_messages.claim_token`,
+  migration 011). No 409 compara: token igual = nossa própria repetição, processa;
+  diferente ou ausente = reenvio, descarta. A repetição do transporte manda o
+  mesmo token porque é a mesma requisição; reenvio é outra execução.
+  **Não há trade-off com resposta dupla** — eu tinha dito ao usuário que haveria,
+  e estava errado.
+- **Histórico que evaporava.** (a) `summarize` devolvia o resumo ANTERIOR quando o
+  Haiku falhava, indistinguível de sucesso, e quem chamava gravava e apagava
+  assim mesmo: 22 mensagens viravam 6 sem nada ter sido resumido. Agora devolve
+  `None` em falha e nada é apagado. (b) A leitura pegava as 50 mais RECENTES,
+  resumia as antigas delas e apagava tudo menos as 6 — então mensagem mais velha
+  que o lote sumia sem nunca ter sido lida. Agora `get_history_for_summary` lê
+  pela ponta VELHA e `delete_history_until` corta exatamente na última resumida.
+  `delete_old_history` foi removida (apagava por posição).
+
+Achados da revisão do Apolo, todos incorporados:
+- **A ordem migration/deploy virou não-problema.** Ele apontou que push é reflexo
+  e SQL é manual, e que inverter traria de volta o bug das três respostas de
+  19/07. O código agora RECUA para o formato antigo quando o PostgREST devolve
+  PGRST204 (coluna ausente). A 011 também dispara `NOTIFY pgrst` para a janela
+  de cache do schema.
+- **`test_dedup_messages.py` estava FORA do portão do CI** por falta de marcador —
+  justo o caminho mais quente. Marcado; duas provas dele nem eram livres de rede
+  (não simulavam `_maybe_summarize` nem `get_summary`). Consertado. O portão
+  subiu de 831 para 841 provas.
+- Mutantes que passavam: token de escopo de módulo (o reenvio cairia no mesmo
+  container e veria o próprio token) e `limit` ignorando `keep_recent` (apagaria
+  o histórico inteiro). Os dois agora têm teste.
+
+Medir: `python -m pytest backend/tests/test_lote3_perda_de_dado.py backend/tests/test_dedup_messages.py -m unit -q`
+
+Ainda pendente: **lote 4** (validador de fatos no motor novo; achado 12a, o
+comando de horário pelo WhatsApp que confirma sem efeito; evals que contam falha
+de leitura como zero invenções). E rotacionar `SCRAPER_API_KEY`.
+
+---
+
 ## O que é
 
 Agente de IA multi-domínio, backend em Python/FastAPI:

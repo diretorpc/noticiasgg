@@ -115,14 +115,18 @@ def test_get_recent_sent_titles_encoda_cutoff_timestamp():
     assert "%2B" in captured["url"]
 
 
-def test_delete_old_history_encoda_cutoff_timestamp():
+def test_delete_history_until_encoda_cutoff_timestamp():
     """Mesma raiz: o cutoff vem do created_at do banco (contém '+00:00'). Sem
-    encoding o DELETE vira 400/no-op e o histórico nunca é podado."""
+    encoding o DELETE vira 400/no-op e o histórico nunca é podado.
+
+    A função mudou de nome em 10/09 (`delete_old_history` apagava por posição,
+    o que levava junto mensagens nunca resumidas); a armadilha do encoding é a
+    mesma e continua valendo."""
     rows = [{"created_at": "2026-06-24T13:03:56.726574+00:00"}]
     captured, fake_handle = _capture_transport(rows)
     with patch.dict(os.environ, _ENV), \
          patch.object(httpx.HTTPTransport, "handle_request", fake_handle):
-        supabase.delete_old_history("553496592975")
+        supabase.delete_history_until("553496592975", "2026-06-24T13:03:56.726574+00:00")
     assert "+00:00" not in captured["url"]
     assert "%2B" in captured["url"]
 
