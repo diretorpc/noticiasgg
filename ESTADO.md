@@ -69,6 +69,66 @@ global (inócuo, pytest serial). Lotes 2-4 da review continuam pendentes de deci
 
 ---
 
+## 09/09/2026 — lote 2 da review: "silêncio que engana" (PR #34)
+
+Seis casos em que o sistema falhava e reportava sucesso. TDD (16 testes, 10 vistos
+falhar; os outros são controles que não podem regredir):
+
+- **Cron contava envio sem gerar seção** (`cron_report.py`): `generate_sections`
+  engole falha por seção e pode devolver lista vazia; o laço de envio não rodava
+  mas `sent += 1` rodava. Agora vira `failed`, e a resposta traz
+  `sections_requested`/`sections_generated` para falha parcial aparecer.
+- **EIA marcava enviado sem entrega** (`alert_checker.py`): janela de 30 dias,
+  então uma queda do WhatsApp perdia a divulgação da semana. Agora `if sent > 0`,
+  igual a preço e Copom.
+- **NewsAPI derrubava os RSS** (`news.py`): erro de transporte escapava e matava
+  o `collect()` antes dos feeds grátis; a chave era exigida mesmo sem usar a
+  NewsAPI. Também passou a tolerar corpo ilegível e payload em forma inesperada.
+- **Timeout agregado descartava cotação** (`market.py`): a exceção subia e levava
+  junto o que o Yahoo direto já tinha entregue.
+- **Grade apagada após carregamento falho** (`schedule-grid.tsx`): o Salvar ficava
+  clicável antes do GET voltar e um PUT mandava grade vazia, apagando horários e
+  desligando o motor com mensagem de sucesso. Trava derivada de `reloadKey`.
+  **Sem teste automatizado** — o painel não tem vitest/testing-library e a exceção
+  foi autorizada. Verificado com `tsc --noEmit` e `eslint`, ambos limpos.
+- **Mudar a voz apagava seções e horário** (`supabase.py`): os dois iam no upsert
+  mesmo como nulos. Agora só entram quando vieram; limpar de propósito continua
+  possível pelo reset, que usa `delete_preferences`.
+
+Duas regressões que EU introduzi, achadas pelo Apolo e consertadas antes do merge:
+1. Isolar o erro da NewsAPI fez o cooldown de 45 min ser marcado mesmo sem ela ter
+   respondido, dobrando o tempo fora do ar. 2. Corrigir isso com prefixo genérico
+   fez 429/401 deixarem de frear o fornecedor — e aí a cota diária nunca drena.
+Resolvido com `news.PREFIXO_SEM_RESPOSTA`, importado pelo `alert_checker`: só erro
+de TRANSPORTE dispensa o freio; resposta ruim gastou cota e freia. O contrato tem
+teste ponta a ponta rodando produtor e consumidor de verdade, porque a versão
+anterior do teste inventava a string e não pegaria a quebra.
+
+Medir: `python -m pytest backend/tests/test_lote2_silencio.py -m unit -q`
+
+Terceira rodada de revisão achou mais duas: (a) fixture de RSS com data CRAVADA
+(`_MAX_AGE` é 48h, então o portão do CI ficaria vermelho em dois dias por motivo
+falso) — agora a data é relativa ao relógio, padrão de `_fresh_rss` em
+`test_news.py`; (b) falha PARCIAL da NewsAPI (uma chamada responde, outra cai)
+dispensava o freio mesmo com cota gasta — agora a decisão vem de telemetria
+(`chamadas` vs `sem_resposta`), e só dispensa quando NENHUMA respondeu.
+Falha parcial do cron passou a sair no log, porque número no corpo do JSON da
+invocação não chega a ninguém.
+
+Dívidas registradas pelo Apolo, fora do lote: painel sem vitest (a trava da grade é
+o pior estrago do lote e não tem teste); `timeout=50` do fallback não limita relógio
+nenhum, porque o executor espera todos os futures na saída (pré-existente);
+`replace_for_phone` ainda apaga antes de gravar (decisão consciente de 07/09).
+
+⚠️ **O achado 12 da review ficou pela METADE**: a parte "voz apaga campos" foi
+consertada aqui, mas a outra — usuário confirma horário pelo WhatsApp, grava em
+`user_preferences`, e o cron lê `report_schedules`, ou seja, confirma sucesso sem
+efeito — segue de pé. Não tirar da lista como se estivesse fechado; é decisão do
+lote 4 (mapear as seções ou responder apontando o painel).
+Lotes 3 e 4 da review continuam pendentes de decisão.
+
+---
+
 ## O que é
 
 Agente de IA multi-domínio, backend em Python/FastAPI:

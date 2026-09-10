@@ -316,16 +316,52 @@ def _collect_rss(client: httpx.Client, feeds: list[tuple[str, str]], vistos: set
     return artigos
 
 
+# Prefixo reservado para a NewsAPI NAO ter respondido (erro de transporte).
+# `alert_checker` importa esta constante para decidir se queima a janela de 45
+# min: fornecedor que respondeu 429/401 gastou cota e merece o freio; quem nem
+# respondeu, nao. Repetir a string nos dois lados deixava o contrato quebrar calado.
+PREFIXO_SEM_RESPOSTA = "newsapi-sem-resposta"
+
+
 def _fetch_newsapi(client: httpx.Client, url: str, params: dict, vistos: set,
-                   errors: list[str] | None, label: str) -> list[dict]:
-    resp = client.get(url, params=params)
+                   errors: list[str] | None, label: str,
+                   telemetria: dict | None = None) -> list[dict]:
+    if telemetria is not None:
+        telemetria["chamadas"] = telemetria.get("chamadas", 0) + 1
+    try:
+        resp = client.get(url, params=params)
+    except httpx.HTTPError as e:
+        # Erro de transporte do fornecedor pago nao pode derrubar o collect()
+        # inteiro: os RSS gratis vem depois e continuam funcionando sozinhos.
+        if telemetria is not None:
+            telemetria["sem_resposta"] = telemetria.get("sem_resposta", 0) + 1
+        if errors is not None:
+            errors.append(f"newsapi {label}: {type(e).__name__}")
+        return []
     if resp.status_code != 200:
         # 429 = limite diário do free tier estourado — reportar para o auto-alerta
         if errors is not None:
             errors.append(f"newsapi {label}: HTTP {resp.status_code}")
         return []
+    # 200 com corpo quebrado ou com forma inesperada: JSONDecodeError nao e
+    # httpx.HTTPError, e lista no lugar de objeto estourava AttributeError.
+    # Os dois escapavam do except acima e derrubavam os RSS junto. Nao usam o
+    # prefixo de sem-resposta: o fornecedor respondeu e a cota foi gasta.
+    try:
+        payload = resp.json()
+    except ValueError:
+        if errors is not None:
+            errors.append(f"newsapi {label}: resposta ilegivel")
+        return []
+    lista = payload.get("articles") if isinstance(payload, dict) else None
+    if not isinstance(lista, list):
+        if errors is not None:
+            errors.append(f"newsapi {label}: resposta em formato inesperado")
+        return []
     artigos = []
-    for a in resp.json().get("articles", []):
+    for a in lista:
+        if not isinstance(a, dict):
+            continue
         article_url = a.get("url", "")
         published_at = a.get("publishedAt")
         if article_url in vistos or not _is_fresh(published_at):
@@ -344,11 +380,17 @@ def _fetch_newsapi(client: httpx.Client, url: str, params: dict, vistos: set,
 def collect(include_ai: bool = True, include_newsapi: bool = True,
             errors: list[str] | None = None) -> list[dict]:
     api_key = os.getenv("NEWS_API_KEY", "")
-    if not api_key:
+    if include_newsapi and not api_key:
         raise ValueError("NEWS_API_KEY não configurada")
 
     artigos = []
     vistos: set = set()
+
+    # Conta chamadas e quantas nao tiveram resposta nenhuma. So quando NENHUMA
+    # respondeu e que a janela de 45 min do alert_checker deve ser dispensada:
+    # se uma respondeu, a cota daquele ciclo ja foi gasta e insistir a cada 15
+    # min impede a janela diaria de drenar.
+    telemetria: dict = {}
 
     with httpx.Client(timeout=15, headers=_BROWSER_HEADERS) as client:
         if include_newsapi:
@@ -360,7 +402,7 @@ def collect(include_ai: bool = True, include_newsapi: bool = True,
                 "language": "en",
                 "sortBy": "publishedAt",
                 "pageSize": 15,
-            }, vistos, errors, "finance"))
+            }, vistos, errors, "finance", telemetria))
 
             # BR: top-headlines categoria business
             artigos.extend(_fetch_newsapi(client, NEWSAPI_HEADLINES, {
@@ -368,7 +410,7 @@ def collect(include_ai: bool = True, include_newsapi: bool = True,
                 "country": "br",
                 "category": "business",
                 "pageSize": 10,
-            }, vistos, errors, "br"))
+            }, vistos, errors, "br", telemetria))
 
             # IA/Tech: /everything com fontes tech + query de IA
             if include_ai:
@@ -379,13 +421,18 @@ def collect(include_ai: bool = True, include_newsapi: bool = True,
                     "language": "en",
                     "sortBy": "publishedAt",
                     "pageSize": 10,
-                }, vistos, errors, "ai"))
+                }, vistos, errors, "ai", telemetria))
 
         # RSS internacionais são grátis e sempre coletados; os de IA seguem o
         # include_ai, igual ao bloco de IA do NewsAPI acima. Sem isso o alert_checker
         # pedia include_ai=False e mesmo assim recebia MIT Tech Review/VentureBeat,
         # que ocupavam as 5 vagas de classificação com artigos de nota 1 e deixavam
         # a notícia de mundo/economia na fila (visto em produção 21/07/2026).
+            chamadas = telemetria.get("chamadas", 0)
+            if chamadas and telemetria.get("sem_resposta", 0) == chamadas and errors is not None:
+                errors.append(
+                    f"{PREFIXO_SEM_RESPOSTA}: nenhuma das {chamadas} chamadas respondeu")
+
         feeds = _feeds("rss_feeds", _RSS_FEEDS)
         if include_ai:
             feeds = feeds + _feeds("rss_feeds_ai", _RSS_FEEDS_AI)  # sem += : não muta a lista de origem
