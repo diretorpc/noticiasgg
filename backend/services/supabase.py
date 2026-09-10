@@ -153,19 +153,41 @@ def count_history(phone: str) -> int:
             return 0
 
 
-def delete_old_history(phone: str, keep_recent: int = 6) -> None:
-    """Deleta todas as mensagens exceto as `keep_recent` mais recentes."""
+def get_history_for_summary(phone: str, keep_recent: int = 6, limit: int = 50,
+                            total: int | None = None) -> list[dict]:
+    """Mensagens mais ANTIGAS que as `keep_recent` mais recentes, em ordem
+    cronológica e com `created_at` para o corte do delete.
+
+    Lê pela ponta velha de propósito: são essas que devem ser comprimidas. A
+    versão anterior lia as 50 mais RECENTES, resumia as antigas DELAS e depois
+    apagava tudo menos as 6 — então qualquer mensagem mais velha que o lote
+    sumia sem nunca ter entrado num resumo.
+    """
+    if total is None:
+        total = count_history(phone)
+    quantas = min(max(total - keep_recent, 0), limit)
+    if quantas <= 0:
+        return []
     with _client() as c:
         r = c.get(
-            f"/conversation_history?phone=eq.{_f(phone)}&select=created_at"
-            f"&order=created_at.desc&limit=1&offset={keep_recent}",
+            f"/conversation_history?phone=eq.{_f(phone)}"
+            f"&select=role,content,created_at&order=created_at.asc&limit={quantas}"
         )
         r.raise_for_status()
-        rows = r.json()
-        if not rows:
-            return
-        cutoff = rows[0]["created_at"]
-        c.delete(f"/conversation_history?phone=eq.{_f(phone)}&created_at=lte.{_f(cutoff)}").raise_for_status()
+        return r.json()
+
+
+def delete_history_until(phone: str, cutoff: str) -> None:
+    """Apaga exatamente até `cutoff` (inclusive) — o `created_at` da última
+    mensagem que ENTROU no resumo. Nunca apaga o que não foi resumido.
+
+    O `_f` no cutoff não é enfeite: o `created_at` do banco traz `+00:00` e sem
+    encoding o DELETE vira um no-op silencioso.
+    """
+    with _client() as c:
+        c.delete(
+            f"/conversation_history?phone=eq.{_f(phone)}&created_at=lte.{_f(cutoff)}"
+        ).raise_for_status()
 
 
 def get_summary(phone: str) -> str | None:
@@ -334,10 +356,37 @@ def claim_message(message_id: str) -> bool:
     KEY de processed_messages: um POST com etiqueta repetida devolve 409 e ninguém
     sobrescreve. NÃO usa merge-duplicates de propósito — precisamos do conflito.
     """
+    token = secrets.token_hex(16)
     with _client() as c:
-        r = c.post("/processed_messages", json={"message_id": message_id})
-        if r.status_code == 409:  # violação de PK → etiqueta já reservada
-            return False
+        r = c.post("/processed_messages",
+                   json={"message_id": message_id, "claim_token": token})
+        if r.status_code == 400 and ("PGRST204" in r.text or "claim_token" in r.text):
+            # Migration 011 ainda não aplicada. Estourar aqui faria o webhook
+            # cair no caminho "processa mesmo assim" e responder a CADA reenvio
+            # da Evolution — o bug das três respostas diferentes de 19/07.
+            # Recua para o formato antigo: a ordem entre migration e deploy
+            # deixa de importar, e a dedução por PK continua valendo.
+            logger.warning("claim_message: coluna claim_token ausente — migration 011 pendente")
+            r = c.post("/processed_messages", json={"message_id": message_id})
+            if r.status_code == 409:
+                return False
+            r.raise_for_status()
+            return True
+        if r.status_code == 409:  # violação de PK → alguém já reservou
+            # ...mas quem? O transporte repete um POST que estourou o tempo, e
+            # nesse caso o conflito é contra a NOSSA própria gravação, que
+            # venceu e só perdeu a resposta. Tratar isso como reenvio deixava a
+            # mensagem original sem resposta para sempre. A repetição manda o
+            # mesmo token; um reenvio da Evolution é outra execução, com token
+            # novo. Linha antiga (antes da migration 011) vem sem token e
+            # continua valendo como reserva anterior.
+            existente = c.get(
+                f"/processed_messages?message_id=eq.{_f(message_id)}&select=claim_token")
+            existente.raise_for_status()
+            linhas = existente.json()
+            if not linhas:
+                return True  # sumiu entre o conflito e a leitura: responder > silêncio
+            return linhas[0].get("claim_token") == token
         r.raise_for_status()
         return True
 

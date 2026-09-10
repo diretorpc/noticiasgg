@@ -7,10 +7,16 @@ da PRIMARY KEY em processed_messages — aqui testamos o mapeamento da resposta.
 """
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 import backend.services.supabase as supabase
 from backend.api.main import app
+
+# Arquivo sem nenhuma chamada de rede. Ficou anos sem marcador e por isso fora
+# do portao do CI (`pytest backend -m unit`) — justo o caminho mais quente do
+# sistema. Achado da revisao de 10/09.
+pytestmark = pytest.mark.unit
 
 
 def _base_env(monkeypatch):
@@ -18,11 +24,15 @@ def _base_env(monkeypatch):
     monkeypatch.setenv("SUPABASE_KEY", "k")
 
 
-def _mock_client(status_code: int) -> MagicMock:
+def _mock_client(status_code: int, token_existente: str = "token-de-outra-execucao") -> MagicMock:
     mock_client = MagicMock()
     mock_resp = MagicMock()
     mock_resp.status_code = status_code
-    mock_client.__enter__.return_value.post.return_value = mock_resp
+    ctx = mock_client.__enter__.return_value
+    ctx.post.return_value = mock_resp
+    resposta_get = MagicMock()
+    resposta_get.json.return_value = [{"claim_token": token_existente}]
+    ctx.get.return_value = resposta_get
     return mock_client
 
 
@@ -33,7 +43,10 @@ def test_claim_message_nova_retorna_true(monkeypatch):
 
 
 def test_claim_message_duplicada_retorna_false(monkeypatch):
-    """409 = violação de chave primária = etiqueta já reservada = reenvio."""
+    """409 cujo token pertence a OUTRA execução = reenvio da Evolution.
+    Desde 10/09 o 409 não é mais suficiente sozinho: quando o token da linha é
+    o nosso, o conflito veio da própria repetição do transporte e a mensagem
+    precisa ser processada. Esse lado vive em test_lote3_perda_de_dado.py."""
     _base_env(monkeypatch)
     with patch("backend.services.supabase.httpx.Client", return_value=_mock_client(409)):
         assert supabase.claim_message("3EB0DB360B218B04C777E3") is False
@@ -75,7 +88,9 @@ def test_webhook_processa_mensagem_nova():
          patch("backend.api.main.supabase.get_preferences", return_value=None), \
          patch("backend.api.main._detect_preference_intent", return_value={"intent": "message"}), \
          patch("backend.api.main.supabase.get_history", return_value=[]), \
+         patch("backend.api.main.supabase.get_summary", return_value=None), \
          patch("backend.api.main.supabase.save_message"), \
+         patch("backend.api.main._maybe_summarize"), \
          patch("backend.api.main.reporter.generate_report", return_value="resposta"), \
          patch("backend.api.main.whatsapp.send_message") as mock_send:
         resp = client.post("/api/webhook", json=_payload())
@@ -90,7 +105,9 @@ def test_webhook_claim_falha_processa_mesmo_assim():
          patch("backend.api.main.supabase.get_preferences", return_value=None), \
          patch("backend.api.main._detect_preference_intent", return_value={"intent": "message"}), \
          patch("backend.api.main.supabase.get_history", return_value=[]), \
+         patch("backend.api.main.supabase.get_summary", return_value=None), \
          patch("backend.api.main.supabase.save_message"), \
+         patch("backend.api.main._maybe_summarize"), \
          patch("backend.api.main.reporter.generate_report", return_value="resposta"), \
          patch("backend.api.main.whatsapp.send_message") as mock_send:
         resp = client.post("/api/webhook", json=_payload())
