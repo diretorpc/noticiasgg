@@ -91,6 +91,8 @@ falhar; os outros são controles que não podem regredir):
   desligando o motor com mensagem de sucesso. Trava derivada de `reloadKey`.
   **Sem teste automatizado** — o painel não tem vitest/testing-library e a exceção
   foi autorizada. Verificado com `tsc --noEmit` e `eslint`, ambos limpos.
+  **Provado à mão pelo Matheus em 11/09 09:06:** o botão só acende depois da
+  grade carregar, e salvar sem mudar nada grava normal.
 - **Mudar a voz apagava seções e horário** (`supabase.py`): os dois iam no upsert
   mesmo como nulos. Agora só entram quando vieram; limpar de propósito continua
   possível pelo reset, que usa `delete_preferences`.
@@ -168,6 +170,11 @@ Achados da revisão do Apolo, todos incorporados:
   o histórico inteiro). Os dois agora têm teste.
 
 Medir: `python -m pytest backend/tests/test_lote3_perda_de_dado.py backend/tests/test_dedup_messages.py -m unit -q`
+
+**Provado em produção 11/09 08:03:** Matheus mandou duas mensagens seguidas; uma
+resposta para cada, sem repetição. O banco registrou exatamente duas reservas, as
+duas com `claim_token` de 32 caracteres. Conferir:
+`select processed_at, claim_token is not null from processed_messages order by processed_at desc limit 5`
 
 Ainda pendente: **lote 4** (validador de fatos no motor novo; achado 12a, o
 comando de horário pelo WhatsApp que confirma sem efeito; evals que contam falha
