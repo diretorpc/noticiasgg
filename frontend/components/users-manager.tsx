@@ -15,7 +15,7 @@ function UserForm({ user }: { user: AdminUser }) {
   const [audioMedia, setAudioMedia] = useState(Boolean(p?.audio_for_media));
   const [voice, setVoice] = useState(VOICES.includes(p?.tts_voice ?? "") ? p!.tts_voice! : "nova");
   const [speed, setSpeed] = useState(() => {
-    const s = Number(p?.tts_speed ?? 0.85);
+    const s = Number(p?.tts_speed || 0.85);
     return Number.isFinite(s) ? Math.min(1.5, Math.max(0.5, s)) : 0.85;
   });
   const [status, setStatus] = useState<string | null>(null);
