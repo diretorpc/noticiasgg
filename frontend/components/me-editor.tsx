@@ -10,7 +10,10 @@ export function MeEditor({ token, data }: { token: string; data: MeData }) {
   const [audioText, setAudioText] = useState(Boolean(data.audio.audio_for_text));
   const [audioMedia, setAudioMedia] = useState(Boolean(data.audio.audio_for_media));
   const [voice, setVoice] = useState(VOICES.includes(data.audio.tts_voice ?? "") ? data.audio.tts_voice! : "nova");
-  const [speed, setSpeed] = useState(Math.min(1.5, Math.max(0.5, data.audio.tts_speed ?? 0.85)));
+  const [speed, setSpeed] = useState(() => {
+    const s = Number(data.audio.tts_speed ?? 0.85);
+    return Number.isFinite(s) ? Math.min(1.5, Math.max(0.5, s)) : 0.85;
+  });
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
