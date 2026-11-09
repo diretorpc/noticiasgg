@@ -280,17 +280,16 @@ def test_artigo_de_tamanho_real_entra_inteiro_na_conversa():
 def test_no_relatorio_a_ferramenta_nao_expulsa_os_coletores():
     """ACHADO 4: `send_report` chama com secoes E com as ferramentas ligadas. Sem
     teto apertado, o texto raspado empurrava `indicators_*`, `commodities_br`,
-    `Noticias` e `Pesquisas` para fora do corpus — e o validador do relatorio
+    `Noticias` para fora do corpus — e o validador do relatorio
     apagava linha verdadeira por nao acha-la ali."""
     data = {
         "market": {"bolsas": {"IBOV": {"preco": 168277}}},
         "indicators_br": {"selic": 10.5},
         "commodities_br": {"boi": 312.4},
         "news": [{"titulo": "Manchete importante"}],
-        "polls_br": [{"instituto": "Datafolha"}],
     }
     corpus = integrity.build_fact_corpus(data, tool_corpus=["z" * 9000])
-    for bloco in ("market:", "indicators_br:", "commodities_br:", "Notícias:", "Pesquisas:"):
+    for bloco in ("market:", "indicators_br:", "commodities_br:", "Notícias:"):
         assert bloco in corpus, f"{bloco} foi expulso pelo texto raspado"
 
 

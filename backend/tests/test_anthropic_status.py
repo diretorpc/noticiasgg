@@ -141,8 +141,7 @@ def test_o_endpoint_publico_NAO_sonda():
                         get_recent_sent_titles=lambda *a, **k: [],
                         count_recent_broadcasts=lambda *a, **k: 0,
                         count_recent_alert_messages=lambda *a, **k: 0,
-                        get_news_log=lambda *a, **k: {"itens": [], "truncado": False},
-                        get_polls=lambda *a, **k: []), \
+                        get_news_log=lambda *a, **k: {"itens": [], "truncado": False}), \
          patch("backend.services.health.whatsapp.connection_state", return_value="open"):
         health.collect_status()
     sonda.assert_not_called()

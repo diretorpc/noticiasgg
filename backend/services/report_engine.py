@@ -5,7 +5,7 @@ import os
 
 from backend.collectors import (
     market, crypto, indicators_us, indicators_br, news,
-    commodities_br, politics_br, polls_br,
+    commodities_br, politics_br,
 )
 from backend.services import report_prompts, integrity
 from backend.services.secrets_mask import sanitize_error
@@ -73,11 +73,8 @@ def adapt_analise(market_out: dict, crypto_out: list, ind_br: dict,
     }}
 
 
-def adapt_politica(politics_out: list, polls_out: list) -> dict:
-    return {"data": {
-        "politica": _safe_list(politics_out),
-        "pesquisas": _safe_list(polls_out),
-    }}
+def adapt_politica(politics_out: list) -> dict:
+    return {"data": {"politica": _safe_list(politics_out)}}
 
 
 def _safe_collect(fn):
@@ -108,7 +105,7 @@ def _collect(section: str) -> dict:
             _safe_collect(news.collect),
         )
     if section == "politica":
-        return adapt_politica(_safe_collect(politics_br.collect), _safe_collect(polls_br.collect))
+        return adapt_politica(_safe_collect(politics_br.collect))
     raise KeyError(section)
 
 

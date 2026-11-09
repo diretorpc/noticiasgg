@@ -19,7 +19,6 @@ def test_collect_status_tudo_ok():
             count_recent_alert_messages=lambda *a, **k: 5,
             count_recent_broadcasts=lambda *a, **k: 9,
             get_news_log=lambda *a, **k: {"itens": [{"news_id": "x"}]},
-            get_polls=lambda *a, **k: [{"instituto": "X"}],
          ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
         st = health.collect_status()
     assert st["status"] == "ok"
@@ -39,7 +38,6 @@ def test_collect_status_dedup_quebrado_vira_error():
             count_recent_alert_messages=lambda *a, **k: 5,
             count_recent_broadcasts=lambda *a, **k: 9,
             get_news_log=lambda *a, **k: {"itens": [{"news_id": "x"}]},
-            get_polls=lambda *a, **k: [{"instituto": "X"}],
          ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
         st = health.collect_status()
     assert st["status"] == "error"
@@ -54,7 +52,6 @@ def test_collect_status_evolution_desconectada_vira_warn():
             count_recent_alert_messages=lambda *a, **k: 5,
             count_recent_broadcasts=lambda *a, **k: 1,
             get_news_log=lambda *a, **k: {"itens": [{"news_id": "x"}]},
-            get_polls=lambda *a, **k: [{"instituto": "X"}],
          ), patch("backend.services.health.whatsapp.connection_state", return_value="close"):
         st = health.collect_status()
     assert st["status"] == "warn"
@@ -70,7 +67,6 @@ def test_collect_status_evolution_excecao_degrada_para_warn():
             count_recent_alert_messages=lambda *a, **k: 5,
             count_recent_broadcasts=lambda *a, **k: 1,
             get_news_log=lambda *a, **k: {"itens": [{"news_id": "x"}]},
-            get_polls=lambda *a, **k: [{"instituto": "X"}],
          ), patch("backend.services.health.whatsapp.connection_state",
                   side_effect=RuntimeError("timeout")):
         st = health.collect_status()
@@ -89,7 +85,6 @@ def test_collect_status_broadcast_sem_registro_no_log_vira_error():
             count_recent_alert_messages=lambda *a, **k: 5,
             count_recent_broadcasts=lambda *a, **k: 3,
             get_news_log=lambda *a, **k: {"itens": []},
-            get_polls=lambda *a, **k: [{"instituto": "X"}],
          ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
         st = health.collect_status()
     assert st["checks"]["news_log"]["status"] == "error"
@@ -110,7 +105,6 @@ def test_collect_status_registro_indisponivel_vira_warn_nao_escrita_silenciosa()
             count_recent_alert_messages=lambda *a, **k: 5,
             count_recent_broadcasts=lambda *a, **k: 3,
             get_news_log=lambda *a, **k: {"itens": [], "aviso": "registro indisponível"},
-            get_polls=lambda *a, **k: [{"instituto": "X"}],
          ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
         st = health.collect_status()
     assert st["checks"]["news_log"]["status"] == "warn"
@@ -135,7 +129,6 @@ def test_collect_status_news_log_nao_chama_count_recent_broadcasts_duas_vezes():
             count_recent_alert_messages=lambda *a, **k: 5,
             count_recent_broadcasts=_contar,
             get_news_log=lambda *a, **k: {"itens": [{"news_id": "x"}]},
-            get_polls=lambda *a, **k: [{"instituto": "X"}],
          ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
         health.collect_status()
     assert chamadas["n"] == 1
@@ -152,7 +145,6 @@ def test_collect_status_news_log_excecao_vira_warn_nao_error():
             count_recent_alert_messages=lambda *a, **k: 5,
             count_recent_broadcasts=lambda *a, **k: 1,
             get_news_log=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("timeout")),
-            get_polls=lambda *a, **k: [{"instituto": "X"}],
          ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
         st = health.collect_status()
     assert st["checks"]["news_log"]["status"] == "warn"
@@ -169,7 +161,6 @@ def test_collect_status_dia_calmo_sem_broadcast_nem_log_fica_ok():
             count_recent_alert_messages=lambda *a, **k: 5,
             count_recent_broadcasts=lambda *a, **k: 0,
             get_news_log=lambda *a, **k: {"itens": []},
-            get_polls=lambda *a, **k: [{"instituto": "X"}],
          ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
         st = health.collect_status()
     assert st["checks"]["news_log"]["status"] == "ok"
@@ -184,7 +175,6 @@ _STATUS_OK = {
         "broadcasts": {"status": "ok", "enviados_24h": 9},
         "news_log": {"status": "ok", "broadcasts_24h": 9, "registrado": True},
         "evolution": {"status": "ok", "estado": "open"},
-        "polls": {"status": "ok", "institutos": 3},
     },
     "checked_at": "2026-06-25T11:00:00+00:00",
 }
@@ -197,7 +187,6 @@ _STATUS_PROBLEMA = {
         "broadcasts": {"status": "ok", "enviados_24h": 9},
         "news_log": {"status": "ok", "broadcasts_24h": 9, "registrado": True},
         "evolution": {"status": "ok", "estado": "open"},
-        "polls": {"status": "ok", "institutos": 3},
     },
     "checked_at": "2026-06-25T11:00:00+00:00",
 }
@@ -329,7 +318,6 @@ def test_collect_status_nao_toca_a_rede_de_noticias():
          patch("backend.services.health.supabase.get_recent_sent_titles", return_value=[]), \
          patch("backend.services.health.supabase.count_recent_broadcasts", return_value=0), \
          patch("backend.services.health.supabase.get_news_log", return_value={"itens": []}), \
-         patch("backend.services.health.supabase.get_polls", return_value=[{"i": 1}]), \
          patch("backend.services.health.whatsapp.connection_state", return_value="open"):
         st = health.collect_status()
     espiao.assert_not_called()
@@ -497,7 +485,6 @@ def test_entrega_por_destinatario_secando_vira_error_com_a_mensagem_certa():
             count_recent_broadcasts=lambda *a, **k: 7,
             count_recent_alert_messages=lambda *a, **k: 0,
             get_news_log=lambda *a, **k: {"itens": [{"news_id": "x"}]},
-            get_polls=lambda *a, **k: [{"instituto": "X"}],
          ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
         st = health.collect_status()
     nl = st["checks"]["news_log"]
@@ -524,7 +511,6 @@ def test_falha_na_contagem_de_entregas_nao_apaga_o_alarme_de_escrita_silenciosa(
             count_recent_broadcasts=lambda *a, **k: 7,
             count_recent_alert_messages=_explode,
             get_news_log=lambda *a, **k: {"itens": []},   # A4 de verdade
-            get_polls=lambda *a, **k: [{"instituto": "X"}],
          ), patch("backend.services.health.whatsapp.connection_state", return_value="open"):
         st = health.collect_status()
     nl = st["checks"]["news_log"]

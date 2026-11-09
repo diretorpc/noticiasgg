@@ -12,11 +12,11 @@ O QUE ESTA TRAVA **NÃO** PEGA (medido em 13/08/2026; tudo latente, zero
 ocorrência no portão do CI de hoje — mas não confie nela como garantia total):
 
 - **Exceção engolida por `asyncio.gather(return_exceptions=True)`.** Herdar de
-  BaseException protege do `except Exception`, não disto. O padrão existe em
-  produção: `collectors/polls_br.py:285` e `:300`.
+  BaseException protege do `except Exception`, não disto. O padrão existiu em
+  produção até 11/2026 em `collectors/polls_br.py` (aposentado, hoje em `_deprecated/`).
 - **Rede aberta dentro de thread.** A conexão É barrada, mas a exceção não sobe
-  para o teste, que segue verde com o caminho degradado. Alvo: `polls_br.py:326`
-  (`pool.submit`). O TestClient do FastAPI NÃO cai nisto — foi medido.
+  para o teste, que segue verde com o caminho degradado. O exemplo era o
+  `pool.submit` do `polls_br.py` (aposentado em 11/2026). O TestClient do FastAPI NÃO cai nisto — foi medido.
 - **Conexão já aberta antes do teste.** A trava vigia a ABERTURA, não o uso: um
   cliente httpx guardado em nível de módulo reaproveita conexão viva e atravessa.
 - **Consulta de nome (DNS) e envio UDP.** Por isso a promessa aqui é "sem
@@ -81,7 +81,7 @@ def _embrulhar(nome: str) -> None:
 def _embrulhar_windows_assincrono() -> None:
     """No Windows, conexão assíncrona usa `ConnectEx` do sistema e NÃO passa por
     socket.connect. Sem isto a trava seria mais fraca na máquina do Matheus do
-    que no CI (Linux, onde passa) — e `collectors/polls_br.py` é todo assíncrono."""
+    que no CI (Linux, onde passa) — e `collectors/polls_br.py` (aposentado em 11/2026) era todo assíncrono."""
     try:
         from asyncio.windows_events import IocpProactor
     except ImportError:

@@ -104,12 +104,6 @@ def collect_status() -> dict:
     except Exception as e:
         checks["evolution"] = {"status": "warn", "message": str(e)[:120]}
 
-    try:
-        polls = supabase.get_polls()
-        checks["polls"] = {"status": "ok" if polls else "warn", "institutos": len(polls) if polls else 0}
-    except Exception as e:
-        checks["polls"] = {"status": "error", "message": str(e)[:120]}
-
     has_error = any(v.get("status") == "error" for v in checks.values())
     has_warn = any(v.get("status") == "warn" for v in checks.values())
     overall = "error" if has_error else ("warn" if has_warn else "ok")
@@ -258,12 +252,6 @@ def _line_anthropic(v: dict) -> str:
     return f"• {icone} Anthropic: {v.get('message', 'indisponível')}"
 
 
-def _line_polls(v: dict) -> str:
-    if v.get("status") != "error":
-        return f"• Pesquisas: {v.get('institutos', 0)} institutos"
-    return f"• {_ICON['error']} Pesquisas: {v.get('message', 'erro')}"
-
-
 def _line_news_sources(v: dict) -> str:
     if v.get("status") == "ok":
         return f"• Fontes de notícia: {v.get('vivas', 0)}/{v.get('total', 0)} entregando"
@@ -297,7 +285,6 @@ def format_digest(status: dict) -> str:
         lines.append(_line_news_sources(checks["news_sources"]))
     if "soja_fretes" in checks:  # ausente quando veio do collect_status simples
         lines.append(_line_soja_fretes(checks["soja_fretes"]))
-    lines.append(_line_polls(checks.get("polls", {})))
     return "\n".join(lines)
 
 

@@ -13,7 +13,7 @@ per-user preferences without touching code.
 WhatsApp (user)
   → Evolution API (Hostinger VPS)
     → FastAPI backend (Vercel) — webhook + cron jobs
-      → collectors — market, crypto, FRED, BCB, news, commodities, politics, polls
+      → collectors — market, crypto, FRED, BCB, news, commodities, politics
       → Claude API — report generation + chat with tools (web search, stock data, agro data)
       → Supabase — message history, per-user config, dedup
       → Evolution API — sending the reply
