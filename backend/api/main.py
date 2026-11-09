@@ -178,10 +178,6 @@ _TTS_SPEED_NORMAL_RE = re.compile(
     r"|\bvolta\b.{0,15}\bvelocidade\b",
     re.IGNORECASE,
 )
-_TTS_SPEED_ANY_RE = re.compile(
-    r"\b(r[áa]pido|devagar|veloz|lento|acelerado|pausado)\b",
-    re.IGNORECASE,
-)
 _TTS_VOICE_RE = re.compile(
     r"\b(muda[r]?|usa[r]?|quero|coloca[r]?|ativa[r]?|testa[r]?|bota[r]?|tenta[r]?)\b.{0,20}\bvoz\b.{0,15}(alloy|echo|fable|nova|onyx|shimmer)"
     r"|\bvoz\s+(para\s+|pra\s+)?(alloy|echo|fable|nova|onyx|shimmer)"
@@ -245,86 +241,12 @@ def _quick_tts_check(text: str, current_speed: float = 0.85) -> dict | None:
     return None
 
 
-_AUDIO_TEXT_ON_RE = re.compile(
-    r"\b(texto|textos|mensagens?\s+de\s+texto)\b.{0,25}\b(áudio|audio)\b"
-    r"|\b(responde|resposta|respostas)\b.{0,25}\b(texto|textos)\b.{0,25}\b(áudio|audio)\b"
-    r"|\b(quero|ativa|liga)\b.{0,15}\b(áudio|audio)\b.{0,25}\b(texto|textos|mensagens?)\b",
-    re.IGNORECASE,
-)
-_AUDIO_MEDIA_ON_RE = re.compile(
-    r"\b(imagens?|fotos?|documentos?|pdf|mídia|mídias|arquivos?)\b.{0,25}\b(áudio|audio)\b"
-    r"|\b(responde|resposta)\b.{0,25}\b(imagens?|fotos?|documentos?|mídia)\b.{0,25}\b(áudio|audio)\b",
-    re.IGNORECASE,
-)
-_AUDIO_ALL_ON_RE = re.compile(
-    # "tudo/qualquer coisa em áudio"
-    r"\b(tudo|todos?|qualquer)\b.{0,20}\b(áudio|audio|voz)\b"
-    # verbo de ação (qualquer conjugação via radical) + áudio
-    r"|\b(quer\w*|ativ\w*|lig\w*|habilit\w*|prefer\w*|respond\w*|pod\w*|consegu\w*|fal\w*|mand\w*|envi\w*)\b.{0,30}\b(áudio|audio|voz)\b"
-    # áudio + confirmação/pedido
-    r"|\b(áudio|audio|voz)\b.{0,25}\b(ativ\w*|lig\w*|resposta|modo|por\s+favor|pfv|pls|please)\b",
-    re.IGNORECASE,
-)
-_AUDIO_TEXT_OFF_RE = re.compile(
-    r"\b(texto|textos|mensagens?\s+de\s+texto)\b.{0,25}\b(texto|sem\s+áudio|desativa|só\s+texto)\b"
-    r"|\b(desativa|desliga|sem)\b.{0,15}\b(áudio|audio)\b.{0,25}\b(texto|textos|mensagens?)\b",
-    re.IGNORECASE,
-)
-_AUDIO_MEDIA_OFF_RE = re.compile(
-    r"\b(imagens?|fotos?|documentos?|pdf|mídia|mídias)\b.{0,25}\b(texto|sem\s+áudio|desativa)\b"
-    r"|\b(desativa|desliga|sem)\b.{0,15}\b(áudio|audio)\b.{0,25}\b(imagens?|fotos?|mídia)\b",
-    re.IGNORECASE,
-)
-_AUDIO_ALL_OFF_RE = re.compile(
-    r"\b(desativa|desliga|para|cancela|sem|desabilita|desativar)\b.{0,25}\b(áudio|audio)\b"
-    r"|\b(resposta\s+em\s+texto|modo\s+texto|tudo\s+em\s+texto|só\s+texto|somente\s+texto)\b",
-    re.IGNORECASE,
-)
-
-
-def _quick_audio_check(text: str) -> dict | None:
-    """Pré-check determinístico para preferência de áudio, evitando falsos negativos do LLM."""
-    # Se tem palavras de velocidade (rápido, devagar, veloz...), não é ativação de áudio
-    if _TTS_SPEED_ANY_RE.search(text):
-        return None
-    # Verificar padrões específicos antes do padrão geral
-    if _AUDIO_TEXT_ON_RE.search(text) and not _AUDIO_MEDIA_ON_RE.search(text):
-        return {
-            "intent": "preference", "sections": None, "report_time": None,
-            "audio_for_text": True, "audio_for_media": None, "reset": False,
-            "reply": "Certo! Vou responder suas mensagens de texto em áudio. Para imagens e documentos continuo em texto.",
-        }
-    if _AUDIO_MEDIA_ON_RE.search(text) and not _AUDIO_TEXT_ON_RE.search(text):
-        return {
-            "intent": "preference", "sections": None, "report_time": None,
-            "audio_for_text": None, "audio_for_media": True, "reset": False,
-            "reply": "Certo! Vou responder imagens, fotos e documentos em áudio. Textos continuam em texto.",
-        }
-    if _AUDIO_TEXT_OFF_RE.search(text) and not _AUDIO_MEDIA_OFF_RE.search(text):
-        return {
-            "intent": "preference", "sections": None, "report_time": None,
-            "audio_for_text": False, "audio_for_media": None, "reset": False,
-            "reply": "Entendido! Vou responder suas mensagens de texto em texto novamente.",
-        }
-    if _AUDIO_MEDIA_OFF_RE.search(text) and not _AUDIO_TEXT_OFF_RE.search(text):
-        return {
-            "intent": "preference", "sections": None, "report_time": None,
-            "audio_for_text": None, "audio_for_media": False, "reset": False,
-            "reply": "Entendido! Vou responder imagens e documentos em texto novamente.",
-        }
-    if _AUDIO_ALL_ON_RE.search(text):
-        return {
-            "intent": "preference", "sections": None, "report_time": None,
-            "audio_for_text": True, "audio_for_media": True, "reset": False,
-            "reply": "Certo! A partir de agora respondo tudo em áudio — textos, imagens e documentos. Para voltar ao texto, é só falar 'desativa áudio'.",
-        }
-    if _AUDIO_ALL_OFF_RE.search(text):
-        return {
-            "intent": "preference", "sections": None, "report_time": None,
-            "audio_for_text": False, "audio_for_media": False, "reset": False,
-            "reply": "Entendido! Vou responder tudo em texto daqui pra frente.",
-        }
-    return None
+# Não há mais pré-check de ÁUDIO por regex: `_quick_audio_check` LIGAVA o áudio em
+# "não quero áudio", "sem áudio por favor", "prefere uma voz masculina" (13/20 numa
+# amostra de 09/11/2026). Ele existia para cobrir "falsos negativos do LLM" — que eram,
+# na verdade, a cerca de código descartando 100% das respostas do Haiku. Consertada a
+# cerca, o Haiku acertou 20/20 nas mesmas frases. O de velocidade/voz acima fica:
+# acerta, e faz a conta da velocidade sem depender do modelo.
 
 
 _PREFERENCE_SYSTEM = """Você é um parser de intenções. Analise a mensagem e classifique em uma de duas categorias.
@@ -708,9 +630,10 @@ async def whatsapp_webhook(request: Request):
             return {"status": "ok"}
 
         # Detectar intenção de preferência — apenas para mensagens de texto
-        # TTS check primeiro: evita que "fala mais rápido" seja classificado como ativar áudio
+        # Velocidade/voz por regex primeiro (determinístico, faz a conta da velocidade);
+        # o resto — áudio liga/desliga, reset, voz por descrição — decide o Haiku.
         intent = (
-            (_quick_tts_check(text, tts_speed) or _quick_audio_check(text) or _detect_preference_intent(text, current_sections=current_sections, tts_speed=tts_speed))
+            (_quick_tts_check(text, tts_speed) or _detect_preference_intent(text, current_sections=current_sections, tts_speed=tts_speed))
             if msg_info["type"] == "text"
             else {"intent": "message"}
         )
@@ -774,7 +697,7 @@ async def whatsapp_webhook(request: Request):
 
             # Preferência enviada via áudio → detecta e confirma em áudio
             audio_intent = _settle_preference(
-                _quick_tts_check(text, tts_speed) or _quick_audio_check(text)
+                _quick_tts_check(text, tts_speed)
                 or _detect_preference_intent(text, current_sections=current_sections, tts_speed=tts_speed))
             if audio_intent.get("intent") == "preference":
                 gravar = audio_intent["_gravar"]

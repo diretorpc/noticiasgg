@@ -336,3 +336,51 @@ def test_chat_por_texto_com_audio_ligado_so_fala_quando_nao_tem_link(resposta, f
     assert mock_tts.called is fala
     if not fala:
         assert mock_send.call_args.args[1].endswith("/me?token=tok123")
+
+
+# ── Pedidos de ÁUDIO vão ao Haiku, não a um regex ─────────────────────────────
+# O regex `_quick_audio_check` LIGAVA o áudio em "não quero áudio", "sem áudio por
+# favor", "prefere uma voz masculina" e "fala sobre a voz do Lula" (13/20 numa
+# amostra de 09/11/2026). O Haiku, com a cerca consertada, acertou 20/20. O regex
+# foi tirado; o de velocidade/voz (`_quick_tts_check`) fica.
+
+@pytest.mark.parametrize("frase", [
+    "não quero áudio", "sem áudio por favor", "não precisa mandar áudio",
+    "prefere uma voz masculina", "fala sobre a voz do Lula no discurso",
+])
+def test_frase_de_audio_e_decidida_pelo_haiku(frase):
+    with patch("backend.api.main.supabase.get_authorized", return_value=AUTHORIZED), \
+         patch("backend.api.main.supabase.get_preferences", return_value=None), \
+         patch("backend.api.main._detect_preference_intent",
+               return_value=_intent(audio_for_text=False, audio_for_media=False, reply="Áudio desligado.")) as leitor, \
+         patch("backend.api.main.supabase.save_preferences") as mock_save, \
+         patch("backend.api.main.whatsapp.send_message"):
+        TestClient(app).post("/api/webhook", json=_webhook(frase))
+    assert leitor.call_args.args[0] == frase
+    assert mock_save.call_args.kwargs["audio_for_text"] is False
+
+
+def test_velocidade_continua_no_regex_sem_chamar_o_haiku():
+    with patch("backend.api.main.supabase.get_authorized", return_value=AUTHORIZED), \
+         patch("backend.api.main.supabase.get_preferences", return_value=None), \
+         patch("backend.api.main._detect_preference_intent") as leitor, \
+         patch("backend.api.main.supabase.save_preferences") as mock_save, \
+         patch("backend.api.main.whatsapp.send_message"):
+        TestClient(app).post("/api/webhook", json=_webhook("fala mais devagar"))
+    leitor.assert_not_called()
+    assert mock_save.call_args.kwargs["tts_speed"] == 0.78
+
+
+def test_chat_nao_promete_ativar_audio():
+    """Pedido de áudio só chega ao Sonnet quando o leitor NÃO aplicou nada (Haiku
+    fora do ar ou leitura errada). O prompt mandava responder "Ativando agora!" —
+    confirmação de algo que não foi gravado."""
+    from backend.services import reporter
+    chat = reporter._build_system(None, {})
+    assert "Ativando agora" not in chat
+    assert "ativa áudio" in chat
+    # Sonnet real, 1 de 3: "por que você parou de me mandar áudio?" → "fala com o admin"
+    # (estendia a regra dos ALERTAS para o áudio). E "o sistema controla" expõe a
+    # mecânica interna ao usuário (5ª rodada do Apolo na remoção do regex).
+    assert "não é com o admin" in chat
+    assert "quem liga e desliga isso é o sistema" not in chat
