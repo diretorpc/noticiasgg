@@ -265,39 +265,6 @@ def delete_preferences(phone: str) -> None:
         r.raise_for_status()
 
 
-def save_polls(polls: list[dict]) -> None:
-    """Grava todas; uma rejeitada não descarta as seguintes (o cache é o
-    fallback do relatório). Levanta a primeira falha só no fim."""
-    falha: Exception | None = None
-    with _client() as c:
-        for poll in polls:
-            r = c.post(
-                "/polls_cache",
-                json={
-                    "instituto": poll["instituto"],
-                    "turno": poll.get("turno"),
-                    "data_pesquisa": poll.get("data_pesquisa"),
-                    "candidatos": poll["candidatos"],
-                    "fonte_url": poll.get("fonte_url"),
-                    "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                },
-                headers={"Prefer": "resolution=merge-duplicates,return=representation"},
-            )
-            try:
-                r.raise_for_status()
-            except httpx.HTTPStatusError as e:
-                falha = falha or e
-    if falha:
-        raise falha
-
-
-def get_polls() -> list[dict]:
-    with _client() as c:
-        r = c.get("/polls_cache?select=instituto,turno,data_pesquisa,candidatos,fonte_url&order=updated_at.desc")
-        r.raise_for_status()
-        return r.json()
-
-
 def get_alert_last_triggered(rule_id: str) -> datetime.datetime | None:
     """`rule_id` hoje é sempre normalizado por quem chama (ex.: `_source_rule_id`),
     mas `_f()` protege qualquer chamador futuro que esqueça — sem isto um `rule_id`

@@ -7,7 +7,7 @@ from anthropic import Anthropic
 
 from backend.collectors import (
     market, crypto, indicators_us, indicators_br, news,
-    commodities_br, politics_br, polls_br, stocks,
+    commodities_br, politics_br, stocks,
 )
 from backend.services.integrity import (
     validate_and_fix as _validate_and_fix,
@@ -35,7 +35,7 @@ _MAX_TOKENS = 2000
 
 ALL_SECTIONS = [
     "market", "crypto", "indicators_us", "indicators_br",
-    "news", "commodities_br", "politics_br", "polls_br",
+    "news", "commodities_br", "politics_br",
 ]
 DEFAULT_SECTIONS = {s: True for s in ALL_SECTIONS}
 
@@ -71,11 +71,6 @@ Regras gerais:
 - Cite as 2-3 notícias mais relevantes
 - Máximo 1500 caracteres no total
 - Se o usuário fizer pergunta específica, responda diretamente sem o formato de resumo
-
-Regra especial — seção *Pesquisas Eleitorais*:
-- Para cada instituto, mostre: *Nome do Instituto* (data) — turno entre parênteses, ex: *(1º turno)*
-- Liste os candidatos com suas porcentagens em ordem decrescente
-- Exemplo de formato: *Datafolha* (07/04/2026) — _1º turno_
 
 Regra especial — seção *Visão Agro BR*:
 - SEMPRE inclua esta seção no relatório diário, independente dos dados coletados no dia
@@ -185,7 +180,7 @@ def _safe_collect(fn):
     """Escotilha final antes do contexto virar JSON na mensagem do usuário
     (generate_report → json.dumps(context)) em TODA conversa. Mascara aqui
     de novo mesmo que cada coletor já se proteja por conta própria — é o
-    único ponto que os 8 coletores de _COLLECTORS atravessam sempre, então
+    único ponto que os coletores de _COLLECTORS atravessam sempre, então
     qualquer parâmetro `api_key=`/`apiKey=`/`API_KEY=` (qualquer grafia) que
     escape de um deles (hoje ou por coletor futuro adicionado sem essa
     proteção) é pega aqui antes de chegar ao Claude. NÃO cobre outra forma de
@@ -208,7 +203,6 @@ _COLLECTORS = {
     "news": lambda: news.collect(),
     "commodities_br": lambda: commodities_br.collect(),
     "politics_br": lambda: politics_br.collect(),
-    "polls_br": lambda: polls_br.collect(),
 }
 
 

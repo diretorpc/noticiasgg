@@ -23,29 +23,27 @@ def test_collect_all_sem_sections_retorna_todas():
          patch("backend.services.reporter.indicators_br") as ibr, \
          patch("backend.services.reporter.news") as n, \
          patch("backend.services.reporter.commodities_br") as cb, \
-         patch("backend.services.reporter.politics_br") as pb, \
-         patch("backend.services.reporter.polls_br") as plb:
-        for mod in [m, c, ius, ibr, n, cb, pb, plb]:
+         patch("backend.services.reporter.politics_br") as pb:
+        for mod in [m, c, ius, ibr, n, cb, pb]:
             mod.collect.return_value = {"ok": True}
         result = reporter._collect_all(sections=None)
     assert set(result.keys()) == {"market", "crypto", "indicators_us", "indicators_br",
-                                   "news", "commodities_br", "politics_br", "polls_br"}
+                                   "news", "commodities_br", "politics_br"}
 
 
 def test_collect_all_com_sections_filtra_coletores():
     sections = {"market": True, "crypto": False, "indicators_us": False, "indicators_br": False,
-                "news": True, "commodities_br": False, "politics_br": False, "polls_br": False}
+                "news": True, "commodities_br": False, "politics_br": False}
     with patch("backend.services.reporter.market") as m, \
          patch("backend.services.reporter.news") as n, \
          patch("backend.services.reporter.crypto") as c, \
          patch("backend.services.reporter.indicators_us") as ius, \
          patch("backend.services.reporter.indicators_br") as ibr, \
          patch("backend.services.reporter.commodities_br") as cb, \
-         patch("backend.services.reporter.politics_br") as pb, \
-         patch("backend.services.reporter.polls_br") as plb:
+         patch("backend.services.reporter.politics_br") as pb:
         m.collect.return_value = {"ok": True}
         n.collect.return_value = {"ok": True}
-        for mod in [c, ius, ibr, cb, pb, plb]:
+        for mod in [c, ius, ibr, cb, pb]:
             mod.collect.return_value = {"ok": True}
         result = reporter._collect_all(sections=sections)
     assert "market" in result
@@ -54,9 +52,26 @@ def test_collect_all_com_sections_filtra_coletores():
     assert "politics_br" not in result
 
 
+def test_collect_all_ignora_secao_aposentada_salva_na_preferencia():
+    """`polls_br` saiu em 11/2026 (eleições encerradas), mas a preferência gravada no
+    Supabase continua com a chave. Ela não pode derrubar a coleta nem ressuscitar."""
+    with patch("backend.services.reporter.market") as m:
+        m.collect.return_value = {"ok": True}
+        result = reporter._collect_all(sections={"market": True, "polls_br": True})
+    assert set(result.keys()) == {"market"}
+
+
+def test_resumo_de_ajustes_nao_mostra_secao_aposentada():
+    from backend.api.main import _build_settings_summary
+    resumo = _build_settings_summary({"sections": {"news": True, "polls_br": True}})
+    assert "polls_br" not in resumo
+    assert "pesquisas" not in resumo
+    assert "Seções ativas: notícias" in resumo
+
+
 def test_generate_report_passa_sections():
     sections = {"market": True, "crypto": True, "indicators_us": False, "indicators_br": False,
-                "news": True, "commodities_br": False, "politics_br": False, "polls_br": False}
+                "news": True, "commodities_br": False, "politics_br": False}
     with patch("backend.services.reporter.Anthropic") as MockA, \
          patch("backend.services.reporter.market") as m, \
          patch("backend.services.reporter.crypto") as c, \
@@ -64,9 +79,8 @@ def test_generate_report_passa_sections():
          patch("backend.services.reporter.indicators_us") as ius, \
          patch("backend.services.reporter.indicators_br") as ibr, \
          patch("backend.services.reporter.commodities_br") as cb, \
-         patch("backend.services.reporter.politics_br") as pb, \
-         patch("backend.services.reporter.polls_br") as plb:
-        for mod in [m, c, n, ius, ibr, cb, pb, plb]:
+         patch("backend.services.reporter.politics_br") as pb:
+        for mod in [m, c, n, ius, ibr, cb, pb]:
             mod.collect.return_value = {}
         MockA.return_value = _mock_anthropic()
         result = reporter.generate_report("teste", sections=sections)

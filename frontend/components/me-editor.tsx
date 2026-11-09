@@ -12,7 +12,6 @@ const SECTIONS: [string, string][] = [
   ["news", "Notícias"],
   ["commodities_br", "Commodities"],
   ["politics_br", "Política"],
-  ["polls_br", "Pesquisas"],
 ];
 const VOICES = ["nova", "shimmer", "alloy", "echo", "fable", "onyx"];
 

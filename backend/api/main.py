@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from anthropic import Anthropic
 
-from backend.collectors import market, crypto, indicators_us, indicators_br, news, commodities_br, politics_br, polls_br, agro_br, esalq, eia, soja_disponivel
+from backend.collectors import market, crypto, indicators_us, indicators_br, news, commodities_br, politics_br, agro_br, esalq, eia, soja_disponivel
 from backend.services import reporter, whatsapp, supabase, health
 from backend.services import media as media_service
 from backend.api import send_report, cron_report, check_alerts, admin, me, health_digest, cron_investing, cron_soja
@@ -34,7 +34,6 @@ app.include_router(indicators_br.router)
 app.include_router(news.router)
 app.include_router(commodities_br.router)
 app.include_router(politics_br.router)
-app.include_router(polls_br.router)
 app.include_router(agro_br.router)
 app.include_router(send_report.router)
 app.include_router(cron_report.router)
@@ -338,12 +337,11 @@ Seções disponíveis e seus aliases em português:
 - news → notícias, news, manchetes
 - commodities_br → commodities, soja, milho, petróleo, agro commodities
 - politics_br → política, política brasil, notícias políticas
-- polls_br → pesquisas, pesquisas eleitorais, eleições, intenção de voto, polls
 
 Responda SOMENTE com JSON:
 {
   "intent": "preference",
-  "sections": {todas as 8 seções com true/false} ou null se não mencionado,
+  "sections": {todas as 7 seções com true/false} ou null se não mencionado,
   "report_time": "HH:00" ou null,
   "audio_for_text": true/false ou null se não mencionado,
   "audio_for_media": true/false ou null se não mencionado,
@@ -407,7 +405,6 @@ _SECTION_LABELS: dict[str, str] = {
     "news": "notícias",
     "commodities_br": "commodities",
     "politics_br": "política",
-    "polls_br": "pesquisas",
 }
 
 
@@ -419,7 +416,9 @@ def _build_settings_summary(prefs: dict | None) -> str:
     speed = p.get("tts_speed") or 0.85
     report_time = p.get("report_time") or "não configurado"
     sections = p.get("sections") or {}
-    active = [_SECTION_LABELS.get(k, k) for k, v in sections.items() if v] if sections else list(_SECTION_LABELS.values())
+    # Só seções que ainda existem: preferência salva pode guardar chave aposentada
+    # (`polls_br`, removida em 11/2026 depois das eleições) e ela não pode aparecer crua.
+    active = [_SECTION_LABELS[k] for k, v in sections.items() if v and k in _SECTION_LABELS] if sections else list(_SECTION_LABELS.values())
     sections_str = ", ".join(active) if active else "nenhuma"
     return (
         "⚙️ *Suas configurações*\n\n"
@@ -476,7 +475,19 @@ def _maybe_summarize(phone: str) -> None:
         logger.warning("summarization failed for %s", phone, exc_info=True)
 
 
+def _known_sections(sections: dict | None) -> dict | None:
+    """Só as seções que existem hoje. Preferência gravada guarda chave aposentada
+    (`polls_br`, 11/2026) e o painel a regrava inteira a cada save. Com ela no
+    contexto, o Haiku zerou TODAS as seções em 5 de 8 pedidos de "remove cripto"
+    (medido pelo Apolo com chamada real) — então ela não entra no modelo nem volta
+    dele para o banco."""
+    if sections is None:
+        return None
+    return {k: v for k, v in sections.items() if k in reporter.ALL_SECTIONS}
+
+
 def _detect_preference_intent(text: str, current_sections: dict | None = None, tts_speed: float = 0.85) -> dict:
+    current_sections = _known_sections(current_sections)
     context = f"\nvelocidade_atual: {tts_speed:.2f}"
     if current_sections:
         context += f"\nseções_atuais: {json.dumps(current_sections, ensure_ascii=False)}"
@@ -600,7 +611,7 @@ async def whatsapp_webhook(request: Request):
             if intent.get("reset"):
                 supabase.delete_preferences(target_phone)
             else:
-                new_sections = intent.get("sections")
+                new_sections = _known_sections(intent.get("sections"))
                 new_time = intent.get("report_time")
                 new_audio_text = intent.get("audio_for_text")
                 new_audio_media = intent.get("audio_for_media")

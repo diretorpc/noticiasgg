@@ -25,7 +25,7 @@ _CTX_BUILDERS = {
         {"bolsas": d.get("bolsas", {}), "cambio": d.get("cambio", {})},
         d.get("cripto", []), d.get("indicadores_br", {}), d.get("indicadores_us", {}),
         d.get("noticias", [])),
-    "politica": lambda d: report_engine.adapt_politica(d.get("politica", []), d.get("pesquisas", [])),
+    "politica": lambda d: report_engine.adapt_politica(d.get("politica", [])),
 }
 
 

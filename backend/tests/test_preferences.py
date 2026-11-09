@@ -18,7 +18,7 @@ def test_get_preferences_inexistente():
 
 def test_save_and_get_preferences_sections():
     sections = {"market": True, "crypto": False, "indicators_us": True, "indicators_br": True,
-                "news": True, "commodities_br": False, "politics_br": False, "polls_br": False}
+                "news": True, "commodities_br": False, "politics_br": False}
     supabase.save_preferences(PHONE_TEST, sections=sections, report_time=None)
     prefs = supabase.get_preferences(PHONE_TEST)
     assert prefs is not None

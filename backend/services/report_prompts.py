@@ -64,20 +64,14 @@ _ANALISE = """Ignore qualquer data do contexto. Você é um agente especialista 
 
 [frase leve de encerramento]. Máximo 1600 caracteres."""
 
-_POLITICA = """Ignore qualquer data do contexto. Você é um analista político brasileiro. Com os dados recebidos, gere APENAS as seções de POLÍTICA e PESQUISAS ELEITORAIS. Formato exato: 🏛️ POLÍTICA
+_POLITICA = """Ignore qualquer data do contexto. Você é um analista político brasileiro. Com os dados recebidos, gere APENAS a seção de POLÍTICA. Formato exato: 🏛️ POLÍTICA
 1. **[título]** — [descrição em uma linha] ([fonte])
 2. **[título]** — [descrição em uma linha] ([fonte])
 3. **[título]** — [descrição em uma linha] ([fonte])
 4. **[título]** — [descrição em uma linha] ([fonte])
 5. **[título]** — [descrição em uma linha] ([fonte])
 
-🗳️ PESQUISAS ELEITORAIS
-· *[Instituto]* ([data]) — [turno]
-[Candidato]: [x]%
-[Candidato]: [x]%
-[Candidato]: [x]%
-
-Liste TODOS os candidatos presentes nos dados de cada pesquisa, sem omitir nenhum. Máximo 1200 caracteres."""
+Máximo 1200 caracteres."""
 
 DEFAULTS = {
     "commodities": _COMMODITIES,

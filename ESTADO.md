@@ -61,6 +61,10 @@ Lote 1 = número errado com cara de certo, feito com TDD (17 testes vistos falha
 - **ScraperAPI** do fallback de mercado ia por `http://` com a chave na query.
   Agora HTTPS. ⚠️ **A chave trafegou em claro até hoje: rotacionar `SCRAPER_API_KEY`**
   (3ª vez; ver memória). Não feito neste lote, é ação no painel do fornecedor.
+  **Rotacionada pelo Matheus em 11/09 ~09:10**, deploy às 09:12. Depois dele a ESALQ
+  segue chegando à página pelo ScraperAPI (mesmo erro de tabela, defeito antigo), então
+  a chave em produção funciona. Falta confirmar que a ANTIGA morreu — senão o teste
+  não distingue chave nova de chave velha ainda válida.
 - Medir: `python -m pytest backend/tests/test_agro_br_unidades.py backend/tests/test_alert_rules_copom.py backend/tests/test_indicators_br_contrato.py backend/tests/test_market_contrato.py -m unit -q`
 
 Dívidas registradas pelo Apolo, fora do lote: `commodities_br.py` é gêmeo sem a
@@ -179,6 +183,45 @@ duas com `claim_token` de 32 caracteres. Conferir:
 Ainda pendente: **lote 4** (validador de fatos no motor novo; achado 12a, o
 comando de horário pelo WhatsApp que confirma sem efeito; evals que contam falha
 de leitura como zero invenções). E rotacionar `SCRAPER_API_KEY`.
+
+---
+
+## 09/11/2026 — seção "Pesquisas eleitorais" aposentada (eleições de 2026 encerradas)
+
+Pedido do Matheus. Branch `chore/remove-election-polls` → PR, **merge é do Matheus**.
+
+- Coletor `polls_br.py` e `test_save_polls.py` saíram do repo. Cópia local em
+  `_deprecated/polls-2026-11/` (pasta fora do git); o original segue no histórico:
+  `git show 7c7e1d2:backend/collectors/polls_br.py`.
+- Removida de: `reporter.py` (seções, coletores, regra do prompt), `report_engine.py`
+  (`adapt_politica` recebe só política), `report_prompts._POLITICA` (sem bloco 🗳️),
+  `main.py` (rota `/api/collectors/polls-br`, parser de preferências, rótulos),
+  `integrity.py` (corpus), `health.py` (check + linha do boletim), `supabase.py`
+  (`save_polls`/`get_polls`), eval + fixture, painel (`me-editor.tsx`, `users-manager.tsx`).
+- **Tabela `polls_cache` ficou intocada de propósito** — nada mais lê; apagar é irreversível.
+- Preferências antigas com `polls_br: true` continuam no banco e são ignoradas:
+  `_collect_all` só roda o que está em `_COLLECTORS`, e `!ajustes` filtra chave
+  desconhecida. Os dois casos ganharam teste em `test_reporter_sections.py`.
+- Conferido em produção (só leitura): `agent_config` não tem nenhum `report_prompt_*`
+  customizado, então o prompt novo de política vale assim que subir.
+- Revisão do Apolo: remoção limpa, nada quebra em runtime. Uma mina ARMADA por esta
+  mudança foi desarmada aqui: prompt de "7 seções" + `seções_atuais` com `polls_br`
+  fez o Haiku real zerar TODAS as seções em 5 de 8 pedidos "remove cripto".
+  `main._known_sections` tira a chave antes do modelo e antes de salvar.
+- `pytest.ini` ganhou `norecursedirs = _deprecated` (rodar `pytest` puro na raiz pegava
+  testes de código aposentado e ficava vermelho; o CI roda `pytest backend` e não via).
+- 🔴 **Achado do Apolo, ANTERIOR a esta mudança, NÃO consertado:** o leitor de
+  preferências por WhatsApp (`main._detect_preference_intent`) está morto em produção.
+  O Haiku devolve o JSON dentro de cerca de código (29 de 29 respostas), `json.loads`
+  falha calado e tudo vira `{"intent": "message"}` — "remove cripto" nunca é salvo e
+  vai como conversa ao Sonnet. Os testes não pegam porque trocam o leitor por dublê.
+  Consertar a cerca SÓ junto com a normalização das seções (base atual + chaves
+  conhecidas), senão o defeito de zerar entra no ar.
+- Fora do escopo, anotado: `politics_br.QUERIES` ainda busca "eleições 2026" e
+  "candidatos eleições 2026 pesquisa" — vai trazer notícia velha.
+
+Medir: `pytest backend -m unit -q` e `grep -rn polls_br backend frontend --include=*.py --include=*.tsx`
+(esperado: só `_deprecated/`, nada em backend/frontend).
 
 ---
 

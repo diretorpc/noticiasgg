@@ -52,6 +52,6 @@ def test_adapt_analise_includes_all_sources():
 
 
 @pytest.mark.unit
-def test_adapt_politica_wraps_both_lists():
-    out = re.adapt_politica([{"titulo": "P"}], [{"instituto": "Datafolha"}])
-    assert out == {"data": {"politica": [{"titulo": "P"}], "pesquisas": [{"instituto": "Datafolha"}]}}
+def test_adapt_politica_wraps_list():
+    out = re.adapt_politica([{"titulo": "P"}])
+    assert out == {"data": {"politica": [{"titulo": "P"}]}}

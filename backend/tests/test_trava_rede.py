@@ -54,8 +54,8 @@ def test_trava_cobre_connect_ex():
 @pytest.mark.unit
 async def test_trava_cobre_conexao_assincrona():
     """No Windows o caminho assíncrono não passa por socket.connect — a trava
-    ficava mais fraca na máquina do dono do que no CI (Linux). `polls_br.py` é
-    todo assíncrono, então era exatamente o coletor desprotegido."""
+    ficava mais fraca na máquina do dono do que no CI (Linux). `polls_br.py`
+    (aposentado em 11/2026) era todo assíncrono — exatamente o coletor desprotegido."""
     with pytest.raises(RedeProibida):
         await asyncio.open_connection("1.1.1.1", 80)
 

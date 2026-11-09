@@ -49,7 +49,7 @@ _TETO_CORPUS = 6000
 # corpus inteiro: o teto menor deixava ~740 chars parados enquanto cortava o artigo.
 # No RELATÓRIO é o contrário — `send_report` chama com seções E com as ferramentas
 # ligadas, e sem um teto apertado o texto raspado expulsava do corpus os coletores
-# (`indicators_*`, `commodities_br`, `Notícias`, `Pesquisas` sumiam), fazendo o
+# (`indicators_*`, `commodities_br`, `Notícias` sumiam), fazendo o
 # validador apagar linha verdadeira (achados 4 e 6 do Apolo, 31/08/2026).
 _TETO_FERRAMENTAS_CHAT = _TETO_CORPUS
 _TETO_FERRAMENTAS_RELATORIO = 1500
@@ -173,13 +173,12 @@ def build_fact_corpus(data: dict, tool_corpus: list[str] | None = None) -> str:
     for key, label, limit in (
         ("news", "Notícias", 10),
         ("politics_br", "Política", 5),
-        ("polls_br", "Pesquisas", 3),
     ):
         val = data.get(key)
         if isinstance(val, list) and val:
             # `_escape` aqui também: manchete vem da NewsAPI e dos feeds, e agora que
             # o corpus TEM tags, forjar uma passou a servir para alguma coisa (achado 12).
-            titles = [_escape(str(a.get("titulo", a.get("instituto", "")))) for a in val[:limit]]
+            titles = [_escape(str(a.get("titulo", ""))) for a in val[:limit]]
             parts.append(f"{label}: {json.dumps(titles, ensure_ascii=False)}")
     corpus = "\n".join(parts)
     # `cortou` cobre o teto das FERRAMENTAS, que é o corte MAIS provável e ficava

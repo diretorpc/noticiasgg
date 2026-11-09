@@ -46,8 +46,7 @@ c:\noticiasgg\
 │   │   ├── indicators_br.py    # SELIC, IPCA (BCB)
 │   │   ├── news.py             # Notícias (NewsAPI)
 │   │   ├── commodities_br.py   # Commodities BR
-│   │   ├── politics_br.py      # Política BR
-│   │   └── polls_br.py         # Pesquisas eleitorais
+│   │   └── politics_br.py      # Política BR (pesquisas eleitorais aposentadas em 11/2026 → _deprecated/)
 │   ├── services/
 │   │   ├── reporter.py         # Geração de relatório via Claude
 │   │   └── whatsapp.py         # Envio via Evolution API
@@ -135,7 +134,7 @@ evo2-postgres + evo2-redis), porta 8080. Container `evolution-api` (v1.8.2) para
 | Task | Status |
 |------|--------|
 | Estrutura do projeto | ✅ |
-| Collectors (market, crypto, FRED, BCB, news, commodities, politics, polls) | ✅ |
+| Collectors (market, crypto, FRED, BCB, news, commodities, politics) | ✅ |
 | `services/reporter.py` (Claude) | ✅ |
 | `services/whatsapp.py` (Evolution) | ✅ |
 | `api/main.py` webhook | ✅ |

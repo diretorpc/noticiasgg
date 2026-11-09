@@ -51,7 +51,7 @@ def test_send_report_com_horario_customizado_pula():
 
 def test_send_report_com_sections_gera_novo_relatorio():
     sections = {"market": True, "crypto": False, "indicators_us": False, "indicators_br": False,
-                "news": True, "commodities_br": False, "politics_br": False, "polls_br": False}
+                "news": True, "commodities_br": False, "politics_br": False}
     with patch("backend.api.send_report.supabase.get_preferences",
                return_value={"phone": "5534999945010", "sections": sections, "report_time": None}), \
          patch("backend.api.send_report.supabase.get_authorized_by_phone",
@@ -88,7 +88,7 @@ def test_send_report_supabase_error_retorna_erro():
 
 def test_send_report_reporter_error_usa_fallback():
     sections = {"market": True, "crypto": False, "indicators_us": False, "indicators_br": False,
-                "news": True, "commodities_br": False, "politics_br": False, "polls_br": False}
+                "news": True, "commodities_br": False, "politics_br": False}
     n8n_text = "Bom dia, Matheus | 18/05/2026 07:00\n\nRelatório do n8n aqui."
     payload = {"number": "5534999945010", "textMessage": {"text": n8n_text}}
     with patch("backend.api.send_report.supabase.get_preferences",
