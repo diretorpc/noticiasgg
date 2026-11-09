@@ -145,7 +145,7 @@ def test_pedido_misto_grava_o_audio_e_redireciona_o_relatorio():
     r = _roda(_intent(sections={"crypto": False}, tts_voice="onyx", reply="Voz onyx e cripto removida."),
               user=COM_LINK)
     kw = r["save"].call_args.kwargs
-    assert kw["sections"] is None and kw["report_time"] is None and kw["tts_voice"] == "onyx"
+    assert "sections" not in kw and "report_time" not in kw and kw["tts_voice"] == "onyx"
     assert "cripto removida" not in r["enviado"].lower()
     assert "Ajustei" in r["enviado"]
     assert r["enviado"].endswith("/me?token=tok123")

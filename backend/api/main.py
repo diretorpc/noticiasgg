@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from anthropic import Anthropic
 
 from backend.collectors import market, crypto, indicators_us, indicators_br, news, commodities_br, politics_br, agro_br, esalq, eia, soja_disponivel
-from backend.services import reporter, whatsapp, supabase, health, selflink, models
+from backend.services import reporter, whatsapp, supabase, health, selflink, models, schedules, audio_prefs
 from backend.services import media as media_service
 from backend.services.secrets_mask import sanitize_error
 from backend.api import send_report, cron_report, check_alerts, admin, me, health_digest, cron_investing, cron_soja
@@ -336,29 +336,88 @@ Reset: "volta pro padrão", "quero tudo de volta", "cancela preferências" → {
 CATEGORIA 2 — Qualquer outra mensagem:
 Responda SOMENTE com JSON: {"intent": "message"}"""
 
-_SECTION_LABELS: dict[str, str] = {
-    "market": "mercado",
-    "crypto": "cripto",
-    "indicators_us": "indicadores EUA",
-    "indicators_br": "indicadores BR",
-    "news": "notícias",
-    "commodities_br": "commodities",
-    "politics_br": "política",
+# Seções da GRADE (`report_schedules`), na ordem do motor. Mesmos nomes da tela
+# (`frontend/components/schedule-grid.tsx`), para o !ajustes e o /me falarem igual.
+_GRADE_LABELS: dict[str, str] = {
+    "commodities": "Commodities",
+    "bolsas": "Bolsas",
+    "cambio_cripto": "Câmbio/Cripto",
+    "noticias": "Notícias",
+    "analise": "Análise",
+    "politica": "Política",
 }
+_DIAS = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
 
 
-def _build_settings_summary(prefs: dict | None) -> str:
+def _e_lista(itens: list[str]) -> str:
+    return itens[0] if len(itens) == 1 else ", ".join(itens[:-1]) + " e " + itens[-1]
+
+
+def _dias_str(dias: list[int]) -> str:
+    """[0..4] → "seg a sex"; [0,2,4] → "seg, qua e sex". Sequência de 3+ dias vira faixa."""
+    if len(dias) == 7:
+        return "todo dia"
+    blocos, corrida = [], [dias[0]]
+    for d in dias[1:]:
+        if d == corrida[-1] + 1:
+            corrida.append(d)
+        else:
+            blocos.append(corrida)
+            corrida = [d]
+    blocos.append(corrida)
+    partes: list[str] = []
+    for b in blocos:
+        if len(b) >= 3:
+            partes.append(f"{_DIAS[b[0]]} a {_DIAS[b[-1]]}")
+        else:
+            partes.extend(_DIAS[d] for d in b)
+    return _e_lista(partes)
+
+
+def _grade_linhas(grid: dict) -> list[str]:
+    """Uma linha por seção: dias com o mesmo conjunto de horas viram um grupo.
+    Seção fora da lista (chave aposentada no banco) não aparece crua."""
+    linhas = []
+    for sec, label in _GRADE_LABELS.items():
+        dias = grid.get(sec) or {}
+        por_horas: dict[tuple, list[int]] = {}
+        for wd, horas in dias.items():
+            if horas:
+                por_horas.setdefault(tuple(sorted(horas)), []).append(int(wd))
+        if not por_horas:
+            continue
+        grupos = sorted(por_horas.items(), key=lambda kv: min(kv[1]))
+        texto = "; ".join(f"{_dias_str(sorted(ds))}, {_e_lista([f'{h}h' for h in hs])}"
+                          for hs, ds in grupos)
+        linhas.append(f"• {label}: {texto}")
+    return linhas
+
+
+def _build_settings_summary(prefs: dict | None, user: dict | None) -> str:
+    """Resposta do `!ajustes`. O relatório diário vem da GRADE real, não de
+    `user_preferences.sections`/`report_time` (campos mortos — mostravam "Horário:
+    não configurado" e uma lista de seções que nada lia). Só sai em texto: tem link."""
     p = prefs or {}
+    u = user or {}
     audio_text = "sim" if p.get("audio_for_text") else "não"
     audio_media = "sim" if p.get("audio_for_media") else "não"
     voice = p.get("tts_voice") or "nova"
     speed = p.get("tts_speed") or 0.85
-    report_time = p.get("report_time") or "não configurado"
-    sections = p.get("sections") or {}
-    # Só seções que ainda existem: preferência salva pode guardar chave aposentada
-    # (`polls_br`, removida em 11/2026 depois das eleições) e ela não pode aparecer crua.
-    active = [_SECTION_LABELS[k] for k, v in sections.items() if v and k in _SECTION_LABELS] if sections else list(_SECTION_LABELS.values())
-    sections_str = ", ".join(active) if active else "nenhuma"
+    onde = "Seções e horário mudam " + selflink.onde_ajustar(selflink.panel_link(u))
+    # O cron só manda para quem tem a chave ligada (`cron_report.py`): grade salva
+    # com ela desligada não chega a ninguém, e mostrá-la seria prometer envio.
+    if not u.get("use_new_report_engine"):
+        relatorio = "• Envio desligado: você não recebe o relatório diário por enquanto."
+    else:
+        try:
+            linhas = _grade_linhas(schedules.rows_to_grid(schedules.get_for_phone(u.get("phone"))))
+            if linhas:
+                relatorio = "Você recebe estas seções:\n" + "\n".join(linhas) + f"\n\n{onde}"
+            else:
+                relatorio = f"• Envio ligado, mas nenhuma seção está agendada.\n\n{onde}"
+        except Exception as e:
+            logger.warning("!ajustes: grade ilegível para %s: %s", u.get("phone"), sanitize_error(e))
+            relatorio = f"• Não consegui carregar seus horários agora. Tenta de novo em instantes.\n\n{onde}"
     return (
         "⚙️ *Suas configurações*\n\n"
         "*Áudio*\n"
@@ -367,9 +426,8 @@ def _build_settings_summary(prefs: dict | None) -> str:
         f"• Voz: {voice}\n"
         f"• Velocidade: {speed}\n\n"
         "*Relatório diário*\n"
-        f"• Horário: {report_time}\n"
-        f"• Seções ativas: {sections_str}\n\n"
-        "Para alterar: \"muda a voz para onyx\", \"fala mais devagar\", \"ativa áudio\", etc."
+        f"{relatorio}\n\n"
+        'Voz e áudio você muda aqui mesmo: "muda a voz para onyx", "fala mais devagar", "ativa áudio".'
     )
 
 
@@ -437,27 +495,6 @@ def _base_sections(current: dict | None) -> dict:
     return {k: v for k, v in current.items() if k in reporter.ALL_SECTIONS}
 
 
-_AUDIO_FIELDS = ("audio_for_text", "audio_for_media", "tts_voice", "tts_speed")
-_TTS_VOICES = ("alloy", "echo", "fable", "nova", "onyx", "shimmer")
-
-
-def _valid_audio_field(campo: str, valor) -> bool:
-    """O que o Haiku manda gravar passa por aqui. `tts_speed` gravado como texto fazia
-    `float()` estourar em TODA mensagem seguinte do usuário ("Tive um problema" até
-    limpar o banco), e voz fora da lista virava "Voz alterada" com TTS caindo calado
-    (achado 3, 4ª revisão do Apolo). `bool` antes de número: `True` é `int` em Python."""
-    if valor is None:
-        return False
-    if campo in ("audio_for_text", "audio_for_media"):
-        return isinstance(valor, bool)
-    if campo == "tts_voice":
-        return valor in _TTS_VOICES
-    if campo == "tts_speed":
-        return (isinstance(valor, (int, float)) and not isinstance(valor, bool)
-                and 0.5 <= valor <= 1.5)
-    return False
-
-
 def _settle_preference(intent: dict) -> dict:
     """Decide o que um pedido de preferência FAZ de verdade, antes de responder.
 
@@ -493,14 +530,15 @@ def _settle_preference(intent: dict) -> dict:
         # resposta (7ª revisão do Apolo).
         if intent.get("pergunta_junto") is True:
             return {"intent": "message", "_formato_unico": formato} if formato else {"intent": "message"}
-        voz_pedida = any(_valid_audio_field(k, intent.get(k)) for k in ("tts_voice", "tts_speed"))
+        voz_pedida = any(audio_prefs.valid_audio_field(k, intent.get(k)) for k in ("tts_voice", "tts_speed"))
         # "Só hoje" sobre seção ou horário não é pedido de voz: recebia o texto fixo de
         # VOZ. Vira conversa, e o chat aponta o /me pela regra do relatório.
         if not formato and not voz_pedida:
             return {"intent": "message"}
         return {"intent": "preference", "_gravar": {}, "_quer_relatorio": False,
                 "_pontual_sozinho": formato or "voz", "_voz_ignorada": bool(formato and voz_pedida)}
-    gravar = {k: intent.get(k) for k in _AUDIO_FIELDS if _valid_audio_field(k, intent.get(k))}
+    gravar = {k: intent.get(k) for k in audio_prefs.AUDIO_FIELDS
+              if audio_prefs.valid_audio_field(k, intent.get(k))}
     if not (gravar or intent.get("reset") or intent.get("list_voices")):
         return {"intent": "message"}
     quer_relatorio = (_known_sections(intent.get("sections")) is not None
@@ -680,7 +718,7 @@ async def whatsapp_webhook(request: Request):
 
         # Comando !ajustes — sempre em texto para o usuário ver as configurações claramente
         if msg_info["type"] == "text" and text.strip().lower() == "!ajustes":
-            whatsapp.send_message(target_phone, _build_settings_summary(current_prefs))
+            whatsapp.send_message(target_phone, _build_settings_summary(current_prefs, authorized))
             return {"status": "ok"}
 
         # Detectar intenção de preferência — apenas para mensagens de texto
@@ -702,8 +740,6 @@ async def whatsapp_webhook(request: Request):
             elif gravar:
                 supabase.save_preferences(
                     target_phone,
-                    sections=None,
-                    report_time=None,
                     audio_for_text=gravar.get("audio_for_text"),
                     audio_for_media=gravar.get("audio_for_media"),
                     tts_voice=gravar.get("tts_voice"),
@@ -766,8 +802,6 @@ async def whatsapp_webhook(request: Request):
                 elif gravar:
                     supabase.save_preferences(
                         target_phone,
-                        sections=None,
-                        report_time=None,
                         audio_for_text=gravar.get("audio_for_text"),
                         audio_for_media=gravar.get("audio_for_media"),
                         tts_voice=gravar.get("tts_voice"),

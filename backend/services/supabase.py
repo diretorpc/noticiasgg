@@ -222,26 +222,22 @@ def get_preferences(phone: str) -> dict | None:
 
 def save_preferences(
     phone: str,
-    sections: dict | None,
-    report_time: str | None,
     audio_for_text: bool | None = None,
     audio_for_media: bool | None = None,
     tts_voice: str | None = None,
     tts_speed: float | None = None,
 ) -> None:
+    """Grava só voz/áudio. `sections`/`report_time` saíram de propósito (09/11/2026):
+    são campos mortos — o relatório sai da grade `report_schedules` — e gravá-los
+    fazia o /me responder "Salvo." sem efeito. As colunas e os dados antigos ficam
+    no banco; ainda leem `send_report.py` (rota do n8n, desligado), o leitor de
+    preferências do webhook (passa `sections` ao Haiku só como contexto),
+    `get_users_for_hour` (sem chamador) e `tools/cutover_audit.py` (auditoria).
+    Campo `None` não entra: um comando de voz não pode apagar o resto."""
     payload: dict = {
         "phone": phone,
         "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
-    # sections/report_time seguem a mesma regra dos campos de audio abaixo: so
-    # entram quando vieram de verdade. Antes iam sempre, e um comando de voz
-    # (que produz os dois como None) apagava o que estava configurado no painel.
-    # Limpar de proposito continua possivel: o reset usa delete_preferences, e
-    # o painel manda dicionario explicito (inclusive vazio).
-    if sections is not None:
-        payload["sections"] = sections
-    if report_time is not None:
-        payload["report_time"] = report_time
     if audio_for_text is not None:
         payload["audio_for_text"] = audio_for_text
     if audio_for_media is not None:

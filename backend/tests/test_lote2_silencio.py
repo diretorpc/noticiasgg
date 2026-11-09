@@ -235,30 +235,16 @@ def _capturar_upsert(monkeypatch) -> dict:
 
 
 @pytest.mark.unit
-def test_salvar_so_a_voz_nao_manda_secoes_nem_horario_nulos(monkeypatch):
-    """O comando de voz produz sections=None e report_time=None; envia-los no
-    upsert apagava o que o usuario tinha configurado no painel."""
+def test_salvar_so_a_voz_nao_manda_os_outros_campos(monkeypatch):
+    """Campo None nao entra no upsert: um comando de voz nao pode apagar o resto.
+    (`sections`/`report_time` sairam de vez em 09/11/2026 — ver test_campo_morto.py.)"""
     capturado = _capturar_upsert(monkeypatch)
-    supabase.save_preferences("555", sections=None, report_time=None, tts_voice="onyx")
+    supabase.save_preferences("555", tts_voice="onyx")
     assert capturado["tts_voice"] == "onyx"
     assert "sections" not in capturado
     assert "report_time" not in capturado
-
-
-@pytest.mark.unit
-def test_painel_ainda_consegue_gravar_secoes_e_horario(monkeypatch):
-    capturado = _capturar_upsert(monkeypatch)
-    supabase.save_preferences("555", sections={"market": True}, report_time="08:00")
-    assert capturado["sections"] == {"market": True}
-    assert capturado["report_time"] == "08:00"
-
-
-@pytest.mark.unit
-def test_secoes_vazias_do_painel_continuam_gravando(monkeypatch):
-    """Desmarcar tudo no painel manda {} - que nao e None e precisa gravar."""
-    capturado = _capturar_upsert(monkeypatch)
-    supabase.save_preferences("555", sections={}, report_time=None)
-    assert capturado["sections"] == {}
+    assert "audio_for_text" not in capturado
+    assert "tts_speed" not in capturado
 
 
 # -- Achados da revisao do Apolo sobre este proprio lote ---------------------
