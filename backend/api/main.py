@@ -279,6 +279,8 @@ Responda SOMENTE com JSON:
   "tts_speed": 0.00 ou null se não mencionado,
   "list_voices": false,
   "reset": false,
+  "pontual": false,
+  "pergunta_junto": false,
   "reply": "confirmação direta, sem bajulação"
 }
 
@@ -300,6 +302,10 @@ Regras de áudio — dois campos independentes (audio_for_text e audio_for_media
 - "textos em texto", "desativa áudio nos textos" → audio_for_text: false, audio_for_media: null
 - "imagens em texto", "fotos em texto", "mídias em texto" → audio_for_text: null, audio_for_media: false
 - Se não mencionado → audio_for_text: null, audio_for_media: null
+- Pedido só para AGORA ("dessa vez", "essa", "só essa", "só agora", "nessa resposta", "tô em reunião", "agora não dá pra ouvir") → os mesmos campos de áudio + "pontual": true. Ex.: "manda em texto dessa vez" e "responde essa por escrito" → audio_for_text: false, audio_for_media: false, pontual: true
+- Pedido só para AGORA que TAMBÉM pergunta alguma coisa continua CATEGORIA 1, com "pontual": true e "pergunta_junto": true — o sistema responde a pergunta no formato pedido. Ex.: "manda em texto dessa vez, como tá o dólar?", "tô em reunião, responde por escrito: a selic caiu?", "dessa vez em áudio: como fechou o ibovespa?"
+- Voz ou velocidade só para agora ("só dessa vez fala mais devagar", "usa a voz echo só nessa") → os campos de voz/velocidade + "pontual": true
+- Sem marca de "só agora" ("desativa áudio", "sem áudio por favor", "a partir de agora só texto", "prefiro texto") → "pontual": false. Na dúvida, é permanente.
 
 Regras de voz TTS (tts_voice):
 - "muda a voz para X", "quero a voz X", "usa a voz X", "voz X" → tts_voice: "X"
@@ -310,7 +316,7 @@ Regras de voz TTS (tts_voice):
 
 Regras de velocidade TTS (tts_speed):
 - ATENÇÃO: pedido de velocidade da FALA ("rápido", "devagar", "veloz", "lento") é tts_speed, nunca audio_for_text.
-- Mas se a mensagem pergunta CONTEÚDO (mercado, preço, notícia, explicação), é CATEGORIA 2, mesmo com essas palavras: "me fala rápido: o dólar subiu?", "fala devagar que eu sou leigo, o que é Selic?", "a inflação acelera?".
+- Mas se a mensagem pergunta CONTEÚDO (mercado, preço, notícia, explicação) SEM pedir formato de resposta, é CATEGORIA 2, mesmo com essas palavras: "me fala rápido: o dólar subiu?", "fala devagar que eu sou leigo, o que é Selic?", "a inflação acelera?".
 - A velocidade atual está no contexto como "velocidade_atual: X.XX"
 - "fala mais devagar", "fale mais devagar", "um pouco mais devagar", "velocidade mais baixa" → tts_speed: max(0.5, velocidade_atual - 0.07), 2 casas decimais
 - "fala bem mais devagar", "muito mais devagar", "bem mais lento" → tts_speed: max(0.5, velocidade_atual - 0.15), 2 casas decimais
@@ -469,6 +475,31 @@ def _settle_preference(intent: dict) -> dict:
     `reporter._REPORT_RULES`, aponta o /me quando é mesmo pedido de relatório."""
     if intent.get("intent") != "preference":
         return intent
+    # Pedido SÓ PARA AGORA ("manda em texto dessa vez, tô em reunião") NUNCA grava.
+    # Antes gravava PARA SEMPRE e o Haiku respondia "próxima resposta em texto"; o áudio
+    # não voltava sozinho (5ª revisão do Apolo, 09/11/2026). Sem guardar estado:
+    # - com pergunta junto → conversa respondida no formato pedido, uma vez;
+    # - sozinho → texto fixo ensinando a mandar a pergunta junto (prometer "a próxima
+    #   vai em texto" seria mentir, porque nada guarda essa promessa);
+    # - voz/velocidade pontual → texto fixo: essas só mudam de vez.
+    # O reset vem antes: "volta pro padrão" não é pedido de formato.
+    if intent.get("pontual") is True and not intent.get("reset"):
+        formatos = [intent.get(k) for k in ("audio_for_text", "audio_for_media")
+                    if isinstance(intent.get(k), bool)]
+        formato = ("audio" if any(formatos) else "texto") if formatos else None
+        # Pergunta junto é SEMPRE respondida — com formato, nele; sem formato (só voz ou
+        # velocidade "só nessa"), no formato de sempre. Antes, "fala mais devagar só
+        # nessa: o que é Selic?" caía no texto fixo de voz e a Selic ficava sem
+        # resposta (7ª revisão do Apolo).
+        if intent.get("pergunta_junto") is True:
+            return {"intent": "message", "_formato_unico": formato} if formato else {"intent": "message"}
+        voz_pedida = any(_valid_audio_field(k, intent.get(k)) for k in ("tts_voice", "tts_speed"))
+        # "Só hoje" sobre seção ou horário não é pedido de voz: recebia o texto fixo de
+        # VOZ. Vira conversa, e o chat aponta o /me pela regra do relatório.
+        if not formato and not voz_pedida:
+            return {"intent": "message"}
+        return {"intent": "preference", "_gravar": {}, "_quer_relatorio": False,
+                "_pontual_sozinho": formato or "voz", "_voz_ignorada": bool(formato and voz_pedida)}
     gravar = {k: intent.get(k) for k in _AUDIO_FIELDS if _valid_audio_field(k, intent.get(k))}
     if not (gravar or intent.get("reset") or intent.get("list_voices")):
         return {"intent": "message"}
@@ -486,6 +517,19 @@ def _preference_reply(intent: dict, user: dict | None) -> str:
       relatório tinha voltado (achado 1, 4ª revisão do Apolo).
     - Pedido MISTO (voz/áudio + seção/horário): o `reply` confirmaria as duas coisas,
       e só uma aconteceu."""
+    pontual = intent.get("_pontual_sozinho")
+    if pontual == "voz":
+        return ('Voz e velocidade eu só troco de vez: "muda a voz para onyx", '
+                '"fala mais devagar". Pra voltar, é só pedir de novo.')
+    if pontual:
+        formato = "texto" if pontual == "texto" else "áudio"
+        # "muda a voz para onyx e manda essa em texto": a voz não é gravada (o pedido
+        # inteiro veio marcado como "só agora"), e calar isso era a voz sumir sem aviso.
+        voz = (' A voz eu não troquei: manda "muda a voz para ..." numa mensagem só.'
+               if intent.get("_voz_ignorada") else "")
+        return (f'Pra só uma resposta em {formato}, manda a pergunta junto, assim: '
+                f'"em {formato} dessa vez: como tá o dólar?". '
+                f'Pra mudar de vez: "desativa áudio" ou "ativa áudio".{voz}')
     onde = selflink.onde_ajustar(selflink.panel_link(user))
     if intent.get("reset"):
         return f"Voz e áudio voltaram ao padrão. Seções e horário do relatório diário se ajustam {onde}"
@@ -649,6 +693,8 @@ async def whatsapp_webhook(request: Request):
         )
 
         intent = _settle_preference(intent)
+        # "manda em texto dessa vez": formato desta resposta só, sem gravar nada.
+        formato_unico = intent.get("_formato_unico")
         if intent.get("intent") == "preference":
             gravar = intent["_gravar"]
             if intent.get("reset"):
@@ -668,8 +714,10 @@ async def whatsapp_webhook(request: Request):
                 if gravar.get("tts_speed") is not None:
                     tts_speed = gravar["tts_speed"]
             reply = _preference_reply(intent, authorized)
-            # list_voices nunca é enviado como áudio — é uma lista visual
-            if (not intent.get("list_voices") and not selflink.has_link(reply)
+            # Lista de vozes e o texto fixo do pedido pontual ensinam a escrever um
+            # comando: falados, não servem para copiar.
+            if (not intent.get("list_voices") and not intent.get("_pontual_sozinho")
+                    and not selflink.has_link(reply)
                     and bool((current_prefs or {}).get("audio_for_text", False))):
                 try:
                     whatsapp.send_audio(target_phone, media_service.text_to_speech(reply, voice=tts_voice, speed=tts_speed))
@@ -730,7 +778,7 @@ async def whatsapp_webhook(request: Request):
                     if gravar.get("tts_speed") is not None:
                         tts_speed = gravar["tts_speed"]
                 reply = _preference_reply(audio_intent, authorized)
-                if selflink.has_link(reply):
+                if selflink.has_link(reply) or audio_intent.get("_pontual_sozinho"):
                     whatsapp.send_message(target_phone, reply)
                     return {"status": "ok", "reason": "preference_updated"}
                 try:
@@ -744,13 +792,16 @@ async def whatsapp_webhook(request: Request):
             _t = time.monotonic()
             reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"),
                                              sections={}, user_phone=target_phone,
-                                             panel_link=_link_for_model(authorized))
+                                             panel_link=_link_for_model(authorized),
+                                             formato_resposta=audio_intent.get("_formato_unico"))
             logger.info("audio: report %.1fs", time.monotonic() - _t)
             supabase.save_message(target_phone, "assistant", reply)
             reply = selflink.fill_link(reply, authorized)  # histórico guarda o marcador
             _maybe_summarize(target_phone)
 
-            if audio_for_media and not selflink.has_link(reply):
+            formato_audio = audio_intent.get("_formato_unico")
+            falar = (formato_audio == "audio") if formato_audio else audio_for_media
+            if falar and not selflink.has_link(reply):
                 try:
                     audio_bytes = media_service.text_to_speech(reply, voice=tts_voice, speed=tts_speed)
                     whatsapp.send_audio(target_phone, audio_bytes)
@@ -812,11 +863,13 @@ async def whatsapp_webhook(request: Request):
         reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"),
                                          sections={}, anchored_news=anchored_news,
                                          user_phone=target_phone,
-                                         panel_link=_link_for_model(authorized))
+                                         panel_link=_link_for_model(authorized),
+                                         formato_resposta=formato_unico)
         supabase.save_message(target_phone, "assistant", reply)
         reply = selflink.fill_link(reply, authorized)  # histórico guarda o marcador
         _maybe_summarize(target_phone)
-        if audio_for_text and not selflink.has_link(reply):
+        falar = (formato_unico == "audio") if formato_unico else audio_for_text
+        if falar and not selflink.has_link(reply):
             try:
                 audio_bytes = media_service.text_to_speech(reply, voice=tts_voice, speed=tts_speed)
                 whatsapp.send_audio(target_phone, audio_bytes)

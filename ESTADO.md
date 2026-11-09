@@ -258,13 +258,20 @@ erra 7 (negação e falso positivo ligam áudio); o Haiku sozinho acertou 20/20.
      (`fullmatch`); o resto vai ao Haiku, cujo prompt ganhou "pergunta de conteúdo é
      conversa" e "voz sem nome → lista". Haiku real, 2 rodadas: 54/55 certos (o desvio é
      de alcance). Medir: `pytest backend/tests/test_quick_tts.py -m unit -q`.
-  1c. ✅ (branch `chore/model-ids-from-env`, PR aberto 09/11) Nome dos modelos sai de
+  1c. ✅ **PR #40 EM PRODUÇÃO 09/11/2026 16:48 BRT** (merge `0b06eda` pelo Matheus, deploy
+     dos dois projetos `success`, health `ok`). Nome dos modelos sai de
      `backend/services/models.py` (`ANTHROPIC_HAIKU_MODEL`/`ANTHROPIC_SONNET_MODEL`, vazio =
      padrão) — eram 12 cravados. Teste varre `backend/` e reprova `claude-` fora dali. A
      sonda do boletim diário testa os DOIS modelos; 404 de modelo vira ❌ com o nome que
      falhou (antes era ⚠️ "não respondeu agora"); o cron de alertas para e avisa.
      Conferido com a API real: modelo aposentado devolve 404 `model: <nome>`.
-  1d. 🟡 "manda em texto dessa vez" grava PARA SEMPRE e o Haiku responde "próxima resposta".
+  1d. ✅ (branch `fix/one-off-reply-format`, PR aberto 09/11) "manda em texto dessa vez"
+     gravava PARA SEMPRE. Agora pedido "só agora" NUNCA grava: com pergunta junto, a
+     resposta sai no formato pedido (o Sonnet é avisado: `formato_resposta`); sozinho,
+     texto fixo ensinando a mandar junto; voz/velocidade pontual, texto fixo. Sem estado
+     no banco, de propósito. Levou 3 rodadas: as 2 primeiras medições não cobriam
+     pergunta junto nem voz pontual. Medir com o Haiku real:
+     `pytest backend/tests/test_formato_unico.py -m smoke -q` (8 casos).
   2. 🟡 `/me` tem a caixa "Seções do chat" gravando o campo morto `sections` ("Salvo." sem
      efeito) — e o bot agora manda gente para lá. O `!ajustes` também mostra seções e
      horário mortos.

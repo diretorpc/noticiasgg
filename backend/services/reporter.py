@@ -134,6 +134,7 @@ Inventar ou estimar fatos não é permitido em hipótese alguma.
 
 Capacidades reais — NUNCA diga que não consegue fazer o que está listado abaixo, NUNCA mencione "plataforma", "interface" ou "configuração externa":
 - Você CONSEGUE responder em áudio (voz). Se o usuário pediu áudio e o pedido chegou até você, ele NÃO foi aplicado: NUNCA diga que ativou. Isso não é com o admin — diga só, em uma frase, que para ligar basta mandar "ativa áudio" (e "desativa áudio" para desligar).
+- Voz e velocidade da fala o usuário também troca pelo chat, NÃO com o admin: "muda a voz para onyx", "fala mais devagar". Se o pedido chegou até você, não foi aplicado — diga isso e ensine o comando.
 - Você CONSEGUE ler e interpretar imagens, fotos e documentos PDF.
 - Você CONSEGUE transcrever áudios.
 
@@ -549,7 +550,8 @@ Pelo chat você NÃO consegue mudar: as seções do relatório diário, o horár
 - A mensagem pede INFORMAÇÃO ("quero saber só do mercado hoje", "me fala de cripto")? Responda a informação normalmente: pergunta não é pedido de configuração."""
 
 
-def _build_system(user_name: str | None, data: dict, panel_link: str | None = None) -> str:
+def _build_system(user_name: str | None, data: dict, panel_link: str | None = None,
+                  formato_resposta: str | None = None) -> str:
     """Prompt do turno. `data` cheio = relatório diário; vazio = conversa.
 
     A data de hoje entra explícita e etiquetada. Sem ela o modelo ancora no corte
@@ -559,6 +561,16 @@ def _build_system(user_name: str | None, data: dict, panel_link: str | None = No
     system = _SYSTEM_MARKET if data else _SYSTEM_CHAT
     if not data:
         system += _REPORT_RULES.format(onde=selflink.onde_ajustar(panel_link))
+    if formato_resposta:
+        # Pedido "só dessa vez em áudio/texto" chega aqui JÁ atendido pelo webhook. Sem
+        # esta linha, a regra de áudio acima fazia o Sonnet abrir — falando, em áudio —
+        # com "O pedido de áudio não foi aplicado" (Sonnet real, 2 de 2; 7ª revisão do
+        # Apolo) e ainda ensinar o comando PERMANENTE a quem pediu só uma vez.
+        nome = "áudio" if formato_resposta == "audio" else "texto"
+        system += (
+            f"\n\nEsta resposta já sai em {nome}, como o usuário pediu só para esta "
+            f"vez. Não comente o formato nem ensine comando de áudio: responda a pergunta."
+        )
     hoje = datetime.datetime.now(_BRT).date().isoformat()
     system += (
         f"\n\n<hoje>{hoje}</hoje>\n"
@@ -651,6 +663,7 @@ def generate_report(
     anchored_news: dict | None = None,
     user_phone: str | None = None,
     panel_link: str | None = None,
+    formato_resposta: str | None = None,
 ) -> str:
     """Gera resposta do agente.
 
@@ -664,11 +677,13 @@ def generate_report(
     saída, que o escopo é a lista — nunca finge que é pessoal.
     panel_link: link /me de quem fala, para a regra "o que você não altera" apontar
     o lugar certo; None manda pedir o link ao admin.
+    formato_resposta: "audio"/"texto" quando o usuário pediu esse formato só para esta
+    resposta ("dessa vez em áudio: ..."); o webhook já entrega nele.
     """
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], timeout=_ANTHROPIC_TIMEOUT, max_retries=1)
     data = _collect_all(sections=sections)
 
-    system = _build_system(user_name, data, panel_link)
+    system = _build_system(user_name, data, panel_link, formato_resposta)
 
     ticker_data = _extract_ticker_data(user_message)
 
