@@ -188,7 +188,13 @@ de leitura como zero invenções). E rotacionar `SCRAPER_API_KEY`.
 
 ## 09/11/2026 — seção "Pesquisas eleitorais" aposentada (eleições de 2026 encerradas)
 
-Pedido do Matheus. Branch `chore/remove-election-polls` → PR, **merge é do Matheus**.
+Pedido do Matheus. **PR #36 EM PRODUÇÃO 09/11/2026 15:34 BRT** (merge `7c1715b`; deploy
+dos dois projetos Vercel `success`). Conferir: `curl -s https://noticiasgg.vercel.app/api/health`
+não tem mais o check `polls`, e `/api/collectors/polls-br` dá 404.
+**PR #37 (leitor de preferências) EM PRODUÇÃO 09/11/2026 15:35 BRT** (merge `51fe201` pelo
+Matheus; deploy dos dois projetos `success`, health `ok`).
+Próximo: verificador de áudio. Medido 09/11 (20 frases): o regex `_quick_audio_check`
+erra 7 (negação e falso positivo ligam áudio); o Haiku sozinho acertou 20/20.
 
 - Coletor `polls_br.py` e `test_save_polls.py` saíram do repo. Cópia local em
   `_deprecated/polls-2026-11/` (pasta fora do git); o original segue no histórico:
@@ -241,9 +247,17 @@ Pedido do Matheus. Branch `chore/remove-election-polls` → PR, **merge é do Ma
   link sai escrita, nunca em TTS. Medido com Haiku+Sonnet reais pelo webhook: nenhuma
   confirmação falsa. Medir: `pytest backend/tests/test_preference_parser.py -m unit -q`.
 - **Fila deixada por esta branch (uma por vez):**
-  1. 🔴 Regex de áudio (`_quick_audio_check`/`_AUDIO_ALL_ON_RE`) LIGA áudio em "não quero
-     áudio", "prefere uma voz masculina", "fala sobre a voz do Lula"; e o de voz engole
-     o resto ("muda a voz para nova e tira política" ignora a política). Em produção hoje.
+  1. ✅ Regex de áudio (`_quick_audio_check`) REMOVIDO na branch `fix/remove-audio-regex`
+     (09/11): nas mesmas 36 frases, o regex dava 8 decisões erradas (todas LIGANDO áudio);
+     o Haiku sozinho, 34/36 sem inverter nenhuma. Prompt do chat não promete mais
+     "Ativando agora!" nem manda ao admin.
+  1b. 🔴 PRÓXIMO: `_quick_tts_check` (velocidade/voz) grava preferência a partir de
+     pergunta de mercado: "a inflação acelera?" → velocidade 0.92; "voz nova no
+     ministério?" → voz nova; "o que as vozes do mercado dizem" → lista de vozes. A
+     pergunta é engolida. Em produção hoje (medido pelo Apolo, sem API).
+  1c. 🟡 Modelo do Haiku cravado em `main.py` (`claude-haiku-4-5-20251001`) — fornecedor
+     muda quando quiser, vai para variável de ambiente; e nada vigia o leitor falhando.
+  1d. 🟡 "manda em texto dessa vez" grava PARA SEMPRE e o Haiku responde "próxima resposta".
   2. 🟡 `/me` tem a caixa "Seções do chat" gravando o campo morto `sections` ("Salvo." sem
      efeito) — e o bot agora manda gente para lá. O `!ajustes` também mostra seções e
      horário mortos.
