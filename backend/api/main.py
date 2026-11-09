@@ -151,45 +151,46 @@ def _handle_admin_command(text: str) -> str | None:
     return None
 
 
-_VERB_FALA = r"\bfal[ae][r]?\b"  # fala / fale / falar / faler
-_TTS_SPEED_BIG_DOWN_RE = re.compile(
-    _VERB_FALA + r".{0,10}\b(bem|muito|bastante)\b.{0,10}\b(mais\s+)?(devagar|lento|pausad)",
-    re.IGNORECASE,
-)
-_TTS_SPEED_SMALL_DOWN_RE = re.compile(
-    _VERB_FALA + r".{0,10}\b(mais\s+)?(devagar|lento|pausad)"
-    r"|\b(mais\s+)?(devagar|lento|pausad)\b.{0,10}\bpor\s+favor\b"
-    r"|\bvelocidade\b.{0,15}\b(mais\s+)?(devagar|lento|baixa|menor)\b",
-    re.IGNORECASE,
-)
-_TTS_SPEED_BIG_UP_RE = re.compile(
-    _VERB_FALA + r".{0,10}\b(bem|muito|bastante)\b.{0,10}\b(mais\s+)?(r[áa]pido|veloz|acelerado)"
-    r"|\bvelocidade\b.{0,15}\b(bem|muito|bastante)\b.{0,15}\b(mais\s+)?(r[áa]pido|alta|maior)\b",
-    re.IGNORECASE,
-)
-_TTS_SPEED_SMALL_UP_RE = re.compile(
-    _VERB_FALA + r".{0,10}\b(mais\s+)?(r[áa]pid[oa]|veloz|acelera)"
-    r"|\bacelera\b"
-    r"|\bvelocidade\b.{0,15}\b(mais\s+)?(r[áa]pid[oa]|alta|maior)\b",
-    re.IGNORECASE,
-)
-_TTS_SPEED_NORMAL_RE = re.compile(
-    r"\bvelocidade\s+(normal|padr[ãa]o|original|default)\b"
-    r"|\bvolta\b.{0,15}\bvelocidade\b",
-    re.IGNORECASE,
-)
-_TTS_VOICE_RE = re.compile(
-    r"\b(muda[r]?|usa[r]?|quero|coloca[r]?|ativa[r]?|testa[r]?|bota[r]?|tenta[r]?)\b.{0,20}\bvoz\b.{0,15}(alloy|echo|fable|nova|onyx|shimmer)"
-    r"|\bvoz\s+(para\s+|pra\s+)?(alloy|echo|fable|nova|onyx|shimmer)"
-    r"|\b(alloy|echo|fable|nova|onyx|shimmer)\b.{0,10}\b(voz|voice)\b",
-    re.IGNORECASE,
-)
-_TTS_LIST_VOICES_RE = re.compile(
-    r"\b(quais?|que|mostre?|lista[r]?|ver?|quero\s+ver)\b.{0,20}\b(vozes?|opções?\s+de\s+voz)\b"
-    r"|\bvozes?\s+(disponíveis?|tem|existem|há|posso\s+escolher)\b"
-    r"|\bque\s+vozes?\s+(tem|há|existem)\b",
-    re.IGNORECASE,
-)
+# Comandos de velocidade/voz só valem quando a mensagem INTEIRA é o comando (fullmatch).
+# A versão antiga procurava palavras soltas em qualquer lugar e engolia pergunta de
+# mercado — 12 de 12 medidas em 09/11/2026: "a inflação acelera em outubro?" mudava a
+# velocidade, "qual a nova voz da oposição?" trocava a voz, "o que as vozes do mercado
+# dizem?" devolvia a lista. Frase com mais coisa vai ao Haiku, que lê o sentido.
+_CMD_PREFIXO = r"(?:(?:ei|oi|agora|por\s+favor|pfv)[\s,]+)?"
+_CMD_SUFIXO = r"(?:[\s,]+(?:por\s+favor|pfv|pls|please|a[ií]))*"
+_FALA = r"(?:fala|fale|falar)"
+_MUITO = r"(?:bem|muito|bastante)"
+_DEVAGAR = r"(?:devagar|lento|pausado)"
+_RAPIDO = r"(?:r[áa]pido|veloz|acelerado)"
+_NOMES_VOZ = r"(alloy|echo|fable|nova|onyx|shimmer)"
+
+
+def _comando(nucleo: str) -> re.Pattern:
+    return re.compile(f"{_CMD_PREFIXO}(?:{nucleo}){_CMD_SUFIXO}", re.IGNORECASE)
+
+
+_TTS_SPEED_BIG_DOWN_RE = _comando(rf"(?:{_FALA}\s+)?{_MUITO}\s+mais\s+{_DEVAGAR}")
+_TTS_SPEED_SMALL_DOWN_RE = _comando(
+    rf"(?:{_FALA}\s+)?(?:um\s+pouco\s+)?mais\s+{_DEVAGAR}|{_FALA}\s+{_DEVAGAR}"
+    r"|velocidade\s+mais\s+(?:baixa|lenta)|diminui\s+a\s+velocidade")
+_TTS_SPEED_BIG_UP_RE = _comando(
+    rf"(?:{_FALA}\s+)?{_MUITO}\s+mais\s+{_RAPIDO}|velocidade\s+{_MUITO}\s+mais\s+(?:alta|r[áa]pida)")
+_TTS_SPEED_SMALL_UP_RE = _comando(
+    rf"(?:{_FALA}\s+)?(?:um\s+pouco\s+)?mais\s+{_RAPIDO}|{_FALA}\s+{_RAPIDO}|acelera"
+    r"|velocidade\s+mais\s+(?:alta|r[áa]pida)|aumenta\s+a\s+velocidade")
+_TTS_SPEED_NORMAL_RE = _comando(
+    r"velocidade\s+(?:normal|padr[ãa]o|original|default)"
+    r"|volta\s+(?:a\s+|pra\s+|para\s+)?(?:a\s+)?velocidade(?:\s+(?:normal|padr[ãa]o|original))?")
+# "voz" é obrigatória: "nova" sozinha é palavra comum, e "quero uma voz nova" é pedir
+# OUTRA voz, não a chamada "nova" (que já é a padrão) — esse vai ao Haiku.
+_TTS_VOICE_RE = _comando(
+    r"(?:(?:muda|mudar|troca|trocar|usa|usar|quero|coloca|bota|testa|ativa)\s+(?:a\s+)?)?"
+    rf"voz\s+(?:para\s+|pra\s+)?(?:a\s+)?{_NOMES_VOZ}|{_NOMES_VOZ}\s+(?:voz|voice)")
+_TTS_LIST_VOICES_RE = _comando(
+    r"(?:quais|que)\s+(?:s[ãa]o\s+)?(?:as\s+)?vozes"
+    r"(?:\s+(?:tem|t[êe]m|h[áa]|existem|dispon[íi]veis|posso\s+escolher))?"
+    r"|(?:lista|listar|mostra|mostre|mostrar|ver|quero\s+ver)\s+(?:as\s+)?vozes(?:\s+dispon[íi]veis)?"
+    r"|vozes(?:\s+dispon[íi]veis)?|op[çc][õo]es\s+de\s+voz")
 
 _VOICES_LIST_REPLY = (
     "🎙 *Vozes disponíveis:*\n"
@@ -204,38 +205,44 @@ _VOICES_LIST_REPLY = (
 
 
 def _quick_tts_check(text: str, current_speed: float = 0.85) -> dict | None:
-    """Pré-check determinístico para comandos de velocidade e voz TTS."""
+    """Pré-check determinístico para comandos de velocidade e voz TTS — só quando a
+    mensagem inteira é o comando (ver `_comando`)."""
     base = {"intent": "preference", "sections": None, "report_time": None,
             "audio_for_text": None, "audio_for_media": None, "reset": False,
             "list_voices": False}
+    # `rstrip`, não `re.sub(...+$)`: a regex era quadrática — 65 mil caracteres de
+    # pontuação seguidos de uma letra levavam 10,66 s (achado 1, 7ª revisão do Apolo).
+    # O `?` NÃO sai: "mais rápido?" no meio de uma conversa é pergunta, vai ao Haiku.
+    # Só a lista de vozes aceita o `?` ("quais vozes tem?").
+    text = re.sub(r"\s+", " ", text.strip()).rstrip(" .!…")
 
-    if _TTS_LIST_VOICES_RE.search(text):
+    if _TTS_LIST_VOICES_RE.fullmatch(text.rstrip(" ?")):
         return {**base, "list_voices": True, "tts_voice": None, "tts_speed": None, "reply": _VOICES_LIST_REPLY}
 
-    voice_match = _TTS_VOICE_RE.search(text)
+    voice_match = _TTS_VOICE_RE.fullmatch(text)
     if voice_match:
         # Extrai o nome da voz de qualquer grupo que tenha capturado
         voice = next((g for g in voice_match.groups() if g and g.lower() in ("alloy", "echo", "fable", "nova", "onyx", "shimmer")), None)
         if voice:
             return {**base, "tts_voice": voice.lower(), "tts_speed": None, "reply": f"Voz alterada para *{voice.lower()}*."}
 
-    if _TTS_SPEED_BIG_DOWN_RE.search(text):
+    if _TTS_SPEED_BIG_DOWN_RE.fullmatch(text):
         new_speed = round(max(0.5, current_speed - 0.15), 2)
         return {**base, "tts_voice": None, "tts_speed": new_speed, "reply": f"Falando mais devagar agora (velocidade: {new_speed})."}
 
-    if _TTS_SPEED_SMALL_DOWN_RE.search(text):
+    if _TTS_SPEED_SMALL_DOWN_RE.fullmatch(text):
         new_speed = round(max(0.5, current_speed - 0.07), 2)
         return {**base, "tts_voice": None, "tts_speed": new_speed, "reply": f"Um pouco mais devagar (velocidade: {new_speed})."}
 
-    if _TTS_SPEED_BIG_UP_RE.search(text):
+    if _TTS_SPEED_BIG_UP_RE.fullmatch(text):
         new_speed = round(min(1.5, current_speed + 0.15), 2)
         return {**base, "tts_voice": None, "tts_speed": new_speed, "reply": f"Falando mais rápido agora (velocidade: {new_speed})."}
 
-    if _TTS_SPEED_SMALL_UP_RE.search(text):
+    if _TTS_SPEED_SMALL_UP_RE.fullmatch(text):
         new_speed = round(min(1.5, current_speed + 0.07), 2)
         return {**base, "tts_voice": None, "tts_speed": new_speed, "reply": f"Um pouco mais rápido (velocidade: {new_speed})."}
 
-    if _TTS_SPEED_NORMAL_RE.search(text):
+    if _TTS_SPEED_NORMAL_RE.fullmatch(text):
         return {**base, "tts_voice": None, "tts_speed": 0.95, "reply": "Velocidade normal (0.95)."}
 
     return None
@@ -297,10 +304,13 @@ Regras de áudio — dois campos independentes (audio_for_text e audio_for_media
 Regras de voz TTS (tts_voice):
 - "muda a voz para X", "quero a voz X", "usa a voz X", "voz X" → tts_voice: "X"
 - Vozes válidas: alloy, echo, fable, nova, onyx, shimmer. Ignorar se não for uma dessas.
+- Voz descrita ("voz masculina" → echo, "mais grave" → onyx, "feminina" → shimmer) → a da lista abaixo que bate.
+- Pedido de OUTRA voz sem dizer qual nem descrever ("quero uma voz nova", "outra voz", "troca a voz") → tts_voice: null e list_voices: true. "nova" só é a voz quando usada como NOME ("usa a voz nova").
 - Se não mencionado → tts_voice: null
 
 Regras de velocidade TTS (tts_speed):
-- ATENÇÃO: mensagens com "rápido", "devagar", "veloz" ou "lento" são SEMPRE tts_speed. Nunca audio_for_text.
+- ATENÇÃO: pedido de velocidade da FALA ("rápido", "devagar", "veloz", "lento") é tts_speed, nunca audio_for_text.
+- Mas se a mensagem pergunta CONTEÚDO (mercado, preço, notícia, explicação), é CATEGORIA 2, mesmo com essas palavras: "me fala rápido: o dólar subiu?", "fala devagar que eu sou leigo, o que é Selic?", "a inflação acelera?".
 - A velocidade atual está no contexto como "velocidade_atual: X.XX"
 - "fala mais devagar", "fale mais devagar", "um pouco mais devagar", "velocidade mais baixa" → tts_speed: max(0.5, velocidade_atual - 0.07), 2 casas decimais
 - "fala bem mais devagar", "muito mais devagar", "bem mais lento" → tts_speed: max(0.5, velocidade_atual - 0.15), 2 casas decimais
