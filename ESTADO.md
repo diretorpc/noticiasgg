@@ -208,8 +208,13 @@ Pedido do Matheus. Branch `chore/remove-election-polls` → PR, **merge é do Ma
   mudança foi desarmada aqui: prompt de "7 seções" + `seções_atuais` com `polls_br`
   fez o Haiku real zerar TODAS as seções em 5 de 8 pedidos "remove cripto".
   `main._known_sections` tira a chave antes do modelo e antes de salvar.
-- `pytest.ini` ganhou `norecursedirs = _deprecated` (rodar `pytest` puro na raiz pegava
-  testes de código aposentado e ficava vermelho; o CI roda `pytest backend` e não via).
+  2ª revisão: se o parser devolver SÓ chave aposentada, o filtro dava `{}`, que gravado
+  apagava as escolhas — agora vira `None` ("não mexe"), com teste.
+- `pytest.ini` ganhou `testpaths = backend` (rodar `pytest` puro na raiz pegava testes de
+  `_deprecated/` e de `.claude/worktrees/`; o CI roda `pytest backend` e não via).
+- Fila, achados antigos do Apolo (não são desta mudança): mudar seção por ÁUDIO responde
+  "Feito" e não grava (`main.py`, caminho de áudio fixa `sections=None`, desde 01/06);
+  3 dos 5 testes de `test_webhook_prefs.py` estão sem `@pytest.mark.unit`, fora do CI.
 - 🔴 **Achado do Apolo, ANTERIOR a esta mudança, NÃO consertado:** o leitor de
   preferências por WhatsApp (`main._detect_preference_intent`) está morto em produção.
   O Haiku devolve o JSON dentro de cerca de código (29 de 29 respostas), `json.loads`

@@ -483,7 +483,9 @@ def _known_sections(sections: dict | None) -> dict | None:
     dele para o banco."""
     if sections is None:
         return None
-    return {k: v for k, v in sections.items() if k in reporter.ALL_SECTIONS}
+    # `or None`: sobrando nada, `{}` gravado APAGARIA as seções escolhidas; `None`
+    # é "não mexe" para `save_preferences` (achado 1, 2ª revisão do Apolo).
+    return {k: v for k, v in sections.items() if k in reporter.ALL_SECTIONS} or None
 
 
 def _detect_preference_intent(text: str, current_sections: dict | None = None, tts_speed: float = 0.85) -> dict:

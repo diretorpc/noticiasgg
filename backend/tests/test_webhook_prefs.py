@@ -120,3 +120,26 @@ def test_webhook_nao_salva_secao_desconhecida_devolvida_pelo_parser():
         resp = client.post("/api/webhook", json=_make_webhook("remove cripto"))
     assert resp.status_code == 200
     assert mock_save.call_args.kwargs["sections"] == {"market": True, "crypto": False}
+
+
+@pytest.mark.unit
+def test_parser_so_com_secao_aposentada_nao_apaga_as_escolhas():
+    """"tira as pesquisas eleitorais" pode voltar como `{"polls_br": False}`. Filtrado,
+    isso vira `{}` — e `{}` gravado apaga as seções escolhidas (achado 1, 2ª revisão
+    do Apolo). Sem seção conhecida, não há o que salvar."""
+    intent_result = {
+        "intent": "preference",
+        "sections": {"polls_br": False},
+        "report_time": None,
+        "reset": False,
+        "reply": "Feito.",
+    }
+    with patch("backend.api.main.supabase.get_authorized", return_value=AUTHORIZED), \
+         patch("backend.api.main.supabase.get_preferences",
+               return_value={"sections": {"market": True, "crypto": True, "polls_br": True}}), \
+         patch("backend.api.main._detect_preference_intent", return_value=intent_result), \
+         patch("backend.api.main.whatsapp.send_message"), \
+         patch("backend.api.main.supabase.save_preferences") as mock_save:
+        resp = client.post("/api/webhook", json=_make_webhook("tira as pesquisas eleitorais"))
+    assert resp.status_code == 200
+    mock_save.assert_not_called()
