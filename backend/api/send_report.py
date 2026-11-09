@@ -100,6 +100,11 @@ async def send_report(payload: SendReportPayload):
             except Exception:
                 logger.warning("generate_report failed for %s, falling back to n8n text", number)
                 text = _personalize(n8n_text, user_name)
+            # "Pode mandar de novo?" é frase de CHAT: num relatório que a pessoa não
+            # pediu, não faz sentido. Vazio ou essa frase = sem relatório gerado.
+            if not text.strip() or text == reporter._RESPOSTA_VAZIA:
+                logger.warning("generate_report sem texto para %s, usando o texto do n8n", number)
+                text = _personalize(n8n_text, user_name)
         else:
             text = _personalize(n8n_text, user_name)
 

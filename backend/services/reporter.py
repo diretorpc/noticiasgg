@@ -3,6 +3,7 @@ import re
 import json
 import logging
 import datetime
+import time
 from anthropic import Anthropic
 
 from backend.collectors import (
@@ -32,6 +33,54 @@ _ANTHROPIC_TIMEOUT = 90.0
 _VALIDATOR_TIMEOUT = 15.0
 _MAX_TOOL_ROUNDS = 6
 _MAX_TOKENS = 2000
+
+# Resposta final SEM texto acontece (Sonnet real, 09/11/2026: 1 em 3 de "quero saber
+# só do mercado hoje"; 0 em 6 na repetição — raro, e nada registrava). Antes virava
+# `""` e o webhook mandava mensagem em branco. Agora: uma chamada extra sem
+# ferramentas pedindo para fechar com o que já levantou — só se sobrar tempo, porque
+# estourar os 300 s da Vercel deixa a pessoa sem NADA — e, falhando, esta frase.
+_RESPOSTA_VAZIA = "Não consegui fechar a resposta agora 😕 Pode mandar de novo?"
+# 170 s, não mais: o relógio começa em `generate_report`, mas o webhook já gastou
+# tempo antes (download/transcrição do áudio) e ainda gasta depois (TTS, envio). A
+# extra (30 s) + validador (15 s) somam até 45 s depois desta porta (achado 2 do Apolo).
+_PRAZO_CHAMADA_EXTRA_S = 170.0
+_TIMEOUT_CHAMADA_EXTRA = 30.0
+# Menor que `_MAX_TOKENS`: 2000 tokens do Sonnet podem não caber nos 30 s.
+_MAX_TOKENS_CHAMADA_EXTRA = 800
+_PEDIDO_DE_FECHAMENTO = ("Responda agora ao usuário, em texto, com o que você já "
+                         "levantou. Não chame ferramentas.")
+
+
+def _primeiro_texto(response) -> str:
+    """O primeiro bloco de texto NÃO vazio. Pegar o primeiro bloco qualquer devolvia
+    `""` quando ele vinha vazio antes do bom."""
+    for block in response.content:
+        texto = getattr(block, "text", None)
+        if isinstance(texto, str) and texto.strip():
+            return texto
+    return ""
+
+
+def _com_pedido_de_fechamento(messages: list[dict], response) -> list[dict]:
+    """Histórico para a chamada extra. Do turno do assistente só fica texto com
+    conteúdo: a API recusa (provado com chamada real, achados 1 e 3 do Apolo) bloco de
+    texto vazio/só espaços e `tool_use` sem `tool_result` — que é o que chega quando o
+    `max_tokens` corta a chamada de ferramenta no meio. Sem nada aproveitável, o pedido
+    entra junto da última mensagem do usuário."""
+    uteis = [b for b in response.content
+             if getattr(b, "type", None) == "text" and (getattr(b, "text", "") or "").strip()]
+    if uteis:
+        return messages + [
+            {"role": "assistant", "content": uteis},
+            {"role": "user", "content": _PEDIDO_DE_FECHAMENTO},
+        ]
+    ultima = dict(messages[-1])
+    conteudo = ultima["content"]
+    if isinstance(conteudo, list):
+        ultima["content"] = conteudo + [{"type": "text", "text": _PEDIDO_DE_FECHAMENTO}]
+    else:
+        ultima["content"] = f"{conteudo}\n\n{_PEDIDO_DE_FECHAMENTO}"
+    return messages[:-1] + [ultima]
 
 ALL_SECTIONS = [
     "market", "crypto", "indicators_us", "indicators_br",
@@ -680,6 +729,7 @@ def generate_report(
     formato_resposta: "audio"/"texto" quando o usuário pediu esse formato só para esta
     resposta ("dessa vez em áudio: ..."); o webhook já entrega nele.
     """
+    inicio = time.monotonic()
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], timeout=_ANTHROPIC_TIMEOUT, max_retries=1)
     data = _collect_all(sections=sections)
 
@@ -824,14 +874,27 @@ def generate_report(
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": tool_results})
         else:
-            for block in response.content:
-                if hasattr(block, "text"):
-                    validador = Anthropic(
-                        api_key=os.environ["ANTHROPIC_API_KEY"],
-                        timeout=_VALIDATOR_TIMEOUT, max_retries=0,
-                    )
-                    return _validate_and_fix(block.text, data, validador, tool_corpus)
-            return ""
+            texto = _primeiro_texto(response)
+            if not texto:
+                logger.warning("reporter: resposta final sem texto (stop_reason=%s, %d blocos, %d rodadas)",
+                               response.stop_reason, len(response.content), rounds)
+                if time.monotonic() - inicio < _PRAZO_CHAMADA_EXTRA_S:
+                    extra = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"],
+                                      timeout=_TIMEOUT_CHAMADA_EXTRA, max_retries=0)
+                    try:
+                        texto = _primeiro_texto(extra.messages.create(
+                            model=models.sonnet(), max_tokens=_MAX_TOKENS_CHAMADA_EXTRA, system=system,
+                            messages=_com_pedido_de_fechamento(messages, response)))
+                    except Exception as e:
+                        logger.warning("reporter: chamada extra falhou: %s", sanitize_error(e))
+                if not texto:
+                    logger.warning("reporter: sem texto também na chamada extra — mensagem honesta")
+                    return _RESPOSTA_VAZIA
+            validador = Anthropic(
+                api_key=os.environ["ANTHROPIC_API_KEY"],
+                timeout=_VALIDATOR_TIMEOUT, max_retries=0,
+            )
+            return _validate_and_fix(texto, data, validador, tool_corpus)
 
 
 def describe_config() -> dict:

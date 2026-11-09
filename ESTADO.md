@@ -283,7 +283,12 @@ erra 7 (negação e falso positivo ligam áudio); o Haiku sozinho acertou 20/20.
      `/me`. Colunas e dados no Supabase intactos; só `send_report.py` (n8n, desligado) e o
      contexto `seções_atuais` do leitor do Haiku ainda leem. Medir:
      `pytest backend/tests/test_campo_morto.py -m unit -q`.
-  3. 🟡 `generate_report` pode devolver `""` (medido 1 de 3 no Sonnet real) → mensagem vazia.
+  3. ✅ (branch `fix/empty-chat-reply`, PR aberto 09/11) `generate_report` devolvia `""`
+     (1 de 3 no Sonnet real; 0 de 6 na repetição). Agora: pega o 1º texto NÃO vazio;
+     sem texto, loga `reporter: resposta final sem texto (stop_reason=…)` e faz UMA
+     chamada extra sem ferramentas (só se sobrar tempo, porta em 170 s); falhando, manda
+     "Não consegui fechar a resposta agora 😕 Pode mandar de novo?". Nunca mensagem em
+     branco. Medir a frequência em produção: procurar esse warning nos logs da Vercel.
   4. ✅ (PR #42, em produção) `/me` e admin recusam com 422 `tts_speed` fora de 0.5–1.5 e voz
      fora da lista — regra única em `backend/services/audio_prefs.py`, a mesma do WhatsApp.
   5. 🟡 NOVO: a grade do `/me` responde "Salvo" mesmo com `use_new_report_engine` desligado
