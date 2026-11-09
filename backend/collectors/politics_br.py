@@ -11,12 +11,15 @@ router = APIRouter()
 NEWSAPI_URL = "https://newsapi.org/v2/everything"
 _MAX_AGE = timedelta(hours=72)
 
+# Sem ano e sem campanha: "eleições 2026" sobreviveu à eleição e seguiu trazendo
+# análise de derrota e pesquisa pós-eleição. Comparação medida em 09/11/2026 na
+# NewsAPI real — ver ESTADO.md.
 QUERIES = [
-    "política Brasil eleições 2026",
+    "Lula 4 ministérios",
     "Lula governo economia reforma",
     "congresso senado câmara votação",
     "banco central selic fiscal déficit",
-    "candidatos eleições 2026 pesquisa",
+    "orçamento governo arcabouço fiscal",
 ]
 
 

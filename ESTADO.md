@@ -283,7 +283,8 @@ erra 7 (negação e falso positivo ligam áudio); o Haiku sozinho acertou 20/20.
      `/me`. Colunas e dados no Supabase intactos; só `send_report.py` (n8n, desligado) e o
      contexto `seções_atuais` do leitor do Haiku ainda leem. Medir:
      `pytest backend/tests/test_campo_morto.py -m unit -q`.
-  3. ✅ (branch `fix/empty-chat-reply`, PR aberto 09/11) `generate_report` devolvia `""`
+  3. ✅ **PR #43 EM PRODUÇÃO 09/11/2026 20:01 BRT** (merge `4f6aa05`, deploy dos dois
+     projetos `success`, health `ok`). `generate_report` devolvia `""`
      (1 de 3 no Sonnet real; 0 de 6 na repetição). Agora: pega o 1º texto NÃO vazio;
      sem texto, loga `reporter: resposta final sem texto (stop_reason=…)` e faz UMA
      chamada extra sem ferramentas (só se sobrar tempo, porta em 170 s); falhando, manda
@@ -301,8 +302,26 @@ erra 7 (negação e falso positivo ligam áudio); o Haiku sozinho acertou 20/20.
   6. 🟡 Anotado pelo Apolo, já existia: "volta pro padrão" usa `delete_preferences` e apaga a
      linha inteira de `user_preferences`, inclusive `sections`/`report_time` antigos.
      Decidir se fica assim.
-- Fora do escopo, anotado: `politics_br.QUERIES` ainda busca "eleições 2026" e
-  "candidatos eleições 2026 pesquisa" — vai trazer notícia velha.
+- ✅ (branch `claude/politica-pos-eleicao-08da92`, PR aberto 09/11) `politics_br.QUERIES` não
+  busca mais a campanha: "política Brasil eleições 2026" → "Lula 4 ministérios" e
+  "candidatos eleições 2026 pesquisa" → "orçamento governo arcabouço fiscal". Medido na
+  NewsAPI real em 09/11 (8 requisições): a busca de candidatos trazia 0 de 5 dentro da
+  janela de 72 h (`_MAX_AGE`), e a de eleições trazia 5 de 5 frescas, mas todas de
+  rescaldo da campanha (derrota de Flávio, pesquisa Quaest pós-eleição). As novas: 2 de 5 e
+  1 de 5 frescas, todas de governo e orçamento. Descartadas: "ministro nomeado posse" (0
+  frescas), "Congresso eleito bancadas" (vence na posse de fev/2027 e repetiu a busca
+  velha), "PEC aprovada Câmara Senado" (sobrepõe "congresso senado câmara votação").
+  ⚠️ Volume: a seção perde ~2 notícias frescas por coleta (5+0 → 2+1); as outras 3 buscas
+  NÃO foram medidas, por cota. Se a seção de política sair com menos de 5 itens, é aqui.
+  🟡 Risco que isto agrava (Apolo): `report_prompts._POLITICA` exige EXATAMENTE 5 itens
+  numerados; com 3-4 notícias o Sonnet pode completar a lista inventando. Conserto
+  proposto: "até 5, só os recebidos". Não feito nesta branch.
+  🟡 "Lula 4" escapa da regra do ano mas é data disfarçada: revisar a busca na próxima
+  campanha (2030) ou se o titular mudar.
+  Teste reprova termo de campanha e ano dentro da busca (ano apodrece calado: foi assim que
+  "2026" sobreviveu à eleição). Medir: `pytest backend/tests/test_politics_br.py -m unit -q`.
+  Fora do escopo: `secrets_mask.py:14` e `alert_checker.py:776` citam `politics_br.py:40`,
+  número de linha que já não batia antes desta mudança.
 
 Medir: `pytest backend -m unit -q` e `grep -rn polls_br backend frontend --include=*.py --include=*.tsx`
 (esperado: só `_deprecated/`, nada em backend/frontend).
