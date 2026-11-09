@@ -291,7 +291,8 @@ erra 7 (negação e falso positivo ligam áudio); o Haiku sozinho acertou 20/20.
      branco. Medir a frequência em produção: procurar esse warning nos logs da Vercel.
   4. ✅ (PR #42, em produção) `/me` e admin recusam com 422 `tts_speed` fora de 0.5–1.5 e voz
      fora da lista — regra única em `backend/services/audio_prefs.py`, a mesma do WhatsApp.
-  5. 🟡 EM REVISÃO (branch `claude/me-grade-desligada-50cb50`, sem PR ainda): a grade do
+  5. 🟡 **PR #46 ABERTO 09/11/2026**, falta o merge do Matheus (branch
+     `claude/me-grade-desligada-50cb50`, 2 rodadas do Apolo, 1011 unit): a grade do
      `/me` dizia "Salvo" com `use_new_report_engine` desligado, e o cron o pula. Medido em
      09/11 (Matheus rodou): ninguém atingido HOJE, mas os usuários com envio off estavam a um
      clique do engano. Decisão do Matheus: opção (a), dizer a verdade, o `/me` NUNCA liga a
