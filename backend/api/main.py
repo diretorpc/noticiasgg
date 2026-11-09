@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from anthropic import Anthropic
 
 from backend.collectors import market, crypto, indicators_us, indicators_br, news, commodities_br, politics_br, agro_br, esalq, eia, soja_disponivel
-from backend.services import reporter, whatsapp, supabase, health, selflink
+from backend.services import reporter, whatsapp, supabase, health, selflink, models
 from backend.services import media as media_service
 from backend.services.secrets_mask import sanitize_error
 from backend.api import send_report, cron_report, check_alerts, admin, me, health_digest, cron_investing, cron_soja
@@ -527,7 +527,7 @@ def _detect_preference_intent(text: str, current_sections: dict | None = None, t
     try:
         client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=models.haiku(),
             max_tokens=400,
             system=_PREFERENCE_SYSTEM,
             messages=[{"role": "user", "content": text + context}],

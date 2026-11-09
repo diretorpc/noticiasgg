@@ -10,7 +10,7 @@ from pathlib import Path
 
 from anthropic import Anthropic
 
-from backend.services import report_engine
+from backend.services import models, report_engine
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "sample_data.json"
 
@@ -44,7 +44,7 @@ def run() -> dict:
         ctx = build_ctx(data)
         text = report_engine._render(section, ctx, client)
         judge = client.messages.create(
-            model="claude-sonnet-4-6", max_tokens=200, system=_JUDGE_SYSTEM,
+            model=models.sonnet(), max_tokens=200, system=_JUDGE_SYSTEM,
             messages=[{"role": "user", "content":
                        f"DADOS:\n{json.dumps(ctx['data'], ensure_ascii=False)}\n\nTEXTO:\n{text}"}],
         )

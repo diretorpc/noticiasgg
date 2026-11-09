@@ -11,7 +11,7 @@ from typing import NamedTuple
 from anthropic import Anthropic
 
 from backend.collectors import eia, market
-from backend.services import anthropic_status, supabase, web_search, whatsapp
+from backend.services import anthropic_status, models, supabase, web_search, whatsapp
 from backend.services.alert_rules import RULES, COPOM_DATES_2026, AlertRule
 from backend.services.secrets_mask import sanitize_error
 
@@ -838,7 +838,7 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
         logger.info("news check: classifying '%s'", title[:80])
         try:
             resp = client.messages.create(
-                model="claude-haiku-4-5-20251001",
+                model=models.haiku(),
                 max_tokens=500,
                 system=_NEWS_CLASSIFIER_SYSTEM,
                 messages=[{"role": "user", "content": _build_classifier_input(article, snapshot, recent_titles)}],
@@ -861,7 +861,11 @@ def _check_news(recipients: list[dict], test_mode: bool = False,
                 # cada 15 minutos, para sempre — e antes disto o `continue` engolia
                 # tudo em silêncio: o agente ficava mudo e ninguém era avisado
                 # (incidente de 31/08/2026). Não adianta tentar as próximas: para
-                # o laço e manda o motivo para o WhatsApp do dono.
+                # o laço e manda o motivo para o WhatsApp do dono. O nome do modelo vai
+                # junto, NA FRENTE: o classificador só usa o Haiku, "Haiku ou Sonnet"
+                # fazia o dono adivinhar, e `notify_admin` corta cada erro em 200
+                # caracteres — no fim, o nome seria a primeira coisa a sumir.
+                motivo = f"classificador {models.haiku()}: {motivo}"
                 logger.error("news classify fatal: %s", motivo)
                 if errors is not None:
                     errors.append(f"anthropic: {motivo}")

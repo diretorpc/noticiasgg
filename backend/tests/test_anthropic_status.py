@@ -56,10 +56,13 @@ def test_falha_passageira_NAO_e_permanente():
 # ── a sonda ───────────────────────────────────────────────────────────────────
 
 def test_sonda_gasta_o_minimo_possivel():
-    criado = {}
+    """Sonda o Sonnet TAMBEM desde 09/11/2026: so o Haiku nao avisava quando o
+    modelo do chat e do relatorio fosse aposentado. Com max_tokens=1 o custo extra
+    e da ordem de US$ 0,00003 por dia."""
+    criados = []
 
     def fake_create(**kw):
-        criado.update(kw)
+        criados.append(kw)
         return MagicMock()
 
     cliente = MagicMock()
@@ -67,8 +70,8 @@ def test_sonda_gasta_o_minimo_possivel():
     with patch.object(anthropic_status.anthropic, "Anthropic", return_value=cliente), \
          patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-teste"}):
         assert anthropic_status.sondar() == {"status": "ok"}
-    assert criado["max_tokens"] == 1, "a sonda nao pode gerar texto"
-    assert "haiku" in criado["model"], "sonda em Sonnet custaria 3x sem motivo"
+    assert all(c["max_tokens"] == 1 for c in criados), "a sonda nao pode gerar texto"
+    assert len(criados) == 2, "uma chamada por modelo, nao mais"
 
 
 def test_sonda_com_saldo_zerado_vira_ERROR_com_o_motivo():
@@ -200,3 +203,16 @@ def test_falha_passageira_numa_noticia_NAO_derruba_as_outras():
     errors, chamadas = _rodar_check_news(TimeoutError("estourou"), _ARTIGOS)
     assert errors == [], f"acordou o dono por um timeout: {errors}"
     assert chamadas > 1, "parou o laco por uma falha passageira"
+
+
+def test_modelo_aposentado_para_o_laco_e_diz_qual_modelo():
+    """404 de modelo não depende da notícia: as cinco falhariam igual. Para na
+    primeira e manda o NOME do modelo ao dono — o classificador só usa o Haiku, e a
+    dica genérica "Haiku ou Sonnet" deixava a pessoa adivinhando."""
+    from backend.services import models
+    req = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    resp = httpx.Response(404, request=req, json={"error": {"message": f"model: {models.haiku()}"}})
+    erro = anthropic.NotFoundError(f"model: {models.haiku()}", response=resp, body=None)
+    errors, chamadas = _rodar_check_news(erro, _ARTIGOS)
+    assert chamadas == 1
+    assert any(models.haiku() in e for e in errors), errors

@@ -27,7 +27,7 @@ from collections import Counter
 from anthropic import Anthropic
 
 from backend.collectors import market, news
-from backend.services import alert_checker, supabase
+from backend.services import alert_checker, models, supabase
 
 _BRT = datetime.timezone(datetime.timedelta(hours=-3))
 
@@ -69,7 +69,7 @@ def notas() -> None:
             continue
         try:
             resp = client.messages.create(
-                model="claude-haiku-4-5-20251001",
+                model=models.haiku(),
                 max_tokens=500,
                 system=alert_checker._NEWS_CLASSIFIER_SYSTEM,
                 messages=[{"role": "user", "content": alert_checker._build_classifier_input(

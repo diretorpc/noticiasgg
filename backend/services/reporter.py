@@ -16,7 +16,7 @@ from backend.services.integrity import (
     SYSTEM_VALIDATOR as _SYSTEM_VALIDATOR,
     SYSTEM_VALIDATOR_CHAT as _SYSTEM_VALIDATOR_CHAT,
 )
-from backend.services import selflink, supabase
+from backend.services import models, selflink, supabase
 from backend.services.secrets_mask import sanitize_error
 
 logger = logging.getLogger("noticiasgg")
@@ -729,7 +729,7 @@ def generate_report(
         # resposta final em texto e encerrar o loop dentro do orçamento de tempo.
         use_tools = rounds < _MAX_TOOL_ROUNDS
         create_kwargs: dict = dict(
-            model="claude-sonnet-4-6",
+            model=models.sonnet(),
             max_tokens=_MAX_TOKENS,
             system=system,
             messages=messages,
@@ -823,8 +823,8 @@ def describe_config() -> dict:
     """Snapshot read-only da config do agente para exibição no painel.
     Não inclui secrets."""
     return {
-        "model": "claude-sonnet-4-6",
-        "validator_model": "claude-haiku-4-5-20251001",
+        "model": models.sonnet(),
+        "validator_model": models.haiku(),
         "anthropic_timeout_s": _ANTHROPIC_TIMEOUT,
         "max_tool_rounds": _MAX_TOOL_ROUNDS,
         "max_tokens": _MAX_TOKENS,

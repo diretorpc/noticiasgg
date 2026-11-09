@@ -20,7 +20,7 @@ from datetime import datetime as _real_datetime
 import pytest
 from anthropic import Anthropic
 
-from backend.services import alert_checker
+from backend.services import alert_checker, models
 from backend.tests._constantes import CHAVE_ANTHROPIC_PLACEHOLDER
 
 # Placeholder que `backend/tests/conftest.py` injeta (fixture autouse
@@ -44,7 +44,7 @@ def _classificar(article: dict, publicado_em_hoje: str) -> int:
         {**article, "publicado_em": publicado_em_hoje}, "", [])
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     resp = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+        model=models.haiku(),
         max_tokens=500,
         system=alert_checker._NEWS_CLASSIFIER_SYSTEM,
         messages=[{"role": "user", "content": entrada}],

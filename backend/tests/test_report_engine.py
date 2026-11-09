@@ -1,4 +1,5 @@
 import pytest
+from backend.services import models
 from backend.services import report_engine as re
 
 # Arquivo sem nenhuma chamada de rede (medido rodando o arquivo isolado).
@@ -45,7 +46,7 @@ def test_render_uses_section_prompt_and_returns_text():
     ctx = re.adapt_bolsas({"bolsas": {"IBOVESPA": {"preco": 168277.55, "variacao_pct": -0.1}}})
     out = re._render("bolsas", ctx, client)
     assert "IBOVESPA" in out
-    assert client.calls[0]["model"] == "claude-sonnet-4-6"
+    assert client.calls[0]["model"] == models.sonnet()
     # prompt da seção pedida (e não o de outra seção) foi usado como system
     assert client.calls[0]["system"] == "PROMPT::bolsas"
 
