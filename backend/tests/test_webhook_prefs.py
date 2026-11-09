@@ -32,7 +32,8 @@ def test_webhook_mensagem_normal_nao_salva_preferencias():
     mock_save.assert_not_called()
 
 
-def test_webhook_preferencia_salva_e_responde():
+@pytest.mark.unit
+def test_webhook_pedido_de_secoes_vai_ao_chat_sem_gravar():
     intent_result = {
         "intent": "preference",
         "sections": {"market": False, "crypto": True, "indicators_us": False,
@@ -46,22 +47,19 @@ def test_webhook_preferencia_salva_e_responde():
          patch("backend.api.main.supabase.get_preferences", return_value=None), \
          patch("backend.api.main._detect_preference_intent", return_value=intent_result), \
          patch("backend.api.main.supabase.save_preferences") as mock_save, \
+         patch("backend.api.main.supabase.get_history", return_value=[]), \
+         patch("backend.api.main.supabase.get_summary", return_value=None), \
+         patch("backend.api.main.supabase.save_message"), \
+         patch("backend.api.main.supabase.get_news_by_message_id", return_value=None), \
+         patch("backend.api.main._maybe_summarize"), \
+         patch("backend.api.main.reporter.generate_report", return_value="resposta do chat"), \
          patch("backend.api.main.whatsapp.send_message") as mock_send:
         resp = client.post("/api/webhook", json=_make_webhook("quero só notícias e crypto"))
     assert resp.status_code == 200
-    mock_save.assert_called_once_with(
-        "5534999301855",
-        sections=intent_result["sections"],
-        report_time=intent_result["report_time"],
-        audio_for_text=None,
-        audio_for_media=None,
-        tts_voice=None,
-        tts_speed=None,
-    )
-    mock_send.assert_called_once_with(
-        "5534999301855",
-        "Feito! Seu relatório vai incluir apenas notícias e criptomoedas."
-    )
+    # Seções não se gravam pelo WhatsApp (campo morto): o pedido vai ao chat, cuja
+    # regra aponta a página /me — o "Feito!" do leitor não pode sair.
+    mock_save.assert_not_called()
+    mock_send.assert_called_once_with("5534999301855", "resposta do chat")
 
 
 def test_webhook_reset_preferencias():
@@ -101,45 +99,3 @@ def test_contexto_do_parser_nao_leva_secao_aposentada():
     enviado = MockA.return_value.messages.create.call_args.kwargs["messages"][0]["content"]
     assert "polls_br" not in enviado
     assert '"crypto": true' in enviado
-
-
-@pytest.mark.unit
-def test_webhook_nao_salva_secao_desconhecida_devolvida_pelo_parser():
-    intent_result = {
-        "intent": "preference",
-        "sections": {"market": True, "crypto": False, "polls_br": True},
-        "report_time": None,
-        "reset": False,
-        "reply": "Feito.",
-    }
-    with patch("backend.api.main.supabase.get_authorized", return_value=AUTHORIZED), \
-         patch("backend.api.main.supabase.get_preferences", return_value=None), \
-         patch("backend.api.main._detect_preference_intent", return_value=intent_result), \
-         patch("backend.api.main.whatsapp.send_message"), \
-         patch("backend.api.main.supabase.save_preferences") as mock_save:
-        resp = client.post("/api/webhook", json=_make_webhook("remove cripto"))
-    assert resp.status_code == 200
-    assert mock_save.call_args.kwargs["sections"] == {"market": True, "crypto": False}
-
-
-@pytest.mark.unit
-def test_parser_so_com_secao_aposentada_nao_apaga_as_escolhas():
-    """"tira as pesquisas eleitorais" pode voltar como `{"polls_br": False}`. Filtrado,
-    isso vira `{}` — e `{}` gravado apaga as seções escolhidas (achado 1, 2ª revisão
-    do Apolo). Sem seção conhecida, não há o que salvar."""
-    intent_result = {
-        "intent": "preference",
-        "sections": {"polls_br": False},
-        "report_time": None,
-        "reset": False,
-        "reply": "Feito.",
-    }
-    with patch("backend.api.main.supabase.get_authorized", return_value=AUTHORIZED), \
-         patch("backend.api.main.supabase.get_preferences",
-               return_value={"sections": {"market": True, "crypto": True, "polls_br": True}}), \
-         patch("backend.api.main._detect_preference_intent", return_value=intent_result), \
-         patch("backend.api.main.whatsapp.send_message"), \
-         patch("backend.api.main.supabase.save_preferences") as mock_save:
-        resp = client.post("/api/webhook", json=_make_webhook("tira as pesquisas eleitorais"))
-    assert resp.status_code == 200
-    mock_save.assert_not_called()

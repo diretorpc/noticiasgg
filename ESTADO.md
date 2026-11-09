@@ -222,6 +222,33 @@ Pedido do Matheus. Branch `chore/remove-election-polls` → PR, **merge é do Ma
   vai como conversa ao Sonnet. Os testes não pegam porque trocam o leitor por dublê.
   Consertar a cerca SÓ junto com a normalização das seções (base atual + chaves
   conhecidas), senão o defeito de zerar entra no ar.
+- **09/11, branch `fix/preference-parser-fence` (não commitada):** cerca do JSON consertada
+  (Haiku real: 30/30 lidos). MAS a 3ª revisão do Apolo achou, e conferi no código, que
+  `user_preferences.sections` e `report_time` são CAMPOS MORTOS: o relatório sai da grade
+  `report_schedules` (`cron_report.py:22`), o chat usa `sections={}`, e o único leitor é
+  `send_report.py:87` (rota do n8n, desligado). Com o leitor vivo, o bot passaria a
+  confirmar "relatório às 18h" sem mudar nada. **Não mergear** até o Matheus decidir.
+  Também achado (antigo): `_quick_audio_check("não quero áudio")` LIGA o áudio.
+  🔴 **Medido em PRODUÇÃO hoje (Sonnet real, caminho do chat):** "manda o relatório às 18h"
+  → "Configurado! A partir de hoje você recebe o relatório diário às 18h." Nada muda.
+  O prompt do chat não diz que ele NÃO altera relatório/alertas.
+  Decisão do Matheus (09/11): pedido de seção/horário vai ao Sonnet, que ganhou a regra
+  `reporter._REPORT_RULES` ("você não altera relatório/alertas; ajuste no /me"). O aviso
+  fixo foi descartado porque engolia pergunta ("quero saber só do mercado hoje").
+  Na mesma branch, depois de 5 revisões do Apolo: reset responde o que voltou de fato
+  (voz/áudio); o modelo vê `[LINK_PESSOAL]`, nunca o token (o código troca na saída, o
+  histórico guarda o marcador); valor do Haiku validado antes de gravar; resposta com
+  link sai escrita, nunca em TTS. Medido com Haiku+Sonnet reais pelo webhook: nenhuma
+  confirmação falsa. Medir: `pytest backend/tests/test_preference_parser.py -m unit -q`.
+- **Fila deixada por esta branch (uma por vez):**
+  1. 🔴 Regex de áudio (`_quick_audio_check`/`_AUDIO_ALL_ON_RE`) LIGA áudio em "não quero
+     áudio", "prefere uma voz masculina", "fala sobre a voz do Lula"; e o de voz engole
+     o resto ("muda a voz para nova e tira política" ignora a política). Em produção hoje.
+  2. 🟡 `/me` tem a caixa "Seções do chat" gravando o campo morto `sections` ("Salvo." sem
+     efeito) — e o bot agora manda gente para lá. O `!ajustes` também mostra seções e
+     horário mortos.
+  3. 🟡 `generate_report` pode devolver `""` (medido 1 de 3 no Sonnet real) → mensagem vazia.
+  4. 🟡 `/me` grava `tts_speed` sem limite (`me.py:32`).
 - Fora do escopo, anotado: `politics_br.QUERIES` ainda busca "eleições 2026" e
   "candidatos eleições 2026 pesquisa" — vai trazer notícia velha.
 

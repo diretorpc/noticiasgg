@@ -8,8 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from anthropic import Anthropic
 
 from backend.collectors import market, crypto, indicators_us, indicators_br, news, commodities_br, politics_br, agro_br, esalq, eia, soja_disponivel
-from backend.services import reporter, whatsapp, supabase, health
+from backend.services import reporter, whatsapp, supabase, health, selflink
 from backend.services import media as media_service
+from backend.services.secrets_mask import sanitize_error
 from backend.api import send_report, cron_report, check_alerts, admin, me, health_digest, cron_investing, cron_soja
 
 logger = logging.getLogger("noticiasgg")
@@ -488,11 +489,109 @@ def _known_sections(sections: dict | None) -> dict | None:
     return {k: v for k, v in sections.items() if k in reporter.ALL_SECTIONS} or None
 
 
+def _base_sections(current: dict | None) -> dict:
+    """As seções valendo agora, só as conhecidas. Sem preferência gravada é o padrão
+    (tudo ligado), o mesmo que `reporter._collect_all` usa quando `sections` é None.
+    Fonte única para o que o Haiku VÊ e para a base do que se GRAVA — se as duas
+    discordassem, o modelo decidiria sobre uma lista e o banco receberia outra."""
+    if current is None:
+        return {s: True for s in reporter.ALL_SECTIONS}
+    return {k: v for k, v in current.items() if k in reporter.ALL_SECTIONS}
+
+
+_AUDIO_FIELDS = ("audio_for_text", "audio_for_media", "tts_voice", "tts_speed")
+_TTS_VOICES = ("alloy", "echo", "fable", "nova", "onyx", "shimmer")
+
+
+def _valid_audio_field(campo: str, valor) -> bool:
+    """O que o Haiku manda gravar passa por aqui. `tts_speed` gravado como texto fazia
+    `float()` estourar em TODA mensagem seguinte do usuário ("Tive um problema" até
+    limpar o banco), e voz fora da lista virava "Voz alterada" com TTS caindo calado
+    (achado 3, 4ª revisão do Apolo). `bool` antes de número: `True` é `int` em Python."""
+    if valor is None:
+        return False
+    if campo in ("audio_for_text", "audio_for_media"):
+        return isinstance(valor, bool)
+    if campo == "tts_voice":
+        return valor in _TTS_VOICES
+    if campo == "tts_speed":
+        return (isinstance(valor, (int, float)) and not isinstance(valor, bool)
+                and 0.5 <= valor <= 1.5)
+    return False
+
+
+def _settle_preference(intent: dict) -> dict:
+    """Decide o que um pedido de preferência FAZ de verdade, antes de responder.
+
+    Seções e horário do relatório NÃO se gravam pelo WhatsApp: `user_preferences.
+    sections`/`report_time` não são lidos por nada que entrega mensagem — o relatório
+    sai da grade `report_schedules` (`cron_report.py`), o chat usa `sections={}`, e o
+    único leitor era `send_report.py` (rota do n8n, desligado). Gravar ali e responder
+    "agendado para 18h" é confirmar o que não acontece (3ª revisão do Apolo,
+    09/11/2026; decisão do Matheus: mandar para o /me).
+
+    Sem nada a gravar, sem reset e sem lista de vozes, o pedido vira CONVERSA — mesmo
+    quando fala de seção/horário. O Haiku real respondeu "Relatório diário desativado"
+    sem campo nenhum por trás, e leu "quero saber só do mercado hoje" como configuração;
+    um aviso fixo ali engolia a pergunta. O chat responde a informação e, pela regra de
+    `reporter._REPORT_RULES`, aponta o /me quando é mesmo pedido de relatório."""
+    if intent.get("intent") != "preference":
+        return intent
+    gravar = {k: intent.get(k) for k in _AUDIO_FIELDS if _valid_audio_field(k, intent.get(k))}
+    if not (gravar or intent.get("reset") or intent.get("list_voices")):
+        return {"intent": "message"}
+    quer_relatorio = (_known_sections(intent.get("sections")) is not None
+                      or intent.get("report_time") is not None)
+    return {**intent, "_gravar": gravar, "_quer_relatorio": quer_relatorio}
+
+
+def _preference_reply(intent: dict, user: dict | None) -> str:
+    """Resposta de um pedido já decidido por `_settle_preference`. O `reply` do Haiku só
+    sai quando ele descreve exatamente o que foi gravado.
+
+    - Reset: apaga voz/áudio, NÃO a grade. Haiku real, 3 de 3: "volta o relatório pro
+      padrão" → `reset: true` + "Preferências resetadas." — o usuário entendia que o
+      relatório tinha voltado (achado 1, 4ª revisão do Apolo).
+    - Pedido MISTO (voz/áudio + seção/horário): o `reply` confirmaria as duas coisas,
+      e só uma aconteceu."""
+    onde = selflink.onde_ajustar(selflink.panel_link(user))
+    if intent.get("reset"):
+        return f"Voz e áudio voltaram ao padrão. Seções e horário do relatório diário se ajustam {onde}"
+    if intent["_quer_relatorio"]:
+        prefixo = "Ajustei a voz/áudio. " if intent["_gravar"] else ""
+        return f"{prefixo}Seções e horário do relatório diário eu não mudo por aqui: ajuste {onde}"
+    return intent.get("reply", "Preferências atualizadas!")
+
+
+def _link_for_model(user: dict | None) -> str | None:
+    """O modelo recebe o MARCADOR, nunca o token — ver `selflink.LINK_PLACEHOLDER`."""
+    return selflink.LINK_PLACEHOLDER if selflink.panel_link(user) else None
+
+
+_CERCA_RE = re.compile(r"^```[a-zA-Z]*\s*|\s*```$")
+
+
+def _parse_json_reply(text: str) -> dict:
+    """JSON do Haiku, com ou sem cerca de código. Medido em 09/11/2026: 29 de 29
+    respostas vieram como ```json ... ```, e o `json.loads` direto descartava todas.
+    Último recurso: o trecho entre a primeira `{` e a última `}`."""
+    limpo = _CERCA_RE.sub("", text.strip())
+    try:
+        return json.loads(limpo)
+    except ValueError:
+        inicio, fim = limpo.find("{"), limpo.rfind("}")
+        if inicio == -1 or fim <= inicio:
+            raise
+        return json.loads(limpo[inicio:fim + 1])
+
+
 def _detect_preference_intent(text: str, current_sections: dict | None = None, tts_speed: float = 0.85) -> dict:
-    current_sections = _known_sections(current_sections)
+    # SEMPRE com `seções_atuais`, inclusive para quem nunca salvou preferência: sem
+    # ela o Haiku real devolveu `sections: null` com "Criptomoedas removidas" em 3 de 3
+    # pedidos — confirmava ao usuário uma mudança que não foi gravada (09/11/2026).
+    atuais = _base_sections(current_sections)
     context = f"\nvelocidade_atual: {tts_speed:.2f}"
-    if current_sections:
-        context += f"\nseções_atuais: {json.dumps(current_sections, ensure_ascii=False)}"
+    context += f"\nseções_atuais: {json.dumps(atuais, ensure_ascii=False)}"
     try:
         client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         response = client.messages.create(
@@ -501,8 +600,15 @@ def _detect_preference_intent(text: str, current_sections: dict | None = None, t
             system=_PREFERENCE_SYSTEM,
             messages=[{"role": "user", "content": text + context}],
         )
-        return json.loads(response.content[0].text)
-    except Exception:
+        intent = _parse_json_reply(response.content[0].text)
+        if not isinstance(intent, dict):
+            raise ValueError(f"esperava objeto JSON, veio {type(intent).__name__}")
+        return intent
+    except Exception as e:
+        # Calado, este `except` escondeu que NENHUM pedido de preferência
+        # por texto era salvo. Cair para conversa continua certo; sumir sem rastro, não.
+        logger.warning("leitor de preferências falhou, tratando como conversa: %s",
+                       sanitize_error(e))
         return {"intent": "message"}
 
 
@@ -609,33 +715,29 @@ async def whatsapp_webhook(request: Request):
             else {"intent": "message"}
         )
 
+        intent = _settle_preference(intent)
         if intent.get("intent") == "preference":
+            gravar = intent["_gravar"]
             if intent.get("reset"):
                 supabase.delete_preferences(target_phone)
-            else:
-                new_sections = _known_sections(intent.get("sections"))
-                new_time = intent.get("report_time")
-                new_audio_text = intent.get("audio_for_text")
-                new_audio_media = intent.get("audio_for_media")
-                new_tts_voice = intent.get("tts_voice")
-                new_tts_speed = intent.get("tts_speed")
-                if any(v is not None for v in [new_sections, new_time, new_audio_text, new_audio_media, new_tts_voice, new_tts_speed]):
-                    supabase.save_preferences(
-                        target_phone,
-                        sections=new_sections,
-                        report_time=new_time,
-                        audio_for_text=new_audio_text,
-                        audio_for_media=new_audio_media,
-                        tts_voice=new_tts_voice,
-                        tts_speed=new_tts_speed,
-                    )
-                    if new_tts_voice:
-                        tts_voice = new_tts_voice
-                    if new_tts_speed is not None:
-                        tts_speed = new_tts_speed
-            reply = intent.get("reply", "Preferências atualizadas!")
+            elif gravar:
+                supabase.save_preferences(
+                    target_phone,
+                    sections=None,
+                    report_time=None,
+                    audio_for_text=gravar.get("audio_for_text"),
+                    audio_for_media=gravar.get("audio_for_media"),
+                    tts_voice=gravar.get("tts_voice"),
+                    tts_speed=gravar.get("tts_speed"),
+                )
+                if gravar.get("tts_voice"):
+                    tts_voice = gravar["tts_voice"]
+                if gravar.get("tts_speed") is not None:
+                    tts_speed = gravar["tts_speed"]
+            reply = _preference_reply(intent, authorized)
             # list_voices nunca é enviado como áudio — é uma lista visual
-            if not intent.get("list_voices") and bool((current_prefs or {}).get("audio_for_text", False)):
+            if (not intent.get("list_voices") and not selflink.has_link(reply)
+                    and bool((current_prefs or {}).get("audio_for_text", False))):
                 try:
                     whatsapp.send_audio(target_phone, media_service.text_to_speech(reply, voice=tts_voice, speed=tts_speed))
                     return {"status": "ok", "reason": "preference_updated"}
@@ -671,27 +773,33 @@ async def whatsapp_webhook(request: Request):
             logger.info("audio: transcribe %.1fs", time.monotonic() - _t)
 
             # Preferência enviada via áudio → detecta e confirma em áudio
-            audio_intent = _quick_tts_check(text, tts_speed) or _quick_audio_check(text) or _detect_preference_intent(text, current_sections=current_sections, tts_speed=tts_speed)
-            if audio_intent and audio_intent.get("intent") == "preference":
-                new_audio_text = audio_intent.get("audio_for_text")
-                new_audio_media = audio_intent.get("audio_for_media")
-                new_tts_voice = audio_intent.get("tts_voice")
-                new_tts_speed = audio_intent.get("tts_speed")
-                if any(v is not None for v in [new_audio_text, new_audio_media, new_tts_voice, new_tts_speed]):
+            audio_intent = _settle_preference(
+                _quick_tts_check(text, tts_speed) or _quick_audio_check(text)
+                or _detect_preference_intent(text, current_sections=current_sections, tts_speed=tts_speed))
+            if audio_intent.get("intent") == "preference":
+                gravar = audio_intent["_gravar"]
+                # O reset por áudio nunca apagou nada e mesmo assim respondia
+                # "Preferências resetadas" — mesma confirmação vazia do texto.
+                if audio_intent.get("reset"):
+                    supabase.delete_preferences(target_phone)
+                elif gravar:
                     supabase.save_preferences(
                         target_phone,
                         sections=None,
                         report_time=None,
-                        audio_for_text=new_audio_text,
-                        audio_for_media=new_audio_media,
-                        tts_voice=new_tts_voice,
-                        tts_speed=new_tts_speed,
+                        audio_for_text=gravar.get("audio_for_text"),
+                        audio_for_media=gravar.get("audio_for_media"),
+                        tts_voice=gravar.get("tts_voice"),
+                        tts_speed=gravar.get("tts_speed"),
                     )
-                    if new_tts_voice:
-                        tts_voice = new_tts_voice
-                    if new_tts_speed is not None:
-                        tts_speed = new_tts_speed
-                reply = audio_intent.get("reply", "Preferências atualizadas!")
+                    if gravar.get("tts_voice"):
+                        tts_voice = gravar["tts_voice"]
+                    if gravar.get("tts_speed") is not None:
+                        tts_speed = gravar["tts_speed"]
+                reply = _preference_reply(audio_intent, authorized)
+                if selflink.has_link(reply):
+                    whatsapp.send_message(target_phone, reply)
+                    return {"status": "ok", "reason": "preference_updated"}
                 try:
                     audio_bytes = media_service.text_to_speech(reply, voice=tts_voice, speed=tts_speed)
                     whatsapp.send_audio(target_phone, audio_bytes)
@@ -702,12 +810,14 @@ async def whatsapp_webhook(request: Request):
             supabase.save_message(target_phone, "user", f"[áudio transcrito] {text}")
             _t = time.monotonic()
             reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"),
-                                             sections={}, user_phone=target_phone)
+                                             sections={}, user_phone=target_phone,
+                                             panel_link=_link_for_model(authorized))
             logger.info("audio: report %.1fs", time.monotonic() - _t)
             supabase.save_message(target_phone, "assistant", reply)
+            reply = selflink.fill_link(reply, authorized)  # histórico guarda o marcador
             _maybe_summarize(target_phone)
 
-            if audio_for_media:
+            if audio_for_media and not selflink.has_link(reply):
                 try:
                     audio_bytes = media_service.text_to_speech(reply, voice=tts_voice, speed=tts_speed)
                     whatsapp.send_audio(target_phone, audio_bytes)
@@ -742,10 +852,12 @@ async def whatsapp_webhook(request: Request):
                 sections={},
                 media_attachment={"type": msg_info["type"], "b64": media["base64"], "mime": mime},
                 user_phone=target_phone,
+                panel_link=_link_for_model(authorized),
             )
             supabase.save_message(target_phone, "assistant", reply)
+            reply = selflink.fill_link(reply, authorized)  # histórico guarda o marcador
             _maybe_summarize(target_phone)
-            if audio_for_media:
+            if audio_for_media and not selflink.has_link(reply):
                 try:
                     audio_bytes = media_service.text_to_speech(reply, voice=tts_voice, speed=tts_speed)
                     whatsapp.send_audio(target_phone, audio_bytes)
@@ -766,10 +878,12 @@ async def whatsapp_webhook(request: Request):
         supabase.save_message(target_phone, "user", text)
         reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"),
                                          sections={}, anchored_news=anchored_news,
-                                         user_phone=target_phone)
+                                         user_phone=target_phone,
+                                         panel_link=_link_for_model(authorized))
         supabase.save_message(target_phone, "assistant", reply)
+        reply = selflink.fill_link(reply, authorized)  # histórico guarda o marcador
         _maybe_summarize(target_phone)
-        if audio_for_text:
+        if audio_for_text and not selflink.has_link(reply):
             try:
                 audio_bytes = media_service.text_to_speech(reply, voice=tts_voice, speed=tts_speed)
                 whatsapp.send_audio(target_phone, audio_bytes)

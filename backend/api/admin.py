@@ -4,7 +4,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, StrictFloat, StrictInt
 
-from backend.services import reporter, auth, supabase, report_engine, schedules, config, report_prompts, soja_fretes, soja_msg
+from backend.services import reporter, auth, supabase, report_engine, schedules, config, report_prompts, soja_fretes, soja_msg, selflink
 from backend.services import media as media_service
 from backend.collectors import news
 
@@ -249,8 +249,7 @@ def generate_selflink(phone: str, user: dict = Depends(auth.require_admin)) -> d
     if not supabase.get_authorized_by_phone(phone):
         raise HTTPException(status_code=404, detail="usuário não encontrado")
     token = supabase.set_selflink_token(phone)
-    base = os.environ.get("PANEL_BASE_URL", "https://noticiasgg-painel.vercel.app").rstrip("/")
-    return {"url": f"{base}/me?token={token}", "token": token}
+    return {"url": selflink.selflink_url(token), "token": token}
 
 
 @router.delete("/api/admin/selflink/{phone}")

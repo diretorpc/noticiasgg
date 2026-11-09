@@ -16,7 +16,7 @@ from backend.services.integrity import (
     SYSTEM_VALIDATOR as _SYSTEM_VALIDATOR,
     SYSTEM_VALIDATOR_CHAT as _SYSTEM_VALIDATOR_CHAT,
 )
-from backend.services import supabase
+from backend.services import selflink, supabase
 from backend.services.secrets_mask import sanitize_error
 
 logger = logging.getLogger("noticiasgg")
@@ -535,7 +535,21 @@ def _extract_ticker_data(text: str) -> dict:
     return result
 
 
-def _build_system(user_name: str | None, data: dict) -> str:
+# Só no CHAT. Medido em produção (Sonnet real, 09/11/2026): "manda o relatório às 18h"
+# → "Configurado! A partir de hoje você recebe o relatório diário às 18h." — e nada
+# mudava: o relatório sai da grade `report_schedules`, editada no painel/no /me, e o
+# chat não tem ferramenta para isso. Voz e áudio ficam de fora de propósito: esses o
+# webhook grava de verdade.
+_REPORT_RULES = """
+
+━━━ O QUE VOCÊ NÃO ALTERA ━━━
+Pelo chat você NÃO consegue mudar: as seções do relatório diário, o horário dele, desligar o relatório, nem ligar ou desligar os alertas de notícia. NUNCA diga "configurado", "agendado", "removido", "ativado" ou "desativado" sobre essas coisas — seria afirmar uma mudança que não aconteceu.
+- Pediram mudança de seção ou horário do relatório? Diga em uma frase que isso se ajusta {onde}.
+- Pediram para ligar ou desligar alertas? Diga que isso é com o admin.
+- A mensagem pede INFORMAÇÃO ("quero saber só do mercado hoje", "me fala de cripto")? Responda a informação normalmente: pergunta não é pedido de configuração."""
+
+
+def _build_system(user_name: str | None, data: dict, panel_link: str | None = None) -> str:
     """Prompt do turno. `data` cheio = relatório diário; vazio = conversa.
 
     A data de hoje entra explícita e etiquetada. Sem ela o modelo ancora no corte
@@ -543,6 +557,8 @@ def _build_system(user_name: str | None, data: dict) -> str:
     relatório, na mesma conversa. Mesma técnica do `<hoje>` que o classificador
     de notícias já usa."""
     system = _SYSTEM_MARKET if data else _SYSTEM_CHAT
+    if not data:
+        system += _REPORT_RULES.format(onde=selflink.onde_ajustar(panel_link))
     hoje = datetime.datetime.now(_BRT).date().isoformat()
     system += (
         f"\n\n<hoje>{hoje}</hoje>\n"
@@ -634,6 +650,7 @@ def generate_report(
     media_attachment: dict | None = None,
     anchored_news: dict | None = None,
     user_phone: str | None = None,
+    panel_link: str | None = None,
 ) -> str:
     """Gera resposta do agente.
 
@@ -645,11 +662,13 @@ def generate_report(
     responder sobre os alertas que chegaram a esta pessoa e não sobre a lista
     inteira. Ausente (evals, chamadas internas) a ferramenta diz, na própria
     saída, que o escopo é a lista — nunca finge que é pessoal.
+    panel_link: link /me de quem fala, para a regra "o que você não altera" apontar
+    o lugar certo; None manda pedir o link ao admin.
     """
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], timeout=_ANTHROPIC_TIMEOUT, max_retries=1)
     data = _collect_all(sections=sections)
 
-    system = _build_system(user_name, data)
+    system = _build_system(user_name, data, panel_link)
 
     ticker_data = _extract_ticker_data(user_message)
 
