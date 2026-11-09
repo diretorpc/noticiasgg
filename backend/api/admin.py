@@ -4,7 +4,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, StrictFloat, StrictInt
 
-from backend.services import reporter, auth, supabase, report_engine, schedules, config, report_prompts, soja_fretes, soja_msg, selflink
+from backend.services import reporter, auth, supabase, report_engine, schedules, config, report_prompts, soja_fretes, soja_msg, selflink, audio_prefs
 from backend.services import media as media_service
 from backend.collectors import news
 
@@ -72,9 +72,8 @@ def list_users(user: dict = Depends(auth.require_admin)) -> dict:
         out.append({
             "phone": u["phone"],
             "name": u.get("name"),
+            # Sem `sections`/`report_time`: campos mortos (ver `test_campo_morto.py`).
             "preferences": {
-                "sections": prefs.get("sections"),
-                "report_time": prefs.get("report_time"),
                 "audio_for_text": prefs.get("audio_for_text"),
                 "audio_for_media": prefs.get("audio_for_media"),
                 "tts_voice": prefs.get("tts_voice"),
@@ -86,8 +85,6 @@ def list_users(user: dict = Depends(auth.require_admin)) -> dict:
 
 class UserPrefsBody(BaseModel):
     phone: str
-    sections: dict | None = None
-    report_time: str | None = None
     audio_for_text: bool | None = None
     audio_for_media: bool | None = None
     tts_voice: str | None = None
@@ -96,16 +93,13 @@ class UserPrefsBody(BaseModel):
 
 @router.post("/api/admin/user-prefs")
 def save_user_prefs(body: UserPrefsBody, user: dict = Depends(auth.require_admin)) -> dict:
-    """Salva as preferências de um usuário (edição pelo painel)."""
-    supabase.save_preferences(
-        body.phone,
-        sections=body.sections,
-        report_time=body.report_time,
-        audio_for_text=body.audio_for_text,
-        audio_for_media=body.audio_for_media,
-        tts_voice=body.tts_voice,
-        tts_speed=body.tts_speed,
-    )
+    """Salva voz/áudio de um usuário (edição pelo painel). Seções e horário do
+    relatório se editam na grade (`/api/admin/schedules`)."""
+    valores = body.model_dump(exclude={"phone"})
+    ruins = audio_prefs.invalid_fields(valores)
+    if ruins:
+        raise HTTPException(status_code=422, detail=f"valor inválido: {', '.join(ruins)}")
+    supabase.save_preferences(body.phone, **valores)
     return {"ok": True}
 
 

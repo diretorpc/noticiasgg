@@ -53,8 +53,6 @@ export async function validateRss(url: string): Promise<RssCheck> {
 
 export type UserPrefsInput = {
   phone: string;
-  sections: Record<string, boolean> | null;
-  report_time: string | null;
   audio_for_text: boolean | null;
   audio_for_media: boolean | null;
   tts_voice: string | null;

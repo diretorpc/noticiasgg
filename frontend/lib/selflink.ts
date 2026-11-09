@@ -10,7 +10,6 @@ export type MeAudio = {
 export type MeData = {
   name: string;
   schedule?: ScheduleGrid;
-  sections: Record<string, boolean> | null;
   audio: MeAudio;
 };
 
@@ -24,7 +23,7 @@ export async function fetchMe(token: string): Promise<MeData> {
 
 export async function saveMePrefs(
   token: string,
-  body: { sections: Record<string, boolean> | null } & MeAudio,
+  body: MeAudio,
 ): Promise<void> {
   const res = await fetch(`${BACKEND}/api/me?token=${encodeURIComponent(token)}`, {
     method: "PUT",

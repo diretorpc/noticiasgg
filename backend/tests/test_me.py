@@ -36,24 +36,21 @@ def test_get_me_returns_scoped_bundle(monkeypatch):
     body = r.json()
     assert body["name"] == "Matheus"
     assert body["schedule"] == {"bolsas": {"0": [7]}}
-    assert body["sections"] == {"market": True}
+    assert "sections" not in body  # campo morto (test_campo_morto.py)
     assert body["audio"] == {"audio_for_text": True, "audio_for_media": False,
                              "tts_voice": "nova", "tts_speed": 0.85}
 
 
 @pytest.mark.unit
-def test_put_me_preserves_report_time(monkeypatch):
-    monkeypatch.setattr(supabase, "get_preferences", lambda phone: {"report_time": "enabled"})
+def test_put_me_grava_o_audio(monkeypatch):
     captured = {}
     monkeypatch.setattr(supabase, "save_preferences",
                         lambda phone, **kw: captured.update(phone=phone, **kw))
-    r = client.put("/api/me?token=x", json={"sections": {"market": True},
-                                            "audio_for_text": True, "audio_for_media": False,
+    r = client.put("/api/me?token=x", json={"audio_for_text": True, "audio_for_media": False,
                                             "tts_voice": "nova", "tts_speed": 0.85})
     assert r.status_code == 200
-    assert captured["phone"] == PHONE
-    assert captured["report_time"] == "enabled"
-    assert captured["sections"] == {"market": True}
+    assert captured == {"phone": PHONE, "audio_for_text": True, "audio_for_media": False,
+                        "tts_voice": "nova", "tts_speed": 0.85}
 
 
 @pytest.mark.unit

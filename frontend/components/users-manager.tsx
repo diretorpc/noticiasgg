@@ -6,29 +6,15 @@ import { saveUserPrefs, resetUserPrefs, previewReport, fetchSchedule, saveSchedu
 import { ScheduleGridEditor } from "@/components/schedule-grid";
 import type { AdminUser } from "@/lib/api";
 
-const SECTIONS: [string, string][] = [
-  ["market", "Mercado"],
-  ["crypto", "Cripto"],
-  ["indicators_us", "Indicadores EUA"],
-  ["indicators_br", "Indicadores BR"],
-  ["news", "Notícias"],
-  ["commodities_br", "Commodities"],
-  ["politics_br", "Política"],
-];
 const VOICES = ["nova", "shimmer", "alloy", "echo", "fable", "onyx"];
-
-function defaultSections(): Record<string, boolean> {
-  return Object.fromEntries(SECTIONS.map(([k]) => [k, true]));
-}
 
 function UserForm({ user }: { user: AdminUser }) {
   const router = useRouter();
   const p = user.preferences;
-  const [sections, setSections] = useState<Record<string, boolean>>(p?.sections ?? defaultSections());
   const [audioText, setAudioText] = useState(Boolean(p?.audio_for_text));
   const [audioMedia, setAudioMedia] = useState(Boolean(p?.audio_for_media));
   const [voice, setVoice] = useState(p?.tts_voice ?? "nova");
-  const [speed, setSpeed] = useState(p?.tts_speed ?? 0.85);
+  const [speed, setSpeed] = useState(Math.min(1.5, Math.max(0.5, p?.tts_speed ?? 0.85)));
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<string[] | null>(null);
@@ -80,8 +66,6 @@ function UserForm({ user }: { user: AdminUser }) {
     try {
       await saveUserPrefs({
         phone: user.phone,
-        sections,
-        report_time: p?.report_time ?? null,
         audio_for_text: audioText,
         audio_for_media: audioMedia,
         tts_voice: voice,
@@ -112,20 +96,6 @@ function UserForm({ user }: { user: AdminUser }) {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-lg border border-border bg-card p-5">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Seções do chat</h2>
-        <p className="mb-3 mt-1 text-xs text-muted-foreground">Quais seções entram quando o usuário pede um relatório pelo WhatsApp. O relatório agendado é configurado na grade abaixo.</p>
-        <div className="grid grid-cols-2 gap-2">
-          {SECTIONS.map(([k, label]) => (
-            <label key={k} className="flex items-center gap-2 text-sm text-foreground">
-              <input type="checkbox" checked={sections[k] ?? false}
-                onChange={() => setSections((s) => ({ ...s, [k]: !s[k] }))} />
-              {label}
-            </label>
-          ))}
-        </div>
-      </section>
-
       <section className="rounded-lg border border-border bg-card p-5 space-y-3">
         <h2 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Áudio</h2>
         <label className="flex items-center gap-2 text-sm text-foreground">
@@ -159,7 +129,7 @@ function UserForm({ user }: { user: AdminUser }) {
 
       <section className="rounded-lg border border-border bg-card p-5 space-y-3">
         <h2 className="text-sm font-medium uppercase tracking-wide text-muted-foreground">Link self-service</h2>
-        <p className="text-xs text-muted-foreground">Gere um link para o usuário editar a própria config (grade, seções, áudio) sem login.</p>
+        <p className="text-xs text-muted-foreground">Gere um link para o usuário editar a própria config (grade e áudio) sem login.</p>
         <div className="flex flex-wrap gap-3">
           <button onClick={genLink} type="button"
             className="rounded-md border border-border px-4 py-2 text-sm text-muted-foreground hover:text-foreground">Gerar link</button>

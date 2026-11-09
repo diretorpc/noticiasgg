@@ -72,8 +72,6 @@ export async function fetchNewsApiSources(): Promise<NewsApiSource[]> {
 }
 
 export type UserPrefs = {
-  sections: Record<string, boolean> | null;
-  report_time: string | null;
   audio_for_text: boolean | null;
   audio_for_media: boolean | null;
   tts_voice: string | null;

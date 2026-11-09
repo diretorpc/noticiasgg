@@ -61,14 +61,6 @@ def test_collect_all_ignora_secao_aposentada_salva_na_preferencia():
     assert set(result.keys()) == {"market"}
 
 
-def test_resumo_de_ajustes_nao_mostra_secao_aposentada():
-    from backend.api.main import _build_settings_summary
-    resumo = _build_settings_summary({"sections": {"news": True, "polls_br": True}})
-    assert "polls_br" not in resumo
-    assert "pesquisas" not in resumo
-    assert "Seções ativas: notícias" in resumo
-
-
 def test_generate_report_passa_sections():
     sections = {"market": True, "crypto": True, "indicators_us": False, "indicators_br": False,
                 "news": True, "commodities_br": False, "politics_br": False}

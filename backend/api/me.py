@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend.services import selflink, supabase, schedules
+from backend.services import audio_prefs, selflink, supabase, schedules
 
 router = APIRouter()
 
@@ -11,10 +11,11 @@ def get_me(phone: str = Depends(selflink.selflink_phone)) -> dict:
     user = supabase.get_authorized_by_phone(phone) or {"phone": phone, "name": ""}
     prefs = supabase.get_preferences(phone) or {}
     grid = schedules.rows_to_grid(schedules.get_for_phone(phone))
+    # Sem `sections`: campo morto (ver `test_campo_morto.py`). Seções e horário
+    # do relatório vivem só na grade.
     return {
         "name": user.get("name") or "",
         "schedule": grid,
-        "sections": prefs.get("sections"),
         "audio": {
             "audio_for_text": prefs.get("audio_for_text"),
             "audio_for_media": prefs.get("audio_for_media"),
@@ -25,7 +26,7 @@ def get_me(phone: str = Depends(selflink.selflink_phone)) -> dict:
 
 
 class MePrefsBody(BaseModel):
-    sections: dict | None = None
+    # `sections` saiu: aba aberta com o /me antigo ainda o manda, e o Pydantic ignora.
     audio_for_text: bool | None = None
     audio_for_media: bool | None = None
     tts_voice: str | None = None
@@ -34,16 +35,11 @@ class MePrefsBody(BaseModel):
 
 @router.put("/api/me")
 def put_me(body: MePrefsBody, phone: str = Depends(selflink.selflink_phone)) -> dict:
-    current = supabase.get_preferences(phone) or {}
-    supabase.save_preferences(
-        phone,
-        sections=body.sections,
-        report_time=current.get("report_time"),
-        audio_for_text=body.audio_for_text,
-        audio_for_media=body.audio_for_media,
-        tts_voice=body.tts_voice,
-        tts_speed=body.tts_speed,
-    )
+    valores = body.model_dump()
+    ruins = audio_prefs.invalid_fields(valores)
+    if ruins:
+        raise HTTPException(status_code=422, detail=f"valor inválido: {', '.join(ruins)}")
+    supabase.save_preferences(phone, **valores)
     return {"ok": True}
 
 

@@ -265,18 +265,29 @@ erra 7 (negação e falso positivo ligam áudio); o Haiku sozinho acertou 20/20.
      sonda do boletim diário testa os DOIS modelos; 404 de modelo vira ❌ com o nome que
      falhou (antes era ⚠️ "não respondeu agora"); o cron de alertas para e avisa.
      Conferido com a API real: modelo aposentado devolve 404 `model: <nome>`.
-  1d. ✅ (branch `fix/one-off-reply-format`, PR aberto 09/11) "manda em texto dessa vez"
+  1d. ✅ **PR #41 EM PRODUÇÃO 09/11/2026 17:20 BRT** (merge `468b550`, deploy `success`). "manda em texto dessa vez"
      gravava PARA SEMPRE. Agora pedido "só agora" NUNCA grava: com pergunta junto, a
      resposta sai no formato pedido (o Sonnet é avisado: `formato_resposta`); sozinho,
      texto fixo ensinando a mandar junto; voz/velocidade pontual, texto fixo. Sem estado
      no banco, de propósito. Levou 3 rodadas: as 2 primeiras medições não cobriam
      pergunta junto nem voz pontual. Medir com o Haiku real:
      `pytest backend/tests/test_formato_unico.py -m smoke -q` (8 casos).
-  2. 🟡 `/me` tem a caixa "Seções do chat" gravando o campo morto `sections` ("Salvo." sem
-     efeito) — e o bot agora manda gente para lá. O `!ajustes` também mostra seções e
-     horário mortos.
+  2. ✅ (branch `claude/me-secoes-mortas-808a47`, PR aberto 09/11) Campo morto
+     `user_preferences.sections`/`report_time` fora de toda tela e resposta: saiu a caixa
+     "Seções do chat" do `/me` e do admin (a do admin dizia, falso, que valia no relatório
+     pedido pelo WhatsApp); `GET/PUT /api/me` e `/api/admin/users`+`user-prefs` não
+     devolvem nem gravam mais; `supabase.save_preferences` PERDEU os dois parâmetros
+     (nenhum caminho grava). `!ajustes` mostra a GRADE real (`report_schedules`) ou
+     "Envio desligado" quando `use_new_report_engine` está off (o cron pula), e aponta o
+     `/me`. Colunas e dados no Supabase intactos; só `send_report.py` (n8n, desligado) e o
+     contexto `seções_atuais` do leitor do Haiku ainda leem. Medir:
+     `pytest backend/tests/test_campo_morto.py -m unit -q`.
   3. 🟡 `generate_report` pode devolver `""` (medido 1 de 3 no Sonnet real) → mensagem vazia.
-  4. 🟡 `/me` grava `tts_speed` sem limite (`me.py:32`).
+  4. ✅ (mesmo PR do item 2) `/me` e admin recusam com 422 `tts_speed` fora de 0.5–1.5 e voz
+     fora da lista — regra única em `backend/services/audio_prefs.py`, a mesma do WhatsApp.
+  5. 🟡 NOVO: a grade do `/me` responde "Salvo" mesmo com `use_new_report_engine` desligado
+     para o usuário, e o cron (`cron_report.py:27`) o pula — mesma classe de engano do item 2.
+     NÃO medido quem é atingido (leitura em produção barrada pelo classificador em 09/11).
 - Fora do escopo, anotado: `politics_br.QUERIES` ainda busca "eleições 2026" e
   "candidatos eleições 2026 pesquisa" — vai trazer notícia velha.
 
