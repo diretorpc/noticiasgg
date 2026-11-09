@@ -272,7 +272,8 @@ erra 7 (negação e falso positivo ligam áudio); o Haiku sozinho acertou 20/20.
      no banco, de propósito. Levou 3 rodadas: as 2 primeiras medições não cobriam
      pergunta junto nem voz pontual. Medir com o Haiku real:
      `pytest backend/tests/test_formato_unico.py -m smoke -q` (8 casos).
-  2. ✅ (branch `claude/me-secoes-mortas-808a47`, PR aberto 09/11) Campo morto
+  2. ✅ **PR #42 EM PRODUÇÃO 09/11/2026 17:56 BRT** (merge `4560ab7` pelo Matheus, deploy
+     dos dois projetos `success`, health 200; `!ajustes` ainda não conferido no WhatsApp real). Campo morto
      `user_preferences.sections`/`report_time` fora de toda tela e resposta: saiu a caixa
      "Seções do chat" do `/me` e do admin (a do admin dizia, falso, que valia no relatório
      pedido pelo WhatsApp); `GET/PUT /api/me` e `/api/admin/users`+`user-prefs` não
@@ -283,7 +284,7 @@ erra 7 (negação e falso positivo ligam áudio); o Haiku sozinho acertou 20/20.
      contexto `seções_atuais` do leitor do Haiku ainda leem. Medir:
      `pytest backend/tests/test_campo_morto.py -m unit -q`.
   3. 🟡 `generate_report` pode devolver `""` (medido 1 de 3 no Sonnet real) → mensagem vazia.
-  4. ✅ (mesmo PR do item 2) `/me` e admin recusam com 422 `tts_speed` fora de 0.5–1.5 e voz
+  4. ✅ (PR #42, em produção) `/me` e admin recusam com 422 `tts_speed` fora de 0.5–1.5 e voz
      fora da lista — regra única em `backend/services/audio_prefs.py`, a mesma do WhatsApp.
   5. 🟡 NOVO: a grade do `/me` responde "Salvo" mesmo com `use_new_report_engine` desligado
      para o usuário, e o cron (`cron_report.py:27`) o pula — mesma classe de engano do item 2.
