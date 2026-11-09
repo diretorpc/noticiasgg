@@ -507,6 +507,13 @@ def test_marcador_vindo_do_historico_nao_vira_link_com_envio_desligado():
     saida = selflink.fill_link(f"ajuste em {selflink.LINK_PLACEHOLDER}", COM_LINK_DESLIGADO)
     assert "tok123" not in saida and "/me" not in saida
     assert "admin" in saida and selflink.LINK_PLACEHOLDER not in saida
+    # Texto fixo no lugar do marcador não cabe em toda frase do modelo ("Acesse o admin
+    # (...) e mude o horário", 3ª revisão do Apolo): o aviso vai numa frase própria.
+    frase = selflink.fill_link(f"Acesse {selflink.LINK_PLACEHOLDER} e mude o horário.", COM_LINK_DESLIGADO)
+    assert "Acesse o admin" not in frase
+    assert frase.endswith("Seu relatório diário está desligado: seções e horário, só com o admin.")
+    duas = selflink.fill_link(f"{selflink.LINK_PLACEHOLDER} e {selflink.LINK_PLACEHOLDER}", COM_LINK_DESLIGADO)
+    assert duas.count("relatório diário está desligado") == 1
     assert selflink.fill_link(f"ajuste em {selflink.LINK_PLACEHOLDER}", COM_LINK).endswith("/me?token=tok123")
 
 

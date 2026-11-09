@@ -408,7 +408,7 @@ def _build_settings_summary(prefs: dict | None, user: dict | None) -> str:
     # O cron só manda para quem tem a chave ligada (`cron_report.py`): grade salva
     # com ela desligada não chega a ninguém, e mostrá-la seria prometer envio.
     if not ligado:
-        relatorio = "• Envio desligado: você não recebe o relatório diário por enquanto."
+        relatorio = "• Envio desligado: você não recebe o relatório diário por enquanto. Quem liga é o admin."
     else:
         try:
             linhas = _grade_linhas(schedules.rows_to_grid(schedules.get_for_phone(u.get("phone"))))

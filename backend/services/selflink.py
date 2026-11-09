@@ -36,8 +36,11 @@ def fill_link(text: str, user: dict | None) -> str:
     if LINK_PLACEHOLDER not in text:
         return text
     if not envio_ligado(user):
-        # Cabe no meio da frase onde estava o link ("Acesse ... e mude o horário").
-        return text.replace(LINK_PLACEHOLDER, f"o admin ({_ENVIO_DESLIGADO})")
+        # Nenhum texto fixo cabe em toda frase que o modelo escreve em volta do marcador
+        # ("Acesse o admin (...) e mude o horário", 3ª revisão do Apolo): o lugar do
+        # link fica neutro e a explicação vai numa frase própria, no fim.
+        return (text.replace(LINK_PLACEHOLDER, "(sem link)")
+                + "\n\nSeu relatório diário está desligado: seções e horário, só com o admin.")
     return text.replace(LINK_PLACEHOLDER, panel_link(user) or "(peça o link ao admin)")
 
 
