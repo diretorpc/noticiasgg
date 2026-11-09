@@ -302,7 +302,8 @@ erra 7 (negação e falso positivo ligam áudio); o Haiku sozinho acertou 20/20.
   6. 🟡 Anotado pelo Apolo, já existia: "volta pro padrão" usa `delete_preferences` e apaga a
      linha inteira de `user_preferences`, inclusive `sections`/`report_time` antigos.
      Decidir se fica assim.
-- ✅ (PR #44 aberto 09/11, NÃO mergeado) `politics_br.QUERIES` não
+- ✅ **PR #44 EM PRODUÇÃO 09/11/2026 20:27 BRT** (merge `3082da8` pelo Matheus, deploy dos
+  dois projetos `success`, health `ok`). `politics_br.QUERIES` não
   busca mais a campanha: "política Brasil eleições 2026" → "Lula 4 ministérios" e
   "candidatos eleições 2026 pesquisa" → "orçamento governo arcabouço fiscal". Medido na
   NewsAPI real em 09/11 (8 requisições): a busca de candidatos trazia 0 de 5 dentro da
@@ -313,9 +314,15 @@ erra 7 (negação e falso positivo ligam áudio); o Haiku sozinho acertou 20/20.
   velha), "PEC aprovada Câmara Senado" (sobrepõe "congresso senado câmara votação").
   ⚠️ Volume: a seção perde ~2 notícias frescas por coleta (5+0 → 2+1); as outras 3 buscas
   NÃO foram medidas, por cota. Se a seção de política sair com menos de 5 itens, é aqui.
-  🟡 Risco que isto agrava (Apolo): `report_prompts._POLITICA` exige EXATAMENTE 5 itens
-  numerados; com 3-4 notícias o Sonnet pode completar a lista inventando. Conserto
-  proposto: "até 5, só os recebidos". Não feito nesta branch.
+  ✅ Risco levantado pelo Apolo e DESMENTIDO pela medição: o `_POLITICA` mostra 5 linhas
+  numeradas no formato, e a suspeita era que, com 3 ou 4 notícias, o Sonnet completasse a
+  lista inventando. Medido em 09/11 com o Sonnet real, pelo caminho do relatório
+  (`report_engine._render`): com 3 notícias, saíram 3 itens nas 5 rodadas; com a lista
+  vazia, saiu "Nenhuma notícia política disponível" nas 2 rodadas. O prompt NÃO foi
+  mudado: mexer no que funciona arriscaria o caso que já dá certo. Achado no caminho: o
+  validador (`integrity.validate_and_fix`) NUNCA roda nesta seção. Ele só entra com marcador
+  de análise (`📊`/`ANÁLISE`/`Visão …`), e o corpus dele lê a chave `politics_br`, enquanto o
+  relatório manda `politica`. Quem segura a invenção aqui é só o prompt.
   🟡 "Lula 4" escapa da regra do ano mas é data disfarçada: revisar a busca na próxima
   campanha (2030) ou se o titular mudar.
   Teste reprova termo de campanha e ano dentro da busca (ano apodrece calado: foi assim que
