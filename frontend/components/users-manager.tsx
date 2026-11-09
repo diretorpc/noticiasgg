@@ -13,7 +13,7 @@ function UserForm({ user }: { user: AdminUser }) {
   const p = user.preferences;
   const [audioText, setAudioText] = useState(Boolean(p?.audio_for_text));
   const [audioMedia, setAudioMedia] = useState(Boolean(p?.audio_for_media));
-  const [voice, setVoice] = useState(p?.tts_voice ?? "nova");
+  const [voice, setVoice] = useState(VOICES.includes(p?.tts_voice ?? "") ? p!.tts_voice! : "nova");
   const [speed, setSpeed] = useState(Math.min(1.5, Math.max(0.5, p?.tts_speed ?? 0.85)));
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

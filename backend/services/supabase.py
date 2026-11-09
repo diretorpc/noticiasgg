@@ -230,7 +230,8 @@ def save_preferences(
     """Grava só voz/áudio. `sections`/`report_time` saíram de propósito (09/11/2026):
     são campos mortos — o relatório sai da grade `report_schedules` — e gravá-los
     fazia o /me responder "Salvo." sem efeito. As colunas e os dados antigos ficam
-    no banco; o único leitor restante é `send_report.py` (rota do n8n, desligado).
+    no banco; ainda leem `send_report.py` (rota do n8n, desligado) e o leitor de
+    preferências do webhook, que passa `sections` ao Haiku só como contexto.
     Campo `None` não entra: um comando de voz não pode apagar o resto."""
     payload: dict = {
         "phone": phone,

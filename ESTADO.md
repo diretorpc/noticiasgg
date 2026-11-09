@@ -288,6 +288,13 @@ erra 7 (negação e falso positivo ligam áudio); o Haiku sozinho acertou 20/20.
   5. 🟡 NOVO: a grade do `/me` responde "Salvo" mesmo com `use_new_report_engine` desligado
      para o usuário, e o cron (`cron_report.py:27`) o pula — mesma classe de engano do item 2.
      NÃO medido quem é atingido (leitura em produção barrada pelo classificador em 09/11).
+     O Apolo provou que o bot se CONTRADIZ para esse usuário: o pedido de seção/horário pelo
+     WhatsApp manda ajustar no `/me` (`_preference_reply`/`selflink.onde_ajustar` não sabem
+     da flag), e o `!ajustes` diz "Envio desligado". Conserto: o `/me` e o `onde_ajustar`
+     passarem a saber da flag.
+  6. 🟡 Anotado pelo Apolo, já existia: "volta pro padrão" usa `delete_preferences` e apaga a
+     linha inteira de `user_preferences`, inclusive `sections`/`report_time` antigos.
+     Decidir se fica assim.
 - Fora do escopo, anotado: `politics_br.QUERIES` ainda busca "eleições 2026" e
   "candidatos eleições 2026 pesquisa" — vai trazer notícia velha.
 

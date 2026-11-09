@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictBool, StrictFloat, StrictInt, StrictStr
 
 from backend.services import audio_prefs, selflink, supabase, schedules
 
@@ -27,10 +27,12 @@ def get_me(phone: str = Depends(selflink.selflink_phone)) -> dict:
 
 class MePrefsBody(BaseModel):
     # `sections` saiu: aba aberta com o /me antigo ainda o manda, e o Pydantic ignora.
-    audio_for_text: bool | None = None
-    audio_for_media: bool | None = None
-    tts_voice: str | None = None
-    tts_speed: float | None = None
+    # Tipos estritos: o Pydantic padrão aceitava `true` como velocidade 1.0 e "yes" como
+    # True — a regra do WhatsApp (`audio_prefs`) recusa os dois (Apolo, 09/11/2026).
+    audio_for_text: StrictBool | None = None
+    audio_for_media: StrictBool | None = None
+    tts_voice: StrictStr | None = None
+    tts_speed: StrictFloat | StrictInt | None = None
 
 
 @router.put("/api/me")

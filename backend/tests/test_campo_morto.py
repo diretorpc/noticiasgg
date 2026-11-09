@@ -86,6 +86,8 @@ def test_put_me_com_secoes_de_pagina_velha_grava_so_o_audio(monkeypatch, me_toke
 
 @pytest.mark.parametrize("campo,valor", [
     ("tts_speed", 5.0), ("tts_speed", 0.1), ("tts_voice", "darth"),
+    # Coerção do Pydantic padrão: `true` virava velocidade 1.0, "yes" virava True.
+    ("tts_speed", True), ("tts_speed", "1"), ("audio_for_text", "yes"), ("audio_for_text", 1),
 ])
 def test_put_me_recusa_audio_fora_da_faixa_sem_gravar(monkeypatch, me_token, campo, valor):
     """`tts_speed` 5.0 ia direto pro TTS (item 4 da fila, 09/11/2026). Mesma regra que
@@ -206,6 +208,20 @@ def test_ajustes_ignora_secao_desconhecida_na_grade(monkeypatch):
     texto = _resumo(monkeypatch, [{"section": "polls_br", "weekday": 0, "hour": 8}])
     assert "polls_br" not in texto
     assert "nenhuma seção está agendada" in texto
+
+
+def test_ajustes_conhece_toda_secao_do_motor():
+    """Seção nova no motor sem nome no !ajustes sumiria calada da resposta."""
+    from backend.services import report_prompts
+    assert tuple(main._GRADE_LABELS) == report_prompts.SECTIONS
+
+
+def test_put_me_aceita_velocidade_inteira_do_slider(monkeypatch, me_token):
+    """O slider manda `1` (sem decimal) em 1.0: tipo estrito não pode recusar."""
+    captured = {}
+    monkeypatch.setattr(supabase, "save_preferences", lambda phone, **kw: captured.update(kw))
+    assert client.put("/api/me?token=x", json={"tts_speed": 1}).status_code == 200
+    assert captured["tts_speed"] == 1
 
 
 def test_ajustes_ultima_linha_so_promete_voz_e_audio(monkeypatch):

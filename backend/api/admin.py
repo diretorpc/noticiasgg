@@ -2,7 +2,7 @@ import os
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, StrictFloat, StrictInt
+from pydantic import BaseModel, StrictBool, StrictFloat, StrictInt, StrictStr
 
 from backend.services import reporter, auth, supabase, report_engine, schedules, config, report_prompts, soja_fretes, soja_msg, selflink, audio_prefs
 from backend.services import media as media_service
@@ -85,10 +85,11 @@ def list_users(user: dict = Depends(auth.require_admin)) -> dict:
 
 class UserPrefsBody(BaseModel):
     phone: str
-    audio_for_text: bool | None = None
-    audio_for_media: bool | None = None
-    tts_voice: str | None = None
-    tts_speed: float | None = None
+    # Estritos pelo mesmo motivo do `/me` (`me.py::MePrefsBody`).
+    audio_for_text: StrictBool | None = None
+    audio_for_media: StrictBool | None = None
+    tts_voice: StrictStr | None = None
+    tts_speed: StrictFloat | StrictInt | None = None
 
 
 @router.post("/api/admin/user-prefs")
