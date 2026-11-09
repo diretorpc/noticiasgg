@@ -302,7 +302,7 @@ erra 7 (negação e falso positivo ligam áudio); o Haiku sozinho acertou 20/20.
   6. 🟡 Anotado pelo Apolo, já existia: "volta pro padrão" usa `delete_preferences` e apaga a
      linha inteira de `user_preferences`, inclusive `sections`/`report_time` antigos.
      Decidir se fica assim.
-- ✅ (branch `claude/politica-pos-eleicao-08da92`, PR aberto 09/11) `politics_br.QUERIES` não
+- ✅ (PR #44 aberto 09/11, NÃO mergeado) `politics_br.QUERIES` não
   busca mais a campanha: "política Brasil eleições 2026" → "Lula 4 ministérios" e
   "candidatos eleições 2026 pesquisa" → "orçamento governo arcabouço fiscal". Medido na
   NewsAPI real em 09/11 (8 requisições): a busca de candidatos trazia 0 de 5 dentro da
