@@ -22,7 +22,7 @@ from unittest.mock import patch
 
 from anthropic import Anthropic
 
-from backend.services import reporter
+from backend.services import models, reporter
 from backend.evals._sem_supabase import NEWS_LOG_PADRAO, supabase_congelado
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "grounding_cases.json"
@@ -100,7 +100,7 @@ def _corpus_text(case: dict) -> str:
 def _judge(answer: str, corpus: str, client: Anthropic, traps: list[dict] | None = None) -> dict:
     proibidos = "\n".join(f"{i}. {t['desc']}" for i, t in enumerate(traps or [], 1)) or "(nenhum)"
     resp = client.messages.create(
-        model="claude-sonnet-4-6", max_tokens=120, system=_JUDGE_SYSTEM,
+        model=models.sonnet(), max_tokens=120, system=_JUDGE_SYSTEM,
         messages=[{"role": "user", "content": (
             f"PROIBIDOS: {proibidos}\n\nCORPUS:\n{corpus}\n\nRESPOSTA:\n{answer}"
         )}],

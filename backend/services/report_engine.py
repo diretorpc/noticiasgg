@@ -7,7 +7,7 @@ from backend.collectors import (
     market, crypto, indicators_us, indicators_br, news,
     commodities_br, politics_br,
 )
-from backend.services import report_prompts, integrity
+from backend.services import report_prompts, integrity, models
 from backend.services.secrets_mask import sanitize_error
 
 logger = logging.getLogger("noticiasgg")
@@ -112,7 +112,7 @@ def _collect(section: str) -> dict:
 def _render(section: str, ctx: dict, client, prompt: str | None = None) -> str:
     prompt = prompt or report_prompts.get_prompt(section)
     resp = client.messages.create(
-        model="claude-sonnet-4-6",
+        model=models.sonnet(),
         max_tokens=_MAX_TOKENS[section],
         system=prompt,
         messages=[{"role": "user",

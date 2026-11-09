@@ -139,7 +139,7 @@ def collect_status_completo() -> dict:
     # A sonda vive AQUI e não no `collect_status`, pela mesma razão que a medição
     # das fontes: `GET /api/health` é público e sem senha, e uma chamada PAGA num
     # endpoint aberto é convite para esvaziarem o saldo por você. Uma vez por dia,
-    # no boletim, custa da ordem de US$ 0,000005.
+    # no boletim, as duas chamadas (Haiku + Sonnet) custam da ordem de US$ 0,00004.
     status["checks"]["anthropic"] = anthropic_status.sondar()
     try:
         from backend.collectors import news

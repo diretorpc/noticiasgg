@@ -4,6 +4,7 @@ import re
 
 from anthropic import Anthropic
 
+from backend.services import models
 from backend.services.secrets_mask import sanitize_error
 
 logger = logging.getLogger("noticiasgg")
@@ -231,7 +232,7 @@ def validate_and_fix(report: str, data: dict, client: Anthropic,
     rotulo = "Relatório para validar" if modo_relatorio else "Resposta para validar"
     try:
         resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=models.haiku(),
             max_tokens=2000,
             system=system,
             messages=[{

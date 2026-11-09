@@ -8,7 +8,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi.testclient import TestClient
 
 from backend.api.main import app
-from backend.services import auth
+from backend.services import auth, models
 
 client = TestClient(app)
 
@@ -50,7 +50,7 @@ def test_agent_config_returns_all_sections():
                           headers={"Authorization": f"Bearer {_token()}"})
     assert resp.status_code == 200
     body = resp.json()
-    assert body["agent"]["model"] == "claude-sonnet-4-6"
+    assert body["agent"]["model"] == models.sonnet()
     assert "reuters" in body["news"]["sources_finance"]
     assert body["audio"]["tts_voice"] == "nova"
 

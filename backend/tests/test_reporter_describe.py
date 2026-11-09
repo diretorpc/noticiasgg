@@ -1,4 +1,4 @@
-from backend.services import reporter
+from backend.services import models, reporter
 import pytest
 
 # Arquivo sem nenhuma chamada de rede (medido rodando o arquivo isolado).
@@ -9,8 +9,8 @@ pytestmark = pytest.mark.unit
 
 def test_describe_config_exposes_model_and_tools():
     cfg = reporter.describe_config()
-    assert cfg["model"] == "claude-sonnet-4-6"
-    assert cfg["validator_model"] == "claude-haiku-4-5-20251001"
+    assert cfg["model"] == models.sonnet()
+    assert cfg["validator_model"] == models.haiku()
     assert cfg["max_tool_rounds"] == 6
     assert cfg["max_tokens"] == 2000
     assert len(cfg["tools"]) == 6

@@ -251,14 +251,19 @@ erra 7 (negação e falso positivo ligam áudio); o Haiku sozinho acertou 20/20.
      15:48 BRT** (merge `1d4d455` pelo Matheus, deploy dos dois projetos `success`). Nas mesmas 36 frases, o regex dava 8 decisões erradas (todas LIGANDO áudio);
      o Haiku sozinho, 34/36 sem inverter nenhuma. Prompt do chat não promete mais
      "Ativando agora!" nem manda ao admin.
-  1b. ✅ (branch `fix/anchor-voice-speed-regex`, PR aberto 09/11) `_quick_tts_check`
+  1b. ✅ **PR #39 EM PRODUÇÃO 09/11/2026 16:25 BRT** (merge `35dc761` pelo Matheus, deploy
+     dos dois projetos `success`, health `ok`). `_quick_tts_check`
      engolia pergunta de mercado ("a inflação acelera?" → velocidade 0.92; "voz nova no
      ministério?" → voz nova). Agora só age quando a mensagem INTEIRA é o comando
      (`fullmatch`); o resto vai ao Haiku, cujo prompt ganhou "pergunta de conteúdo é
      conversa" e "voz sem nome → lista". Haiku real, 2 rodadas: 54/55 certos (o desvio é
      de alcance). Medir: `pytest backend/tests/test_quick_tts.py -m unit -q`.
-  1c. 🟡 Modelo do Haiku cravado em `main.py` (`claude-haiku-4-5-20251001`) — fornecedor
-     muda quando quiser, vai para variável de ambiente; e nada vigia o leitor falhando.
+  1c. ✅ (branch `chore/model-ids-from-env`, PR aberto 09/11) Nome dos modelos sai de
+     `backend/services/models.py` (`ANTHROPIC_HAIKU_MODEL`/`ANTHROPIC_SONNET_MODEL`, vazio =
+     padrão) — eram 12 cravados. Teste varre `backend/` e reprova `claude-` fora dali. A
+     sonda do boletim diário testa os DOIS modelos; 404 de modelo vira ❌ com o nome que
+     falhou (antes era ⚠️ "não respondeu agora"); o cron de alertas para e avisa.
+     Conferido com a API real: modelo aposentado devolve 404 `model: <nome>`.
   1d. 🟡 "manda em texto dessa vez" grava PARA SEMPRE e o Haiku responde "próxima resposta".
   2. 🟡 `/me` tem a caixa "Seções do chat" gravando o campo morto `sections` ("Salvo." sem
      efeito) — e o bot agora manda gente para lá. O `!ajustes` também mostra seções e

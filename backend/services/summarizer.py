@@ -1,6 +1,8 @@
 import os
 from anthropic import Anthropic
 
+from backend.services import models
+
 _SYSTEM = """Você é um compressor de histórico de conversa.
 
 Você receberá mensagens trocadas entre um usuário e um assistente financeiro, e um resumo anterior (pode estar vazio).
@@ -47,7 +49,7 @@ def summarize(messages: list[dict], existing_summary: str | None = None) -> str 
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     try:
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=models.haiku(),
             max_tokens=600,
             system=_SYSTEM,
             messages=[{"role": "user", "content": "\n".join(parts)}],

@@ -18,7 +18,7 @@ WhatsApp do agente: +55 34 99659-2975
 | Camada | Tecnologia |
 |--------|-----------|
 | Backend principal | Python 3.12, FastAPI |
-| IA | Claude API (`claude-sonnet-4-6`) via `anthropic` SDK |
+| IA | Claude API via `anthropic` SDK — Sonnet (chat/relatório) e Haiku (leitor, validador, classificador); nomes em `backend/services/models.py` |
 | Dados de mercado | Yahoo Finance (HTTP direto) |
 | Cripto | CoinGecko API (sem chave) |
 | Indicadores EUA | FRED API (`FRED_API_KEY`) |
@@ -67,6 +67,7 @@ c:\noticiasgg\
 | Variável | Descrição |
 |----------|-----------|
 | `ANTHROPIC_API_KEY` | Chave da API Claude |
+| `ANTHROPIC_HAIKU_MODEL` / `ANTHROPIC_SONNET_MODEL` | Opcionais. Nome do modelo; vazio usa o padrão de `backend/services/models.py` (fonte única — teste reprova modelo cravado fora dela). Trocar quando a Anthropic aposentar; a sonda do boletim diário diz qual falhou |
 | `FRED_API_KEY` | Chave da API FRED |
 | `EIA_API_KEY` | Chave da API EIA (estoques semanais petróleo/gasolina/gás EUA) |
 | `NEWS_API_KEY` | Chave da NewsAPI |
