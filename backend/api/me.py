@@ -15,6 +15,9 @@ def get_me(phone: str = Depends(selflink.selflink_phone)) -> dict:
     # do relatório vivem só na grade.
     return {
         "name": user.get("name") or "",
+        # O /me nunca liga/desliga o envio (só o admin). A tela usa isto para não
+        # prometer relatório a quem o cron não atende (`cron_report.py`).
+        "envio_ligado": selflink.envio_ligado(user),
         "schedule": grid,
         "audio": {
             "audio_for_text": prefs.get("audio_for_text"),
@@ -55,5 +58,9 @@ def put_me_schedule(body: MeScheduleBody, phone: str = Depends(selflink.selflink
         rows = schedules.grid_to_rows(phone, body.schedule)
     except (ValueError, TypeError, AttributeError) as e:
         raise HTTPException(status_code=422, detail=f"grade inválida: {e}")
+    # Lida do banco agora, não do GET: o admin pode ter mudado a chave com a página
+    # aberta, e a mensagem de "salvo" não pode prometer envio que não vai acontecer.
+    # ANTES de gravar: lida depois, uma falha aqui devolvia 500 com a grade já salva.
+    ligado = selflink.envio_ligado(supabase.get_authorized_by_phone(phone))
     schedules.replace_for_phone(phone, rows)
-    return {"ok": True}
+    return {"ok": True, "envio_ligado": ligado}

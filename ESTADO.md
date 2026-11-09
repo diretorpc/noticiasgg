@@ -291,13 +291,16 @@ erra 7 (negação e falso positivo ligam áudio); o Haiku sozinho acertou 20/20.
      branco. Medir a frequência em produção: procurar esse warning nos logs da Vercel.
   4. ✅ (PR #42, em produção) `/me` e admin recusam com 422 `tts_speed` fora de 0.5–1.5 e voz
      fora da lista — regra única em `backend/services/audio_prefs.py`, a mesma do WhatsApp.
-  5. 🟡 NOVO: a grade do `/me` responde "Salvo" mesmo com `use_new_report_engine` desligado
-     para o usuário, e o cron (`cron_report.py:27`) o pula — mesma classe de engano do item 2.
-     NÃO medido quem é atingido (leitura em produção barrada pelo classificador em 09/11).
-     O Apolo provou que o bot se CONTRADIZ para esse usuário: o pedido de seção/horário pelo
-     WhatsApp manda ajustar no `/me` (`_preference_reply`/`selflink.onde_ajustar` não sabem
-     da flag), e o `!ajustes` diz "Envio desligado". Conserto: o `/me` e o `onde_ajustar`
-     passarem a saber da flag.
+  5. 🟡 EM REVISÃO (branch `claude/me-grade-desligada-50cb50`, sem PR ainda): a grade do
+     `/me` dizia "Salvo" com `use_new_report_engine` desligado, e o cron o pula. Medido em
+     09/11 (Matheus rodou): ninguém atingido HOJE, mas os usuários com envio off estavam a um
+     clique do engano. Decisão do Matheus: opção (a), dizer a verdade, o `/me` NUNCA liga a
+     chave (só o admin). Feito: `GET/PUT /api/me` devolvem `envio_ligado` (o PUT lê ANTES
+     de gravar); o `/me` mostra aviso e "salvos, mas o envio está desligado"; o
+     `selflink.onde_ajustar(link, envio_ligado)` (2º argumento obrigatório) manda "com o
+     admin" nos 3 lugares: `!ajustes`, `_preference_reply` e a regra do prompt do chat.
+     Não conferido: a tela no navegador e o Sonnet real. Medir quem é atingido (só
+     leitura, produção): `python -m backend.tools.medir_grade_desligada [caminho do .env]`.
   6. 🟡 Anotado pelo Apolo, já existia: "volta pro padrão" usa `delete_preferences` e apaga a
      linha inteira de `user_preferences`, inclusive `sections`/`report_time` antigos.
      Decidir se fica assim.

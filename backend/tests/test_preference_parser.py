@@ -76,7 +76,10 @@ def test_usuario_sem_preferencia_tambem_manda_secoes_atuais_ao_haiku():
 # (3ª revisão do Apolo, 09/11/2026; decisão do Matheus: mandar para o /me).
 
 AUTHORIZED = {"lid": "553499930185@lid", "phone": "5534999301855", "name": "Ricardim"}
-COM_LINK = {**AUTHORIZED, "selflink_token": "tok123"}
+# Envio ligado: o cron manda o relatório, então o /me é o caminho certo.
+COM_LINK = {**AUTHORIZED, "selflink_token": "tok123", "use_new_report_engine": True}
+# Envio desligado (7 dos 9 usuários em produção): a grade do /me salva mas nada é enviado.
+COM_LINK_DESLIGADO = {**AUTHORIZED, "selflink_token": "tok123", "use_new_report_engine": False}
 
 
 def _webhook(texto):
@@ -209,10 +212,10 @@ def test_prompt_do_chat_proibe_confirmar_mudanca_de_relatorio():
     """Medido em produção (Sonnet real, 09/11/2026): "manda o relatório às 18h" →
     "Configurado! A partir de hoje você recebe o relatório diário às 18h." Nada mudava."""
     from backend.services import reporter
-    chat = reporter._build_system("Ana Lima", {}, panel_link=selflink.LINK_PLACEHOLDER)
+    chat = reporter._build_system("Ana Lima", {}, panel_link=selflink.LINK_PLACEHOLDER, envio_ligado=True)
     assert selflink.LINK_PLACEHOLDER in chat
     assert "NÃO" in chat and "horário" in chat
-    assert "peça o link ao admin" in reporter._build_system("Ana Lima", {})
+    assert "peça o link ao admin" in reporter._build_system("Ana Lima", {}, envio_ligado=True)
     relatorio = reporter._build_system("Ana Lima", {"market": {}}, panel_link=selflink.LINK_PLACEHOLDER)
     assert selflink.LINK_PLACEHOLDER not in relatorio
 
@@ -384,3 +387,133 @@ def test_chat_nao_promete_ativar_audio():
     # mecânica interna ao usuário (5ª rodada do Apolo na remoção do regex).
     assert "não é com o admin" in chat
     assert "quem liga e desliga isso é o sistema" not in chat
+
+
+# ── Envio do relatório desligado: o bot não manda ninguém ao /me ──────────────
+# Com `use_new_report_engine` falsa o cron não manda nada; a grade do /me salvaria e
+# a pessoa esperaria um relatório que nunca chega. O `!ajustes` já dizia a verdade.
+
+def test_onde_ajustar_nos_dois_estados():
+    ligado = selflink.onde_ajustar("https://x/me?token=t", True)
+    assert "https://x/me?token=t" in ligado
+    assert "peça o link ao admin" in selflink.onde_ajustar(None, True)
+    desligado = selflink.onde_ajustar("https://x/me?token=t", False)
+    assert "/me" not in desligado and "token" not in desligado
+    assert "desligado" in desligado and "admin" in desligado
+    assert selflink.onde_ajustar(None, False) == desligado  # com ou sem link, igual
+
+
+def test_reset_com_envio_desligado_nao_manda_ao_me():
+    r = _roda(_intent(reset=True), user=COM_LINK_DESLIGADO, texto="volta pro padrão")
+    assert "Voz e áudio voltaram ao padrão" in r["enviado"]
+    assert "/me" not in r["enviado"] and "tok123" not in r["enviado"]
+    assert "desligado" in r["enviado"] and "admin" in r["enviado"]
+
+
+def test_pedido_misto_com_envio_desligado_nao_manda_ao_me():
+    r = _roda(_intent(sections={"crypto": False}, tts_voice="onyx"), user=COM_LINK_DESLIGADO)
+    assert "Ajustei a voz/áudio." in r["enviado"]
+    assert "/me" not in r["enviado"] and "tok123" not in r["enviado"]
+    assert "ajuste com o admin" in r["enviado"]
+
+
+def test_usuario_sem_a_chave_no_cadastro_conta_como_desligado():
+    r = _roda(_intent(reset=True), user=AUTHORIZED)
+    assert "/me" not in r["enviado"]
+
+
+def test_resposta_com_envio_desligado_sai_em_audio_quando_ligado():
+    """Sem link na resposta, a trava 'link nunca em áudio' não se aplica: o aviso de
+    envio desligado pode ser falado."""
+    with patch("backend.api.main.supabase.get_authorized", return_value=COM_LINK_DESLIGADO), \
+         patch("backend.api.main.supabase.get_preferences", return_value=_TUDO_EM_AUDIO_OFF), \
+         patch("backend.api.main._detect_preference_intent", return_value=_intent(reset=True)), \
+         patch("backend.api.main.supabase.delete_preferences"), \
+         patch("backend.api.main.media_service.text_to_speech", return_value=b"mp3") as mock_tts, \
+         patch("backend.api.main.whatsapp.send_audio"), \
+         patch("backend.api.main.whatsapp.send_message"):
+        TestClient(app).post("/api/webhook", json=_webhook("volta pro padrão"))
+    mock_tts.assert_called_once()
+
+
+_TUDO_EM_AUDIO_OFF = {"audio_for_text": True, "audio_for_media": True}
+
+
+@pytest.mark.parametrize("user,esperado", [
+    (COM_LINK, True), (COM_LINK_DESLIGADO, False), (AUTHORIZED, False),
+])
+def test_a_chave_chega_ao_reporter_nos_tres_caminhos(user, esperado):
+    texto = _roda(_intent(sections={"crypto": False}), user=user)
+    assert texto["chat"].call_args.kwargs["envio_ligado"] is esperado
+    assert _roda_midia_flag("audio", user) is esperado
+    assert _roda_midia_flag("image", user) is esperado
+
+
+def _roda_midia_flag(tipo, user):
+    mensagem = {"audioMessage": {"seconds": 2}} if tipo == "audio" else {"imageMessage": {"caption": "olha"}}
+    payload = {"data": {"key": {"fromMe": False, "remoteJid": "553499930185@lid"},
+                        "pushName": "Ricardim", "message": mensagem}}
+    with patch("backend.api.main.supabase.get_authorized", return_value=user), \
+         patch("backend.api.main.supabase.get_preferences", return_value=None), \
+         patch("backend.api.main.supabase.get_history", return_value=[]), \
+         patch("backend.api.main.supabase.get_summary", return_value=None), \
+         patch("backend.api.main.supabase.save_message"), \
+         patch("backend.api.main._maybe_summarize"), \
+         patch("backend.api.main.whatsapp.download_media", return_value={"base64": "x", "mimetype": "image/jpeg"}), \
+         patch("backend.api.main.media_service.transcribe_audio", return_value="oi"), \
+         patch("backend.api.main._detect_preference_intent", return_value={"intent": "message"}), \
+         patch("backend.api.main.reporter.generate_report", return_value="ok") as chat, \
+         patch("backend.api.main.whatsapp.send_message"):
+        TestClient(app).post("/api/webhook", json=payload)
+    return chat.call_args.kwargs["envio_ligado"]
+
+
+def test_prompt_do_chat_com_envio_desligado_nao_manda_ao_me():
+    from backend.services import reporter
+    chat = reporter._build_system("Ana Lima", {}, panel_link=selflink.LINK_PLACEHOLDER, envio_ligado=False)
+    assert selflink.LINK_PLACEHOLDER not in chat
+    assert "se ajusta com o admin" in chat and "desligado" in chat
+    # esquecer de passar a chave nunca promete envio
+    assert selflink.LINK_PLACEHOLDER not in reporter._build_system(
+        "Ana Lima", {}, panel_link=selflink.LINK_PLACEHOLDER)
+    # envio ligado: texto igual ao de antes
+    ligado = reporter._build_system("Ana Lima", {}, panel_link=selflink.LINK_PLACEHOLDER, envio_ligado=True)
+    assert f"se ajusta na sua página pessoal: {selflink.LINK_PLACEHOLDER}" in ligado
+
+
+class _Parou(Exception):
+    pass
+
+
+@pytest.mark.parametrize("flag", [True, False])
+def test_generate_report_repassa_a_chave_ao_prompt(flag):
+    """Elo entre o webhook e o prompt: os testes do webhook trocam o `generate_report`
+    inteiro e os do prompt chamam `_build_system` direto. Sem este, perder o argumento
+    no meio passava verde, e o default False fazia os usuários com envio LIGADO ouvirem
+    "fale com o admin" (achado 1, 2ª revisão do Apolo neste item)."""
+    from backend.services import reporter
+    with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "x"}), \
+         patch.object(reporter, "_collect_all", return_value={}), \
+         patch.object(reporter, "_build_system", side_effect=_Parou) as build:
+        with pytest.raises(_Parou):
+            reporter.generate_report("oi", panel_link=selflink.LINK_PLACEHOLDER, envio_ligado=flag)
+    assert build.call_args.args[4] is flag  # 5º posicional de `_build_system`
+
+
+def test_marcador_vindo_do_historico_nao_vira_link_com_envio_desligado():
+    """O histórico guarda o marcador cru, e até hoje o prompt mandava TODO mundo ao
+    /me. Se o modelo repetir o marcador para quem está com envio desligado, o
+    `fill_link` não pode transformá-lo no link da grade que não vale (achado 2)."""
+    saida = selflink.fill_link(f"ajuste em {selflink.LINK_PLACEHOLDER}", COM_LINK_DESLIGADO)
+    assert "tok123" not in saida and "/me" not in saida
+    assert "admin" in saida and selflink.LINK_PLACEHOLDER not in saida
+    assert selflink.fill_link(f"ajuste em {selflink.LINK_PLACEHOLDER}", COM_LINK).endswith("/me?token=tok123")
+
+
+def test_frase_do_pedido_misto_com_envio_desligado_e_legivel():
+    """Saía "por aqui: ajuste com o admin: o envio do relatório diário está desligado,
+    então nada é enviado até ele ligar" — dois-pontos encadeados e "ele" ambíguo
+    (achado 3)."""
+    r = _roda(_intent(sections={"crypto": False}, tts_voice="onyx"), user=COM_LINK_DESLIGADO)
+    assert r["enviado"].count(":") == 1
+    assert "até ele ligar" not in r["enviado"]
