@@ -247,14 +247,16 @@ erra 7 (negação e falso positivo ligam áudio); o Haiku sozinho acertou 20/20.
   link sai escrita, nunca em TTS. Medido com Haiku+Sonnet reais pelo webhook: nenhuma
   confirmação falsa. Medir: `pytest backend/tests/test_preference_parser.py -m unit -q`.
 - **Fila deixada por esta branch (uma por vez):**
-  1. ✅ Regex de áudio (`_quick_audio_check`) REMOVIDO na branch `fix/remove-audio-regex`
-     (09/11): nas mesmas 36 frases, o regex dava 8 decisões erradas (todas LIGANDO áudio);
+  1. ✅ Regex de áudio (`_quick_audio_check`) REMOVIDO — **PR #38 EM PRODUÇÃO 09/11/2026
+     15:48 BRT** (merge `1d4d455` pelo Matheus, deploy dos dois projetos `success`). Nas mesmas 36 frases, o regex dava 8 decisões erradas (todas LIGANDO áudio);
      o Haiku sozinho, 34/36 sem inverter nenhuma. Prompt do chat não promete mais
      "Ativando agora!" nem manda ao admin.
-  1b. 🔴 PRÓXIMO: `_quick_tts_check` (velocidade/voz) grava preferência a partir de
-     pergunta de mercado: "a inflação acelera?" → velocidade 0.92; "voz nova no
-     ministério?" → voz nova; "o que as vozes do mercado dizem" → lista de vozes. A
-     pergunta é engolida. Em produção hoje (medido pelo Apolo, sem API).
+  1b. ✅ (branch `fix/anchor-voice-speed-regex`, PR aberto 09/11) `_quick_tts_check`
+     engolia pergunta de mercado ("a inflação acelera?" → velocidade 0.92; "voz nova no
+     ministério?" → voz nova). Agora só age quando a mensagem INTEIRA é o comando
+     (`fullmatch`); o resto vai ao Haiku, cujo prompt ganhou "pergunta de conteúdo é
+     conversa" e "voz sem nome → lista". Haiku real, 2 rodadas: 54/55 certos (o desvio é
+     de alcance). Medir: `pytest backend/tests/test_quick_tts.py -m unit -q`.
   1c. 🟡 Modelo do Haiku cravado em `main.py` (`claude-haiku-4-5-20251001`) — fornecedor
      muda quando quiser, vai para variável de ambiente; e nada vigia o leitor falhando.
   1d. 🟡 "manda em texto dessa vez" grava PARA SEMPRE e o Haiku responde "próxima resposta".
