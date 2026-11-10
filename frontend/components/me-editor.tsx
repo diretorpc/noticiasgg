@@ -6,6 +6,13 @@ import { saveMePrefs, saveMeSchedule, type MeData } from "@/lib/selflink";
 
 const VOICES = ["nova", "shimmer", "alloy", "echo", "fable", "onyx"];
 
+// O /me nunca liga o envio (só o admin). Com ele desligado a grade salva, mas o cron
+// não manda nada: a tela não pode prometer o relatório.
+const AVISO_ENVIO_DESLIGADO =
+  "Seu envio do relatório diário está desligado. Você pode deixar os horários prontos, mas nada é enviado até o admin ligar.";
+const STATUS_SALVO_ENVIO_DESLIGADO =
+  "Horários salvos, mas o envio está desligado: o relatório só chega quando o admin ligar.";
+
 export function MeEditor({ token, data }: { token: string; data: MeData }) {
   const [audioText, setAudioText] = useState(Boolean(data.audio.audio_for_text));
   const [audioMedia, setAudioMedia] = useState(Boolean(data.audio.audio_for_media));
@@ -16,6 +23,9 @@ export function MeEditor({ token, data }: { token: string; data: MeData }) {
   });
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Começa pelo GET e passa a seguir o PUT: com o aviso fixo do GET, o admin ligando o
+  // envio com a página aberta deixava "Agendamento salvo." embaixo de "está desligado".
+  const [envioLigado, setEnvioLigado] = useState(data.envio_ligado);
 
   async function savePrefs() {
     setBusy(true);
@@ -43,7 +53,14 @@ export function MeEditor({ token, data }: { token: string; data: MeData }) {
         showEngineToggle={false}
         reloadKey={token}
         load={() => Promise.resolve({ schedule: data.schedule, use_new_engine: false })}
-        save={({ schedule }) => saveMeSchedule(token, schedule)}
+        aviso={envioLigado === false ? AVISO_ENVIO_DESLIGADO : undefined}
+        save={async ({ schedule }) => {
+          // Vale o que o PUT devolveu (lido na hora), não só o do GET. Ausente (backend
+          // antigo) = comportamento de sempre: "Agendamento salvo.".
+          const ligado = await saveMeSchedule(token, schedule);
+          if (ligado !== undefined) setEnvioLigado(ligado);
+          return ligado === false ? STATUS_SALVO_ENVIO_DESLIGADO : undefined;
+        }}
       />
 
       <section className="rounded-lg border border-border bg-card p-5 space-y-3">

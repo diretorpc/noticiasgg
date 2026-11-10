@@ -28,9 +28,19 @@ LINK_PLACEHOLDER = "[LINK_PESSOAL]"
 
 def fill_link(text: str, user: dict | None) -> str:
     """Troca o marcador pelo link real de quem vai receber. Sem link, cai no aviso
-    de pedir ao admin — nunca deixa o marcador cru chegar ao usuário."""
+    de pedir ao admin — nunca deixa o marcador cru chegar ao usuário.
+
+    Envio desligado também não leva o link: o histórico guarda o marcador cru de
+    quando o prompt mandava todo mundo ao /me, e o modelo pode repeti-lo. Preenchido,
+    viraria o link de uma grade que não envia nada (achado 2, revisão do Apolo)."""
     if LINK_PLACEHOLDER not in text:
         return text
+    if not envio_ligado(user):
+        # Nenhum texto fixo cabe em toda frase que o modelo escreve em volta do marcador
+        # ("Acesse o admin (...) e mude o horário", 3ª revisão do Apolo): o lugar do
+        # link fica neutro e a explicação vai numa frase própria, no fim.
+        return (text.replace(LINK_PLACEHOLDER, "(sem link)")
+                + "\n\nSeu relatório diário está desligado: seções e horário, só com o admin.")
     return text.replace(LINK_PLACEHOLDER, panel_link(user) or "(peça o link ao admin)")
 
 
@@ -41,9 +51,29 @@ def has_link(text: str) -> bool:
     return "/me?token=" in text
 
 
-def onde_ajustar(link: str | None) -> str:
+def envio_ligado(user: dict | None) -> bool:
+    """O envio do relatório diário deste usuário está ligado? Fonte única da leitura
+    da chave: o cron (`cron_report.py`) só manda para quem a tem ligada, então grade
+    salva com ela desligada nunca chega a ninguém. Só o admin liga/desliga."""
+    return bool((user or {}).get("use_new_report_engine"))
+
+
+# Sem "relatório": as frases que usam `onde_ajustar` já dizem "relatório diário" antes.
+_ENVIO_DESLIGADO = "o seu envio diário está desligado"
+
+
+def onde_ajustar(link: str | None, envio_ligado: bool) -> str:
     """Onde o usuário muda seções e horário do relatório. Mesmo texto no aviso do
-    webhook e na regra do prompt do chat — se divergissem, o bot daria dois caminhos."""
+    webhook e na regra do prompt do chat — se divergissem, o bot daria dois caminhos.
+
+    `envio_ligado` é obrigatório, sem default: com ele desligado a grade do /me salva
+    mas nada é enviado, e mandar a pessoa para lá seria prometer o que não acontece.
+    Um default esconderia o chamador que esqueceu de passar. O texto desligado fecha
+    as quatro frases que o usam ("mudam ...", "se ajustam ...", "ajuste ...", "se
+    ajusta ...") e não leva o link."""
+    if not envio_ligado:
+        # Sem dois-pontos: duas frases que o usam já trazem um antes ("por aqui: ajuste ...").
+        return f"com o admin, porque {_ENVIO_DESLIGADO}"
     if link:
         return f"na sua página pessoal: {link}"
     return "na sua página pessoal (peça o link ao admin)"

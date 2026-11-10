@@ -181,6 +181,7 @@ def test_ajustes_envio_desligado_nao_mostra_grade_que_nao_vale(monkeypatch):
     assert "Envio desligado" in texto
     assert "Commodities" not in texto
     assert "Seções e horário mudam" not in texto
+    assert "/me" not in texto and "tok123" not in texto  # nada contraditório sobra
 
 
 def test_ajustes_ligado_sem_grade(monkeypatch):

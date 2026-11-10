@@ -403,11 +403,12 @@ def _build_settings_summary(prefs: dict | None, user: dict | None) -> str:
     audio_media = "sim" if p.get("audio_for_media") else "não"
     voice = p.get("tts_voice") or "nova"
     speed = p.get("tts_speed") or 0.85
-    onde = "Seções e horário mudam " + selflink.onde_ajustar(selflink.panel_link(u))
+    ligado = selflink.envio_ligado(u)
+    onde = "Seções e horário mudam " + selflink.onde_ajustar(selflink.panel_link(u), ligado)
     # O cron só manda para quem tem a chave ligada (`cron_report.py`): grade salva
     # com ela desligada não chega a ninguém, e mostrá-la seria prometer envio.
-    if not u.get("use_new_report_engine"):
-        relatorio = "• Envio desligado: você não recebe o relatório diário por enquanto."
+    if not ligado:
+        relatorio = "• Envio desligado: você não recebe o relatório diário por enquanto. Quem liga é o admin."
     else:
         try:
             linhas = _grade_linhas(schedules.rows_to_grid(schedules.get_for_phone(u.get("phone"))))
@@ -568,7 +569,7 @@ def _preference_reply(intent: dict, user: dict | None) -> str:
         return (f'Pra só uma resposta em {formato}, manda a pergunta junto, assim: '
                 f'"em {formato} dessa vez: como tá o dólar?". '
                 f'Pra mudar de vez: "desativa áudio" ou "ativa áudio".{voz}')
-    onde = selflink.onde_ajustar(selflink.panel_link(user))
+    onde = selflink.onde_ajustar(selflink.panel_link(user), selflink.envio_ligado(user))
     if intent.get("reset"):
         return f"Voz e áudio voltaram ao padrão. Seções e horário do relatório diário se ajustam {onde}"
     if intent["_quer_relatorio"]:
@@ -827,6 +828,7 @@ async def whatsapp_webhook(request: Request):
             reply = reporter.generate_report(text, history=anthropic_history, user_name=authorized.get("name"),
                                              sections={}, user_phone=target_phone,
                                              panel_link=_link_for_model(authorized),
+                                             envio_ligado=selflink.envio_ligado(authorized),
                                              formato_resposta=audio_intent.get("_formato_unico"))
             logger.info("audio: report %.1fs", time.monotonic() - _t)
             supabase.save_message(target_phone, "assistant", reply)
@@ -871,6 +873,7 @@ async def whatsapp_webhook(request: Request):
                 media_attachment={"type": msg_info["type"], "b64": media["base64"], "mime": mime},
                 user_phone=target_phone,
                 panel_link=_link_for_model(authorized),
+                envio_ligado=selflink.envio_ligado(authorized),
             )
             supabase.save_message(target_phone, "assistant", reply)
             reply = selflink.fill_link(reply, authorized)  # histórico guarda o marcador
@@ -898,6 +901,7 @@ async def whatsapp_webhook(request: Request):
                                          sections={}, anchored_news=anchored_news,
                                          user_phone=target_phone,
                                          panel_link=_link_for_model(authorized),
+                                         envio_ligado=selflink.envio_ligado(authorized),
                                          formato_resposta=formato_unico)
         supabase.save_message(target_phone, "assistant", reply)
         reply = selflink.fill_link(reply, authorized)  # histórico guarda o marcador

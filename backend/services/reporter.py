@@ -600,8 +600,12 @@ Pelo chat você NÃO consegue mudar: as seções do relatório diário, o horár
 
 
 def _build_system(user_name: str | None, data: dict, panel_link: str | None = None,
-                  formato_resposta: str | None = None) -> str:
+                  formato_resposta: str | None = None, envio_ligado: bool = False) -> str:
     """Prompt do turno. `data` cheio = relatório diário; vazio = conversa.
+
+    `envio_ligado`: o envio do relatório diário deste usuário está ligado? Default
+    False de propósito: quem esquece de passar recebe o texto "fale com o admin" (nunca
+    promete envio), em vez de mandar para o /me alguém que não receberia nada.
 
     A data de hoje entra explícita e etiquetada. Sem ela o modelo ancora no corte
     de treino e mistura anos — em 18/08/2026 deu 2025 e 2026 para o mesmo
@@ -609,7 +613,7 @@ def _build_system(user_name: str | None, data: dict, panel_link: str | None = No
     de notícias já usa."""
     system = _SYSTEM_MARKET if data else _SYSTEM_CHAT
     if not data:
-        system += _REPORT_RULES.format(onde=selflink.onde_ajustar(panel_link))
+        system += _REPORT_RULES.format(onde=selflink.onde_ajustar(panel_link, envio_ligado))
     if formato_resposta:
         # Pedido "só dessa vez em áudio/texto" chega aqui JÁ atendido pelo webhook. Sem
         # esta linha, a regra de áudio acima fazia o Sonnet abrir — falando, em áudio —
@@ -713,6 +717,7 @@ def generate_report(
     user_phone: str | None = None,
     panel_link: str | None = None,
     formato_resposta: str | None = None,
+    envio_ligado: bool = False,
 ) -> str:
     """Gera resposta do agente.
 
@@ -726,6 +731,9 @@ def generate_report(
     saída, que o escopo é a lista — nunca finge que é pessoal.
     panel_link: link /me de quem fala, para a regra "o que você não altera" apontar
     o lugar certo; None manda pedir o link ao admin.
+    envio_ligado: `authorized_users.use_new_report_engine` de quem fala. Desligado, a
+    regra manda falar com o admin em vez do /me (a grade salva mas nada é enviado).
+    Default False: quem não passa nunca promete envio.
     formato_resposta: "audio"/"texto" quando o usuário pediu esse formato só para esta
     resposta ("dessa vez em áudio: ..."); o webhook já entrega nele.
     """
@@ -733,7 +741,7 @@ def generate_report(
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], timeout=_ANTHROPIC_TIMEOUT, max_retries=1)
     data = _collect_all(sections=sections)
 
-    system = _build_system(user_name, data, panel_link, formato_resposta)
+    system = _build_system(user_name, data, panel_link, formato_resposta, envio_ligado)
 
     ticker_data = _extract_ticker_data(user_message)
 

@@ -27,11 +27,16 @@ export function ScheduleGridEditor({
   save,
   showEngineToggle,
   reloadKey,
+  aviso,
 }: {
   load: () => Promise<{ schedule?: ScheduleGrid; use_new_engine: boolean }>;
-  save: (args: { schedule: ScheduleGrid; use_new_engine: boolean }) => Promise<void>;
+  // Se devolver texto, ele vira o status no lugar de "Agendamento salvo." (o /me usa
+  // isso para não prometer envio quando está desligado). O admin devolve void: igual a antes.
+  save: (args: { schedule: ScheduleGrid; use_new_engine: boolean }) => Promise<string | void>;
   showEngineToggle: boolean;
   reloadKey: string;
+  // Aviso fixo acima da tabela. Opcional: o admin não passa.
+  aviso?: string;
 }) {
   const [cells, setCells] = useState<Record<string, Record<number, string>>>({});
   const [useNew, setUseNew] = useState(false);
@@ -88,8 +93,8 @@ export function ScheduleGridEditor({
       }
     }
     try {
-      await save({ use_new_engine: useNew, schedule });
-      setStatus("Agendamento salvo.");
+      const mensagem = await save({ use_new_engine: useNew, schedule });
+      setStatus(typeof mensagem === "string" ? mensagem : "Agendamento salvo.");
     } catch (e) {
       setStatus("Erro: " + (e instanceof Error ? e.message : "desconhecido"));
     } finally {
@@ -102,6 +107,11 @@ export function ScheduleGridEditor({
       <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
         Agendamento
       </h2>
+      {aviso && (
+        <p role="note" className="mb-4 rounded-md border border-border bg-muted px-3 py-2 text-sm text-foreground">
+          {aviso}
+        </p>
+      )}
       {showEngineToggle && (
         <label className="mb-4 flex items-center gap-2 text-sm text-foreground">
           <input type="checkbox" checked={useNew} onChange={() => setUseNew((v) => !v)} />
