@@ -13,6 +13,37 @@
 
 ---
 
+## Incidente 19–24/11/2026 — bot MUDO por ~5 dias: o WhatsApp derrubou a sessão
+
+**Sintoma:** Matheus percebeu em 24/11 que as notícias tinham parado. Ninguém foi avisado
+antes — **2ª vez** que o alarme cai junto com o canal (a 1ª foi 04/09, ver abaixo).
+
+**Causa (medida na Evolution, não teorizada):** `fetchInstances` devolveu
+`disconnectionReasonCode: 401`, `conflict / device_removed`, em **19/11 06:20 UTC (03:20 BRT)**.
+É o WhatsApp encerrando o aparelho vinculado. Último envio em `sent_news`: 19/11 03:31 UTC;
+zero depois (antes, 7–16/dia). Por que o WhatsApp derrubou às 3h **não se sabe** — perguntado
+ao Matheus, sem resposta registrada. Se for celular do agente offline, volta a cair.
+
+**Conserto (24/11):** `logout` não precisou (já desconectado). `PUT /instance/restart`
+devolveu 404 — provavelmente método errado (na v2 a rota deve ser `POST`; **não testado**),
+e para 401 não faria diferença. `GET /instance/connect/noticiasgg` gerou QR, Matheus escaneou no
+celular do agente, `state: open` em ~25 s às 21:03 UTC, mesmo `ownerJid`. Primeira notícia
+saiu 21:16 UTC e **o Matheus confirmou que chegou**.
+
+Diagnóstico de fora, sem SSH (o classificador barra SSH na VPS):
+```bash
+curl -s -H "apikey: $EVOLUTION_API_KEY" "$EVOLUTION_API_URL/instance/fetchInstances?instanceName=noticiasgg"
+```
+Olhar `connectionStatus` e `disconnectionReasonCode/At/Object`. **401 `device_removed` =
+credencial morta: reiniciar não resolve, só QR novo.**
+
+Medir envios por dia (quando parou):
+```bash
+curl -s "$SUPABASE_URL/rest/v1/sent_news?select=sent_at&title=not.is.null&order=sent_at.desc&limit=200" -H "apikey: $SUPABASE_KEY" -H "Authorization: Bearer $SUPABASE_KEY"
+```
+
+---
+
 ## 07/09/2026 — achados do Codex conferidos e corrigidos (PR #32)
 
 Codex (06–07/09) apontou 4 defeitos e propôs migrations com RPC e advisory lock.
@@ -1241,8 +1272,28 @@ python -c "from backend.collectors import news; print(news.source_health())"
       rodou" é INFERIDO (números ricos + tempo compatível), não observado; o que está provado
       é a ausência do dano, que era o risco. Detalhe na seção de 31/08.
 - [ ] 🔴 **Alarme fora do WhatsApp.** Em 04/09 o bot ficou mudo ~35 h e nenhum aviso chegou:
-      o boletim de saúde e o `notify_admin` viajam pelo canal que caiu. Opção mais barata:
-      UptimeRobot (grátis) batendo em `/api/health` e mandando e-mail se `status != ok`.
+      o boletim de saúde e o `notify_admin` viajam pelo canal que caiu. **Aconteceu de novo
+      19–24/11: ~5 dias mudo**; na amostra de 24/11 20:35 UTC o `/api/health` dava HTTP 200
+      com `evolution: warn` (só essa amostra foi medida).
+      **Construído em 24/11 (branch `feat/alarme-fora-do-whatsapp`):** GitHub Actions de hora
+      em hora (`.github/workflows/alarme-whatsapp.yml` + `backend/tools/vigia_externo.py`).
+      Regra: toca só se backend fora/ilegível ou `checks.evolution.estado != "open"`, depois
+      de 3 tentativas. **NÃO** usar `status != ok`: o geral vira `warn` por qualquer soluço
+      do Supabase e treinaria o dono a ignorar o e-mail. Falta, uma por vez:
+      1. **Provar o e-mail** depois do merge: Actions → Run workflow → `simular_queda`.
+         Motivo da dúvida: o `Hallucination Eval` falha todo mês desde 01/09 (segredo
+         `ANTHROPIC_API_KEY` do GitHub inválido, 401) e nenhum desses avisos gerou ação —
+         ou o e-mail não chega, ou chega e é ignorado. Conferir:
+         `gh run list --workflow hallucination-eval.yml --limit 4`.
+      2. **Vigia do vigia:** o GitHub desliga cron de repo público após 60 dias sem commit;
+         o maior intervalo medido aqui foi 59,3 dias (11/09 → 09/11). Saída simples:
+         healthchecks.io (grátis) recebendo ping a cada rodada e avisando quando parar.
+      3. **Pontos cegos** (robô mudo com vigia verde): sessão `open` sem entrega (14–16/07),
+         crons da Vercel parados, webhook de entrada quebrado. `broadcasts.enviados_24h`
+         pegaria só o cron de alertas de notícia (`/api/check-alerts`) parado — relatório,
+         investing e os outros crons não gravam título em `sent_news`; e não pega "sessão
+         open sem entrega" (envio aceito pela Evolution conta como enviado mesmo sem
+         chegar) — e só virar regra depois de medir quantos dias normais têm zero envio.
 - [ ] 🟡 Tirar `restart: always` da v1.8.2 TAMBÉM no compose antigo (feito só via `docker
       update`; se alguém subir a stack v1 pelo compose, volta). Ou apagar o container de vez.
 - [ ] 🟡 **O `<hoje>` NÃO chega ao relatório diário de verdade.** Ele existe em
