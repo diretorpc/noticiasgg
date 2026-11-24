@@ -1290,9 +1290,10 @@ python -c "from backend.collectors import news; print(news.source_health())"
          healthchecks.io (grátis) recebendo ping a cada rodada e avisando quando parar.
       3. **Pontos cegos** (robô mudo com vigia verde): sessão `open` sem entrega (14–16/07),
          crons da Vercel parados, webhook de entrada quebrado. `broadcasts.enviados_24h`
-         pegaria só os crons parados (envio aceito pela Evolution conta como enviado mesmo
-         sem chegar; "sessão open sem entrega" só se vê pela confirmação de entrega) — e
-         só virar regra depois de medir quantos dias normais têm zero envio.
+         pegaria só o cron de alertas de notícia (`/api/check-alerts`) parado — relatório,
+         investing e os outros crons não gravam título em `sent_news`; e não pega "sessão
+         open sem entrega" (envio aceito pela Evolution conta como enviado mesmo sem
+         chegar) — e só virar regra depois de medir quantos dias normais têm zero envio.
 - [ ] 🟡 Tirar `restart: always` da v1.8.2 TAMBÉM no compose antigo (feito só via `docker
       update`; se alguém subir a stack v1 pelo compose, volta). Ou apagar o container de vez.
 - [ ] 🟡 **O `<hoje>` NÃO chega ao relatório diário de verdade.** Ele existe em

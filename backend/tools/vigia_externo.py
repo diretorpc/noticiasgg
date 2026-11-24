@@ -10,9 +10,11 @@ PONTOS CEGOS (robô mudo com vigia VERDE) — não prometer mais do que isto cob
   - sessão `open` mas mensagem não entrega (forma do incidente de 14–16/07);
   - crons da Vercel parados (nada sai, a sessão segue `open`);
   - webhook de entrada quebrado (conversa muda, envios seguem).
-O sinal `broadcasts.enviados_24h` pegaria só o SEGUNDO (crons parados): envio aceito
-pela Evolution conta como enviado mesmo sem chegar (`alert_checker` marca `sent_news`
-no 2xx), então o primeiro só se vê pela confirmação de entrega. E só pode virar regra
+O sinal `broadcasts.enviados_24h` pegaria só o cron de ALERTAS DE NOTÍCIA
+(`/api/check-alerts`) parado — só ele grava título em `sent_news`; relatório, investing
+e os outros crons param sem mexer no número. E não pega "sessão open sem entrega":
+envio aceito pela Evolution conta como enviado mesmo sem chegar (`alert_checker` marca
+`sent_news` no 2xx); isso só se vê pela confirmação de entrega. E só pode virar regra
 depois de medir quantos dias normais têm zero envio (senão grita em dia calmo).
 
 Só biblioteca padrão de propósito: o job não instala `requirements.txt`, então
@@ -66,7 +68,9 @@ def avaliar(codigo_http: int | None, corpo: str) -> str | None:
     if estado:
         return _curto(f"WhatsApp do robô com estado '{estado}' (esperado 'open') — "
                       "alertas e boletim não estão saindo")
-    return _curto("Evolution (servidor do WhatsApp) inalcançável: "
+    # "não informou o estado", não "inalcançável": um 401 de chave errada também cai
+    # aqui, e "inalcançável" mandava recriar o container à toa (Apolo, 24/11/2026).
+    return _curto("Evolution (servidor do WhatsApp) não informou o estado: "
                   f"{evo.get('message') or 'sem detalhe'}")
 
 
@@ -126,7 +130,7 @@ def main(argv: list[str]) -> int:
         "mostra `disconnectionReasonCode`; código 401 ALI = QR novo |\n"
         "| Evolution `401`/`403` no motivo (HTTP) | chave errada, NÃO é QR: "
         "`EVOLUTION_API_KEY` da Vercel ≠ a da VPS (troca de 04/09) |\n"
-        "| Evolution inalcançável / 404 | incidente 04/09/2026 — VPS reiniciou, "
+        "| Evolution timeout / conexão recusada / 404 | incidente 04/09/2026 — VPS reiniciou, "
         "`docker compose up -d --force-recreate evolution` |\n"
         "| backend HTTP ruim / inalcançável / não-JSON | Vercel: último deploy e logs |"
     )
