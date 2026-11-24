@@ -1,0 +1,54 @@
+name: ALARME robo do WhatsApp mudo
+# O unico alarme que NAO viaja pelo WhatsApp. Job vermelho = o GitHub manda e-mail
+# de "workflow falhou" ao dono. Motivo e regra: backend/tools/vigia_externo.py.
+#
+# Por que existe: em 04/09/2026 (~35 h) e 19-24/11/2026 (~5 dias) o bot ficou mudo e
+# ninguem soube — /api/health marcava `evolution: warn`, mas o boletim e o
+# notify_admin saem pelo proprio WhatsApp que tinha caido.
+#
+# Testar o e-mail de ponta a ponta: aba Actions -> este workflow -> Run workflow ->
+# marcar "simular_queda". Tem que chegar e-mail; se nao chegar, conferir em
+# github.com/settings/notifications -> Actions -> Email + "Only notify for failed workflows".
+#
+# Cobre SESSAO caida e backend fora. NAO cobre: sessao open sem entrega, crons da
+# Vercel parados, webhook de entrada quebrado (pontos cegos no vigia_externo.py).
+#
+# ⚠️ O GitHub DESLIGA cron de repo publico apos 60 dias sem commit — e o maior
+# intervalo medido neste repo foi 59,3 dias (11/09 -> 09/11/2026). Desligado, o
+# alarme morre CALADO. Pendencia aberta no ESTADO.md: um vigia do vigia
+# (dead-man's switch) que avisa quando os pings param.
+
+on:
+  schedule:
+    # De hora em hora, fora do minuto 0 (o agendador do GitHub atrasa mais no :00).
+    # Falha persistente = 1 e-mail por hora ate consertar, de proposito.
+    - cron: "23 * * * *"
+  workflow_dispatch:
+    inputs:
+      simular_queda:
+        description: "Simular queda para testar se o e-mail chega"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: alarme-whatsapp
+  cancel-in-progress: false
+
+jobs:
+  vigia:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Sem `pip install`: o vigia usa so biblioteca padrao, para nao depender de
+      # nada que possa quebrar junto com o backend.
+      - name: Conferir backend e sessao do WhatsApp
+        env:
+          SIMULAR: ${{ github.event_name == 'workflow_dispatch' && inputs.simular_queda && '--simular-queda' || '' }}
+        run: python -m backend.tools.vigia_externo $SIMULAR
