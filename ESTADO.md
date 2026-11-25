@@ -1275,20 +1275,29 @@ python -c "from backend.collectors import news; print(news.source_health())"
       o boletim de saúde e o `notify_admin` viajam pelo canal que caiu. **Aconteceu de novo
       19–24/11: ~5 dias mudo**; na amostra de 24/11 20:35 UTC o `/api/health` dava HTTP 200
       com `evolution: warn` (só essa amostra foi medida).
-      **Construído em 24/11 (branch `feat/alarme-fora-do-whatsapp`):** GitHub Actions de hora
+      **Na master desde 24/11 22:03 UTC** (PR #47, merge `6f581a8`): GitHub Actions de hora
       em hora (`.github/workflows/alarme-whatsapp.yml` + `backend/tools/vigia_externo.py`).
       Regra: toca só se backend fora/ilegível ou `checks.evolution.estado != "open"`, depois
       de 3 tentativas. **NÃO** usar `status != ok`: o geral vira `warn` por qualquer soluço
-      do Supabase e treinaria o dono a ignorar o e-mail. Falta, uma por vez:
-      1. **Provar o e-mail** depois do merge: Actions → Run workflow → `simular_queda`.
-         Motivo da dúvida: o `Hallucination Eval` falha todo mês desde 01/09 (segredo
-         `ANTHROPIC_API_KEY` do GitHub inválido, 401) e nenhum desses avisos gerou ação —
-         ou o e-mail não chega, ou chega e é ignorado. Conferir:
-         `gh run list --workflow hallucination-eval.yml --limit 4`.
-      2. **Vigia do vigia:** o GitHub desliga cron de repo público após 60 dias sem commit;
+      do Supabase e treinaria o dono a ignorar o e-mail. Situação, uma por vez:
+      1. [x] ~~Provar o e-mail~~ — **PROVADO em 24/11:** rodada manual com `simular_queda`
+         (run `45497204449`, 22:03 UTC) falhou de propósito e **o Matheus confirmou que o
+         e-mail chegou**. Então o silêncio do `Hallucination Eval` (falha todo mês desde 01/09,
+         segredo `ANTHROPIC_API_KEY` do GitHub inválido) é falta de atenção, não de entrega.
+         ⚠️ E-mail de rodada **agendada** vai para quem editou a linha `cron:` por último —
+         hoje `diretorpc` (autor de `1f386ef`). Outra conta mexer nela = e-mail muda de dono.
+      2. [ ] 🔴 **O relógio ainda não rodou o alarme nenhuma vez sozinho.** Em 25/11 00:34 UTC,
+         três horários `:23` tinham passado desde o merge e **zero** rodadas `schedule`. E-mail
+         provado ≠ vigia de hora em hora provado. O agendador do GitHub atrasa aqui: o cron do
+         eval (09:00 UTC) saiu com horas de atraso em set/out/nov. Medir os dois:
+         `gh run list --workflow alarme-whatsapp.yml --event schedule --limit 5`
+         `gh run list --workflow hallucination-eval.yml --event schedule --limit 4 --json createdAt`
+         Se seguir em zero por ~1 dia, trocar o relógio (serviço de monitoramento externo
+         batendo em `/api/health`) em vez de insistir no cron do GitHub.
+      3. **Vigia do vigia:** o GitHub desliga cron de repo público após 60 dias sem commit;
          o maior intervalo medido aqui foi 59,3 dias (11/09 → 09/11). Saída simples:
          healthchecks.io (grátis) recebendo ping a cada rodada e avisando quando parar.
-      3. **Pontos cegos** (robô mudo com vigia verde): sessão `open` sem entrega (14–16/07),
+      4. **Pontos cegos** (robô mudo com vigia verde): sessão `open` sem entrega (14–16/07),
          crons da Vercel parados, webhook de entrada quebrado. `broadcasts.enviados_24h`
          pegaria só o cron de alertas de notícia (`/api/check-alerts`) parado — relatório,
          investing e os outros crons não gravam título em `sent_news`; e não pega "sessão
